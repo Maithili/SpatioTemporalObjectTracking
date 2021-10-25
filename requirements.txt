@@ -2,4 +2,7 @@ numpy
 matplotlib
 sklearn
 scipy
-tensorflow==1.13.1
+tensorflow
+torch
+pytorch-lightning
+lightning-bolts
