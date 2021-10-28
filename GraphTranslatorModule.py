@@ -45,12 +45,12 @@ class GraphTranslatorModule(LightningModule):
         batch_size_e, num_f_nodes, num_t_nodes, edge_feature_len = edges.size()
         
         # Sanity check input dimensions
-        assert (batch_size == batch_size_e)
-        assert (self.edge_feature_len == edge_feature_len)
-        assert (self.node_feature_len == node_feature_len)
-        assert (self.num_nodes == num_nodes)
-        assert (self.num_nodes == num_f_nodes)
-        assert (self.num_nodes == num_t_nodes)
+        assert batch_size == batch_size_e, "Different edge and node batch sizes"
+        assert self.edge_feature_len == edge_feature_len, (str(self.edge_feature_len) +'!='+ str(edge_feature_len))
+        assert self.node_feature_len == node_feature_len, (str(self.node_feature_len) +'!='+ str(node_feature_len))
+        assert self.num_nodes == num_nodes, (str(self.num_nodes) +'!='+ str(num_nodes))
+        assert self.num_nodes == num_f_nodes, (str(self.num_nodes) +'!='+ str(num_f_nodes))
+        assert self.num_nodes == num_t_nodes, (str(self.num_nodes) +'!='+ str(num_t_nodes))
 
         context = torch.cat([context_curr, context_query], dim=-1)
 
