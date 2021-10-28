@@ -7,3 +7,5 @@ torch
 pytorch-lightning
 lightning-bolts
 comet-ml
+tensorboard
+wandb

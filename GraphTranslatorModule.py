@@ -3,16 +3,20 @@ from torch.nn import functional as F
 from torch import nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
+from analyzers import MeanLoss
 
 
 class GraphTranslatorModule(LightningModule):
-    def __init__(self, num_nodes, node_feature_len, edge_feature_len, context_len):
+    def __init__(self, num_nodes, node_feature_len, edge_feature_len, context_len, train_analyzer=MeanLoss(), logging_analyzers=[]):
         super().__init__()
 
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
         self.edge_feature_len = edge_feature_len
         self.total_context_len = 2 * context_len
+
+        self.train_analyzer = train_analyzer
+        self.logging_analyzers = logging_analyzers
 
         self.hidden_influence_dim = 20
         
@@ -83,16 +87,17 @@ class GraphTranslatorModule(LightningModule):
         """
         edges, nodes, context_curr, context_query, y = batch
         x = self(edges, nodes, context_curr, context_query)
-        losses = self.bce(x, y).mean(dim=(0,1,2))
-        losses = losses.mean()
-        self.log('train_loss', losses)
-        return losses.mean()
+        losses = self.bce(x, y)
+        for analyzer in self.logging_analyzers:
+            self.log('Train: '+analyzer.name(), analyzer(losses))
+        return self.train_analyzer(losses)
 
     def test_step(self, batch, batch_idx):
         edges, nodes, context_curr, context_query, y = batch
         x = self(edges, nodes, context_curr, context_query)
-        losses = self.bce(x, y).mean(dim=(0,1,2))
-        self.log('test_loss', losses)
+        losses = self.bce(x, y)
+        for analyzer in self.logging_analyzers:
+            self.log('Test: '+analyzer.name(), analyzer(losses))
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=1e-3)

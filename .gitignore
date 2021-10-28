@@ -131,3 +131,4 @@ dmypy.json
 # Custom
 NEC-DGT/
 lightning_logs/
+wandb/
