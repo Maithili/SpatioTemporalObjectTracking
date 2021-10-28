@@ -12,7 +12,7 @@ class GraphTranslatorModule(LightningModule):
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
         self.edge_feature_len = edge_feature_len
-        self.context_len = context_len
+        self.total_context_len = 2 * context_len
 
         self.hidden_influence_dim = 20
         
@@ -23,22 +23,24 @@ class GraphTranslatorModule(LightningModule):
                              )
 
         self.mlp_update = nn.Sequential(
-                          nn.Linear(self.hidden_influence_dim+self.edge_feature_len+self.context_len, 20),
-                          nn.ReLU(),
-                          nn.Linear(20, self.edge_feature_len),
-                          )
+                               nn.Linear(self.hidden_influence_dim+self.edge_feature_len+self.total_context_len, 20),
+                               nn.ReLU(),
+                               nn.Linear(20, self.edge_feature_len),
+                               nn.Sigmoid()
+                               )
 
-        self.softmax = torch.nn.LogSoftmax(dim=-1)
-
-        self.loss = nn.NLLLoss()
+        self.bce = nn.BCELoss(reduction='none')
         
-    def forward(self, edges, nodes, context):
+    def forward(self, edges, nodes, context_curr, context_query):
         """
         Args:
-            edges: batch_size x from_nodes x to_nodes x edge_feature_len
+            adjacency: batch_size x from_nodes x to_nodes x 1
+            edge_features: batch_size x from_nodes x to_nodes x edge_feature_len
             nodes: batch_size x num_nodes x node_feature_len
-            context: batch_size x context_len
+            context_curr: batch_size x context_len
+            context_query: batch_size x context_len
         """
+
         batch_size, num_nodes, node_feature_len = nodes.size()
         batch_size_e, num_f_nodes, num_t_nodes, edge_feature_len = edges.size()
         
@@ -50,55 +52,47 @@ class GraphTranslatorModule(LightningModule):
         assert (self.num_nodes == num_f_nodes)
         assert (self.num_nodes == num_t_nodes)
 
+        context = torch.cat([context_curr, context_query], dim=-1)
+
         x = self.collate_edges(edges=edges, nodes=nodes)
-        
         x = x.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
                   self.node_feature_len * 2 + self.edge_feature_len])
-        
         x = self.mlp_influence(x)
-        
         x = x.view(
             size=[batch_size, 
                   self.num_nodes, 
                   self.num_nodes, 
                   self.hidden_influence_dim])
-        
         x = self.message_collection(x, edges, context)
-        
         x = x.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.hidden_influence_dim + self.edge_feature_len + self.context_len])
-
-        x = self.mlp_update(x)
-        x = self.softmax(x)
-        
-        x = x.view(
-            size=[batch_size, 
-                  self.num_nodes, 
-                  self.num_nodes, 
-                  self.edge_feature_len])
-
-        return x.permute(0,3,1,2)
+                  self.hidden_influence_dim + self.edge_feature_len + self.total_context_len])
+        x = self.mlp_update(x).view(size=[batch_size, 
+                                          self.num_nodes, 
+                                          self.num_nodes, 
+                                          self.edge_feature_len])
+        return x
 
     def training_step(self, batch, batch_idx):
         """
         Args:
             batch: x,y (tuple) 
-                    x: edges,nodes,context (tuple) : edges is nxnx_; nodes is nx_; context is any vector
-                    y: edge_category : integer in [0,len(edge_feat)) representing the edge edge_category
+                    x: adjacency,edges,nodes,context (tuple) : edges is nxnx_; nodes is nx_; context is any vector
+                    y: edge_existence,edge_category : existence is 0/1; type is integer in [0,len(edge_feat))
         """
-        edges, nodes, context, y = batch
-        x_hat = self(edges, nodes, context).contiguous()
-        loss = self.loss(x_hat, y).contiguous()
-        self.log('train_loss', loss.mean())
-        return loss
+        edges, nodes, context_curr, context_query, y = batch
+        x = self(edges, nodes, context_curr, context_query)
+        losses = self.bce(x, y).mean(dim=(0,1,2))
+        losses = losses.mean()
+        self.log('train_loss', losses)
+        return losses.mean()
 
     def test_step(self, batch, batch_idx):
-        edges, nodes, context, y = batch
-        x_hat = self(edges, nodes, context).contiguous()
-        loss = self.loss(x_hat, y).contiguous()
-        self.log('test_loss', loss.mean())
+        edges, nodes, context_curr, context_query, y = batch
+        x = self(edges, nodes, context_curr, context_query)
+        losses = self.bce(x, y).mean(dim=(0,1,2))
+        self.log('test_loss', losses)
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=1e-3)
@@ -136,7 +130,7 @@ class GraphTranslatorModule(LightningModule):
         assert(len(message_to_edge.size())==4)
         assert(message_to_edge.size()[1]==self.num_nodes)
         assert(message_to_edge.size()[2]==self.num_nodes)
-        assert(message_to_edge.size()[3]==self.hidden_influence_dim+self.edge_feature_len+self.context_len)
+        assert(message_to_edge.size()[3]==self.hidden_influence_dim+self.edge_feature_len+self.total_context_len)
         return message_to_edge
 
 
