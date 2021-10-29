@@ -132,3 +132,5 @@ dmypy.json
 NEC-DGT/
 lightning_logs/
 wandb/
+*.ckpt
+data/

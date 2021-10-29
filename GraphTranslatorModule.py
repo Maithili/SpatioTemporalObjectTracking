@@ -89,15 +89,15 @@ class GraphTranslatorModule(LightningModule):
         x = self(edges, nodes, context_curr, context_query)
         losses = self.bce(x, y)
         for analyzer in self.logging_analyzers:
-            self.log('Train: '+analyzer.name(), analyzer(losses))
-        return self.train_analyzer(losses)
+            self.log('Train: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y))
+        return self.train_analyzer(losses, x_edges=edges, y_edges=y)
 
     def test_step(self, batch, batch_idx):
         edges, nodes, context_curr, context_query, y = batch
         x = self(edges, nodes, context_curr, context_query)
         losses = self.bce(x, y)
         for analyzer in self.logging_analyzers:
-            self.log('Test: '+analyzer.name(), analyzer(losses))
+            self.log('Test: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y))
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=1e-3)
