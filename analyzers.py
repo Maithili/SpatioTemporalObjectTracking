@@ -65,3 +65,19 @@ class StaticGraphLoss(LossAnalyzer):
         return loss_static
     def name(self):
         return "Mean Loss On Static Edges"
+
+class SpecificEdgeLoss(LossAnalyzer):
+    def __init__(self, node_from, node_to, edge_classes, name = None):
+        self.nodes = (node_from, node_to)
+        self.edges = edge_classes
+        self.nm = name
+        if self.nm is None:
+            self.nm = str(node_from)+'-->'+str(node_to)
+
+    def __call__(self, loss_tensor, **kwargs):
+        loss_results = {}
+        for k in range(len(self.edges)):
+            loss_results[self.edges[k]] = float(loss_tensor[:, self.nodes[0], self.nodes[1], k].mean())
+        return loss_results
+    def name(self):
+        return "Specific Edge "+str(self.nm)

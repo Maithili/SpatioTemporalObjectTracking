@@ -27,7 +27,7 @@ class GraphTranslatorModule(LightningModule):
                              )
 
         self.mlp_update = nn.Sequential(
-                               nn.Linear(self.hidden_influence_dim+self.edge_feature_len+self.total_context_len, 20),
+                               nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.total_context_len, 20),
                                nn.ReLU(),
                                nn.Linear(20, self.edge_feature_len),
                                nn.Sigmoid()
@@ -71,7 +71,7 @@ class GraphTranslatorModule(LightningModule):
         x = self.message_collection(x, edges, context)
         x = x.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.hidden_influence_dim + self.edge_feature_len + self.total_context_len])
+                  self.hidden_influence_dim*4 + self.edge_feature_len + self.total_context_len])
         x = self.mlp_update(x).view(size=[batch_size, 
                                           self.num_nodes, 
                                           self.num_nodes, 
@@ -118,24 +118,20 @@ class GraphTranslatorModule(LightningModule):
         # edge_influence : batch_size x from_nodes x to_nodes x hidden_influence_dim
 
         # batch_size x nodes x 1 x hidden_influence_dim
-        from_from_influence = edge_influence.sum(dim=2)
-        from_to_influence = edge_influence.sum(dim=1)
-        from_influence_sum_repeated = (from_from_influence + from_to_influence).unsqueeze(2).repeat([1,1,self.num_nodes,1])
+        from_from_influence = edge_influence.sum(dim=2).unsqueeze(2).repeat([1,1,self.num_nodes,1])
+        from_to_influence = edge_influence.sum(dim=1).unsqueeze(2).repeat([1,1,self.num_nodes,1])
         # batch_size x 1 x nodes x hidden_influence_dim
-        to_to_influence = edge_influence.sum(dim=1)
-        to_from_influence = edge_influence.sum(dim=2)
-        to_influence_sum_repeated = (to_to_influence + to_from_influence).unsqueeze(1).repeat([1,self.num_nodes,1,1])
+        to_to_influence = edge_influence.sum(dim=1).unsqueeze(1).repeat([1,self.num_nodes,1,1])
+        to_from_influence = edge_influence.sum(dim=2).unsqueeze(1).repeat([1,self.num_nodes,1,1])
         
         # all_influences : batch_size x from_nodes x to_nodes x hidden_influence_dim
-        all_influences = from_influence_sum_repeated + to_influence_sum_repeated
+        all_influences = torch.cat([from_from_influence, from_to_influence, to_to_influence, to_from_influence],dim=-1)
         context_repeated = context.unsqueeze(1).unsqueeze(1).repeat([1,self.num_nodes,self.num_nodes,1])
 
-        # batch_size x from_nodes x to_nodes x (hidden_influence_dim + edge_feature_len + context_length)
+        # batch_size x from_nodes x to_nodes x (hidden_influence_dim*4 + edge_feature_len + context_length)
         message_to_edge = torch.cat([all_influences,edges,context_repeated],dim=-1)
         assert(len(message_to_edge.size())==4)
         assert(message_to_edge.size()[1]==self.num_nodes)
         assert(message_to_edge.size()[2]==self.num_nodes)
-        assert(message_to_edge.size()[3]==self.hidden_influence_dim+self.edge_feature_len+self.total_context_len)
+        assert(message_to_edge.size()[3]==self.hidden_influence_dim*4+self.edge_feature_len+self.total_context_len)
         return message_to_edge
-
-

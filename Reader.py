@@ -4,13 +4,38 @@ from os import path as osp
 import torch
 import random
 
-def encode_time(t, dt):
-    min_omega = 2*np.pi*dt/10
-    omegas = [min_omega/(2**i) for i in range(5)]
+def time_sine_cosine(t):
+    T_freq = [10]
+    n_days = 1
+    while (T_freq[-1] < 60*24*7*n_days):
+        T_freq.append(T_freq[-1] * 2)
+    omegas = [2*np.pi/t_freq for t_freq in T_freq]
     enc = []
     for om in omegas:
         enc = enc + [np.sin(om*t), np.cos(om*t)]
     return enc
+
+def time_external(t):
+    in_t = t
+    mins = in_t % 60
+    in_t = in_t // 60
+    hrs = in_t % 24
+    in_t = in_t // 24
+    days = in_t % 7
+    in_t = in_t // 7
+    weeks = in_t
+    return [weeks, days, hrs, mins]
+
+def time_external_normalized(t):
+    in_t = t
+    mins = in_t % 60
+    in_t = in_t // 60
+    hrs = in_t % 24
+    in_t = in_t // 24
+    days = in_t % 7
+    in_t = in_t // 7
+    weeks = in_t
+    return [weeks, days/7, hrs/24, mins/60]
 
 def pairwise_data(nodes, edges, contexts):
     n = len(edges)
@@ -32,9 +57,10 @@ class DataSplit():
         return self.data[idx]
 
 class RoutinesDataset():
-    def __init__(self, data_path: str = 'data/example/sample.json', classes_path: str = 'data/example/classes.json', test_perc = 0.2):
+    def __init__(self, data_path: str = 'data/example/sample.json', classes_path: str = 'data/example/classes.json', test_perc = 0.2, time_encoder=time_sine_cosine):
         self.data_path = data_path
         self.classes_path = classes_path
+        self.time_encoder = time_encoder
         self._alldata = self.read_data()
         print(len(self._alldata),' examples found in dataset.')
         # Infer parameters from data
@@ -95,7 +121,7 @@ class RoutinesDataset():
                 for k,n2 in enumerate(node_ids):
                     edge_features[i,j,k,:]= self.encode_edge(self.get_edges(graph, n1, n2))
 
-        context = [encode_time(t, 10) for t in times]
+        context = [self.time_encoder(t*10) for t in times]
 
         return torch.Tensor(node_features), torch.Tensor(edge_features), torch.Tensor(context)
 
