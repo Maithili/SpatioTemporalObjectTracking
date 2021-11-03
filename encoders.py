@@ -1,3 +1,5 @@
+import numpy as np
+
 def time_sine_cosine(t):
     T_freq = [10]
     n_days = 1
@@ -30,3 +32,10 @@ def time_external_normalized(t):
     in_t = in_t // 7
     weeks = in_t
     return [weeks, days/7, hrs/24, mins/60]
+
+
+time_encoding_options = {
+    'sine_cosine': time_sine_cosine,
+    'external': time_external,
+    'external_normalized': time_external_normalized
+}

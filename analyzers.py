@@ -5,7 +5,7 @@ class LossAnalyzer():
     """
     Base class to analyze the loss for useful metrics
     """
-    def __init__(self):
+    def __init__(self, **kwargs):
         pass
 
     def __call__(self, loss_tensor, **kwargs):
@@ -19,7 +19,7 @@ class LossAnalyzer():
         return "Zero"
 
 class MeanLoss(LossAnalyzer):
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
     def __call__(self, loss_tensor, **kwargs):
         return loss_tensor.mean()
@@ -27,8 +27,8 @@ class MeanLoss(LossAnalyzer):
         return "Mean Loss"
 
 class EdgeTypeLoss(LossAnalyzer):
-    def __init__(self, edge_class_names):
-        self.labels = edge_class_names
+    def __init__(self, **kwargs):
+        self.labels = kwargs["edge_classes"]
     def __call__(self, loss_tensor, **kwargs):
         assert(len(self.labels) == loss_tensor.size()[-1])
         losses_by_type = {self.labels[i]: loss_tensor[:,:,:,i].mean() for i in range(len(self.labels))}
@@ -37,7 +37,7 @@ class EdgeTypeLoss(LossAnalyzer):
         return "Loss by Edge Type"
 
 class ChangedEdgeLoss(LossAnalyzer):
-    def __init__(self):
+    def __init__(self, **kwargs):
         pass
     def __call__(self, loss_tensor, **kwargs):
         loss_at_change = loss_tensor[np.where(kwargs["x_edges"]!=kwargs["y_edges"])]
@@ -47,8 +47,8 @@ class ChangedEdgeLoss(LossAnalyzer):
         return "Mean Loss On Changed Edges"
 
 class ChangedEdgeWeightedLoss(LossAnalyzer):
-    def __init__(self, weight_changed_edges = 0.5):
-        self.weight_changed_edges = weight_changed_edges
+    def __init__(self, **kwargs):
+        self.weight_changed_edges = kwargs["weight_for_changed_edges"]
     def __call__(self, loss_tensor, **kwargs):
         loss_at_change = loss_tensor[np.where(kwargs["x_edges"]!=kwargs["y_edges"])]
         mean_loss_at_change = loss_at_change.mean()
@@ -58,26 +58,42 @@ class ChangedEdgeWeightedLoss(LossAnalyzer):
         return "Mean Loss Weighted On Changed Edges"
 
 class StaticGraphLoss(LossAnalyzer):
-    def __init__(self, static_nodes):
-        self.static_nodes = static_nodes
+    def __init__(self, **kwargs):
+        self.static_nodes = kwargs["static_nodes"]
     def __call__(self, loss_tensor, **kwargs):
         loss_static = loss_tensor[self.static_nodes,self.static_nodes].mean()
         return loss_static
     def name(self):
         return "Mean Loss On Static Edges"
 
-class SpecificEdgeLoss(LossAnalyzer):
-    def __init__(self, node_from, node_to, edge_classes, name = None):
-        self.nodes = (node_from, node_to)
-        self.edges = edge_classes
-        self.nm = name
-        if self.nm is None:
-            self.nm = str(node_from)+'-->'+str(node_to)
+# class SpecificEdgeLoss(LossAnalyzer):
+#     def __init__(self, node_from, node_to, edge_classes, name = None):
+#         self.nodes = (node_from, node_to)
+#         self.edges = edge_classes
+#         self.nm = name
+#         if self.nm is None:
+#             self.nm = str(node_from)+'-->'+str(node_to)
+#     def __call__(self, loss_tensor, **kwargs):
+#         loss_results = {}
+#         for k in range(len(self.edges)):
+#             loss_results[self.edges[k]] = float(loss_tensor[:, self.nodes[0], self.nodes[1], k].mean())
+#         return loss_results
+#     def name(self):
+#         return "Specific Edge "+str(self.nm)
 
-    def __call__(self, loss_tensor, **kwargs):
-        loss_results = {}
-        for k in range(len(self.edges)):
-            loss_results[self.edges[k]] = float(loss_tensor[:, self.nodes[0], self.nodes[1], k].mean())
-        return loss_results
-    def name(self):
-        return "Specific Edge "+str(self.nm)
+
+
+class loss_options():
+    def __init__(self, data):
+        self.options = {x.__name__:x for x in LossAnalyzer.__subclasses__()}
+        args = {}
+        args["edge_classes"] = data.get_edge_classes()
+        args["weight_for_changed_edges"] = 0.5
+        args["static_nodes"] = data.get_static_nodes()
+        self.losses = {}
+        for name,clas in self.options.items():
+            self.losses[name] = clas(**args)
+    def __call__(self, name):
+        return self.losses[name]
+    def __contains__(self, name):
+        return name in self.losses

@@ -1,0 +1,16 @@
+DATA_PATH:
+  GRAPHS: 'data/routines_1029/sample.json'
+  CLASSES: 'data/routines_1029/classes.json'
+
+MODEL:
+  # NAME: My Awesome Run
+  TIME_ENCODING: external
+
+TRAIN:
+  LOSS: MeanLoss
+  LOSSES_LOG: 
+    - MeanLoss
+    - ChangedEdgeLoss
+    - EdgeTypeLoss
+  EPOCHS: 3
+  TEST_SPLIT: 0.2
