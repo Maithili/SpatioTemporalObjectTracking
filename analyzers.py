@@ -36,6 +36,25 @@ class EdgeTypeLoss(LossAnalyzer):
     def name(self):
         return "Loss by Edge Type"
 
+class MeanLossWhereExists(LossAnalyzer):
+    def __init__(self, **kwargs):
+        pass
+    def __call__(self, loss_tensor, **kwargs):
+        mean_loss_where_exists = loss_tensor[np.where(kwargs["y_edges"])].mean()
+        return mean_loss_where_exists
+    def name(self):
+        return "Mean Loss Where Edge Exists"
+
+class EdgeTypeLossWhereExists(LossAnalyzer):
+    def __init__(self, **kwargs):
+        self.labels = kwargs["edge_classes"]
+    def __call__(self, loss_tensor, **kwargs):
+        assert(len(self.labels) == loss_tensor.size()[-1])
+        losses_by_type = {self.labels[i]: loss_tensor[:,:,:,i][kwargs["y_edges"][:,:,:,i]>0].mean() for i in range(len(self.labels))}
+        return losses_by_type
+    def name(self):
+        return "Loss by Edge Type Where Edge Exists"
+
 class ChangedEdgeLoss(LossAnalyzer):
     def __init__(self, **kwargs):
         pass
@@ -66,30 +85,24 @@ class StaticGraphLoss(LossAnalyzer):
     def name(self):
         return "Mean Loss On Static Edges"
 
-# class SpecificEdgeLoss(LossAnalyzer):
-#     def __init__(self, node_from, node_to, edge_classes, name = None):
-#         self.nodes = (node_from, node_to)
-#         self.edges = edge_classes
-#         self.nm = name
-#         if self.nm is None:
-#             self.nm = str(node_from)+'-->'+str(node_to)
-#     def __call__(self, loss_tensor, **kwargs):
-#         loss_results = {}
-#         for k in range(len(self.edges)):
-#             loss_results[self.edges[k]] = float(loss_tensor[:, self.nodes[0], self.nodes[1], k].mean())
-#         return loss_results
-#     def name(self):
-#         return "Specific Edge "+str(self.nm)
-
-
+class SpecificEdgeLoss(LossAnalyzer):
+    def __init__(self, **kwargs):
+        self.idxs = kwargs["edges_of_interest"]
+        print(self.idxs)
+    def __call__(self, loss_tensor, **kwargs):
+        loss_results = {n:loss_tensor[:,i[0],i[1],i[2]].mean() for n,i in self.idxs.items()}
+        return loss_results
+    def name(self):
+        return "Specific Edge Loss"
 
 class loss_options():
     def __init__(self, data):
         self.options = {x.__name__:x for x in LossAnalyzer.__subclasses__()}
         args = {}
-        args["edge_classes"] = data.get_edge_classes()
+        args["edge_classes"] = data.edge_keys
         args["weight_for_changed_edges"] = 0.5
-        args["static_nodes"] = data.get_static_nodes()
+        args["static_nodes"] = data.static_nodes
+        args["edges_of_interest"] = data.get_edges_of_interest()
         self.losses = {}
         for name,clas in self.options.items():
             self.losses[name] = clas(**args)

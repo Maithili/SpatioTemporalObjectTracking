@@ -7,5 +7,11 @@ LOSSES_LOG:
   - MeanLoss
   - ChangedEdgeLoss
   - EdgeTypeLoss
+  - MeanLossWhereExists
+  - EdgeTypeLossWhereExists
+  - SpecificEdgeLoss
+EDGES_OF_INTEREST:
 EPOCHS: 10
 TEST_SPLIT: 0.2
+SAMPLE_DATA: True
+SAMPLING_RATIO: 1.5

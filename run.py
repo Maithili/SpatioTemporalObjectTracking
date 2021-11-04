@@ -27,7 +27,15 @@ def run(cfg_in):
     assert cfg['TIME_ENCODING'] in time_encoding_options, 'Time encoding {} specified in config should be one of {}'.format(cfg['TIME_ENCODING'], time_encoding_options.keys())
     time_encoding = time_encoding_options[cfg['TIME_ENCODING']]
 
-    data = RoutinesDataset(data_path=cfg['DATA_PATH'], classes_path=cfg['CLASSES_PATH'], time_encoder=time_encoding, test_perc=cfg['TEST_SPLIT'])
+    data = RoutinesDataset(data_path=cfg['DATA_PATH'], 
+                           classes_path=cfg['CLASSES_PATH'], 
+                           time_encoder=time_encoding, 
+                           test_perc=cfg['TEST_SPLIT'], 
+                           edges_of_interest=cfg['EDGES_OF_INTEREST'], 
+                           sample_data=cfg['SAMPLE_DATA'],
+                           sampling_ratio=cfg['SAMPLING_RATIO'])
+
+    wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
     losses = loss_options(data)
 
@@ -38,10 +46,10 @@ def run(cfg_in):
         assert logging_loss in losses, 'Loss {} specified in config should be one of {}'.format(logging_loss, losses.keys())
         logging_loss_funcs.append(losses(logging_loss))
 
-    model = GraphTranslatorModule(num_nodes=data.n_nodes, 
-                              node_feature_len=data.n_len, 
-                              edge_feature_len=data.e_len, 
-                              context_len=data.c_len, 
+    model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
+                              node_feature_len=data.params['n_len'],
+                              edge_feature_len=data.params['e_len'],
+                              context_len=data.params['c_len'],
                               train_analyzer=train_loss, 
                               logging_analyzers=logging_loss_funcs)
 

@@ -77,11 +77,11 @@ def case1():
     cfg = {
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "UnitTest 1",
-        'LOSS': "MeanLoss",
-        'LOSSES_LOG':["MeanLoss", "EdgeTypeLoss"],
-        'EPOCHS': 250,
-        'TEST_SPLIT': 0.2,
+        'NAME': "Unit Test 1",
+        'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
+                              ('cup','INSIDE','table'), 
+                              ('cup','INSIDE','sink')],
+        'EPOCHS': 250
     }
     run(cfg)
 
@@ -138,11 +138,11 @@ def case2():
     cfg = {
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "UnitTest 2",
-        'LOSS': "MeanLoss",
-        'LOSSES_LOG':["MeanLoss", "EdgeTypeLoss"],
-        'EPOCHS': 250,
-        'TEST_SPLIT': 0.2,
+        'NAME': "Unit Test 2",
+        'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
+                              ('cup','ON','table'), 
+                              ('cup','INSIDE','sink')],
+        'EPOCHS': 250
     }
     run(cfg)
 
@@ -158,7 +158,6 @@ def case3():
 
 
     nodes = [node_dictionary[key] for key in ['kitchen','cabinet','table','sink','cup']]
-    print('Nodes : ',nodes)
 
     with open(os.path.join(data_dir,'classes.json'),'w') as f:
         json.dump({"nodes":nodes, "edges": ["INSIDE"]}, f)
@@ -198,11 +197,11 @@ def case3():
     cfg = {
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "UnitTest 3",
-        'LOSS': "MeanLoss",
-        'LOSSES_LOG':["MeanLoss", "EdgeTypeLoss"],
-        'EPOCHS': 250,
-        'TEST_SPLIT': 0.2,
+        'NAME': "Unit Test 3",
+        'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
+                              ('cup','INSIDE','table'), 
+                              ('cup','INSIDE','sink')],
+        'EPOCHS': 250
     }
     run(cfg)
 
@@ -217,7 +216,6 @@ def case4():
 
 
     nodes = [node_dictionary[key] for key in ['kitchen','cabinet','table','cereal','toast']]
-    print('Nodes : ',nodes)
 
     with open(os.path.join(data_dir,'classes.json'),'w') as f:
         json.dump({"nodes":nodes, "edges": ["ON","INSIDE","CLOSE"]}, f)
@@ -253,15 +251,10 @@ def case4():
 
     graph_times = [time_internal(0,8,0,0), time_internal(20,8,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_a]})
-    graph_times = [time_internal(0,8,0,0), time_internal(20,8,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_b]})
-    graph_times = [time_internal(0,8,0,0), time_internal(20,8,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_a]})
-    graph_times = [time_internal(0,8,0,0), time_internal(20,8,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_b]})
-    graph_times = [time_internal(0,8,0,0), time_internal(20,8,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_a]})
-    graph_times = [time_internal(0,8,0,0), time_internal(20,8,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_b]})
 
     with open(os.path.join(data_dir,'sample.json'),'w') as f:
@@ -270,11 +263,13 @@ def case4():
     cfg = {
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "UnitTest 4",
-        'LOSS': "MeanLoss",
-        'LOSSES_LOG':["MeanLoss", "EdgeTypeLoss"],
-        'EPOCHS': 250,
-        'TEST_SPLIT': 0.2,
+        'NAME': "Unit Test 4",
+        'EDGES_OF_INTEREST': [('cereal','INSIDE','cabinet'), 
+                              ('cereal','ON','table'), 
+                              ('toast','INSIDE','cabinet'), 
+                              ('toast','ON','table')],
+        'EPOCHS': 500,
+        'SAMPLE_DATA': False
     }
     run(cfg)
 
