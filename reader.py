@@ -18,6 +18,58 @@ def pairwise_data(nodes, edges, contexts):
     return data
 
 
+class RoutinesCollateFn():
+    def __init__(self, time_encoder, sampling=True):
+        self.time_encoder = time_encoder
+        if sampling:
+            self.get_datapoint = self.get_datapoint_interpolate
+        else:
+            self.get_datapoint = self.get_datapoint_choose
+
+    def get_datapoint_interpolate(self, nodes, edges, times):
+        i = random.random()*len(times)
+        j = random.random()*len(times)
+        times = torch.cat([times, torch.Tensor([times[-1]+ (times[-1] - times[-2])])])
+        if i > j:
+            t=i
+            i=j
+            j=t
+        def interp_time(sample):
+            idx = floor(sample)
+            f = sample - idx
+            t = f * times[idx+1] + (1-f) * times[idx]
+            return idx, t
+        i,time_i = interp_time(i)
+        j,time_j = interp_time(j)
+        return  (edges[i], nodes, self.time_encoder(time_i), self.time_encoder(time_j), edges[j])
+
+    def get_datapoint_choose(self, nodes, edges, times):
+        i = random.randrange(0, len(times))
+        j = random.randrange(0, len(times))
+        while (i>=j):
+            i = random.randrange(0, len(times))
+            j = random.randrange(0, len(times))
+        return  (edges[i], nodes, self.time_encoder(times[i]), self.time_encoder(times[j]), edges[j])
+
+    def __call__(self, routine_list):
+        data = {}
+
+        data['edges'] = torch.Tensor()
+        data['nodes'] = torch.Tensor()
+        data['context_curr'] = torch.Tensor()
+        data['context_query'] = torch.Tensor()
+        data['y'] = torch.Tensor()
+
+        for routine in routine_list:
+            e1, n, c1, c2, e2 = self.get_datapoint(routine[0], routine[1], routine[2])
+            data['edges'] = torch.cat([data['edges'], e1.unsqueeze(0)], dim=0)
+            data['nodes'] = torch.cat([data['nodes'], n.unsqueeze(0)], dim=0)
+            data['context_curr'] = torch.cat([data['context_curr'], c1.unsqueeze(0)], dim=0)
+            data['context_query'] = torch.cat([data['context_query'], c2.unsqueeze(0)], dim=0)
+            data['y'] = torch.cat([data['y'], e2.unsqueeze(0)], dim=0)
+
+        return data
+
 class DataSplit():
     def __init__(self, data):
         self.data = data
@@ -33,14 +85,12 @@ class RoutinesDataset():
                  time_encoder = time_sine_cosine, 
                  dt = 10,
                  edges_of_interest = None,
-                 sample_data = True,
-                 sampling_ratio = 1.5):
+                 sample_data = True):
 
         self.data_path = data_path
         self.classes_path = classes_path
         self.time_encoder = time_encoder
         self.params = {}
-        self.params['sampling_ratio'] = sampling_ratio
         self.params['dt'] = dt
         self.params['edges_of_interest'] = edges_of_interest if edges_of_interest is not None else []
         self.params['sample_data'] = sample_data
@@ -49,11 +99,11 @@ class RoutinesDataset():
         self._alldata = self.read_data()
         print(len(self._alldata),' examples found in dataset.')
         # Infer parameters from data
-        edges, nodes, context_curr, context_query, y = self._alldata[0]
+        nodes, edges, times = self._alldata[0]
         self.params['n_nodes'] = edges.size()[1]
         self.params['n_len'] = nodes.size()[1]
         self.params['e_len'] = edges.size()[-1]
-        self.params['c_len'] = context_curr.size()[0]
+        self.params['c_len'] = time_encoder(times[0]).size()[0]
         # Split the data into train and test
         random.shuffle(self._alldata)
         num_test = int(round(test_perc*len(self._alldata)))
@@ -81,11 +131,8 @@ class RoutinesDataset():
         training_data = []
         for routine in data:
             nodes, edges = self.read_graphs(routine["graphs"])
-            times = routine["times"]
-            if self.params['sample_data']:
-                edges, times = self.sample_data(edges, times)
-            contexts = torch.Tensor([self.time_encoder(t*self.params['dt']) for t in times])
-            training_data += pairwise_data(nodes, edges, contexts)
+            times = torch.Tensor(routine["times"])
+            training_data.append((nodes, edges, times))
 
         return training_data
 
@@ -107,9 +154,6 @@ class RoutinesDataset():
             node_features[i] = self.encode_node(nid)
         node_features = np.array(node_features)
 
-        self.nodes_in_graph = list(node_features.argmax(axis=1))
-        assert (self.nodes_in_graph == [self.node_keys.index(node['id']) for node in nodes])
-
         edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)))
         for i,graph in enumerate(graphs):
             for j,n1 in enumerate(node_ids):
@@ -130,34 +174,18 @@ class RoutinesDataset():
     def encode_node(self, node):
         return np.array(self.node_keys) == node['id']
 
-    def sample_data(self, edges, times):
-        new_edges = torch.Tensor()
-        new_times = []
-        num_samples = int(len(times) * self.params['sampling_ratio'])
-        sample_idxs = [random.random()*len(times) for _ in range(num_samples)]
-        times.append(times[-1]+ (times[-1] - times[-2]))
-        for i in sample_idxs:
-            idx = floor(i)
-            f = i - idx
-            t = f * times[idx+1] + (1-f) * times[idx]
-            new_times.append(t)
-            new_edges = torch.cat([new_edges,edges[idx,:,:,:].unsqueeze(0)],dim=0)
-        assert(len(new_times) == new_edges.size()[0])
-        assert(new_edges.size()[1:] == edges.size()[1:])
-        return new_edges, torch.Tensor(new_times)
-
     def get_train_loader(self):
-        return torch.utils.data.DataLoader(self.train, num_workers=8, batch_size=10)
+        return torch.utils.data.DataLoader(self.train, num_workers=8, batch_size=100, collate_fn=RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data']))
 
     def get_test_loader(self):
-        return torch.utils.data.DataLoader(self.test, num_workers=8, batch_size=10)
+        return torch.utils.data.DataLoader(self.test, num_workers=8, batch_size=100, collate_fn=RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data']))
 
     def get_edges_of_interest(self):
         edges = {}
         for from_node, relation, to_node in self.params['edges_of_interest']:
-            from_idx = self.nodes_in_graph.index(self.node_classes.index(from_node))
-            to_idx = self.nodes_in_graph.index(self.node_classes.index(to_node))
+            from_feat = self.node_classes.index(from_node)
+            to_feat = self.node_classes.index(to_node)
             rel_idx = self.edge_keys.index(relation)
             name = ' '.join([from_node, relation, to_node])
-            edges[name] = (from_idx,to_idx,rel_idx)
+            edges[name] = (from_feat,to_feat,rel_idx)
         return edges

@@ -85,19 +85,29 @@ class GraphTranslatorModule(LightningModule):
                     x: adjacency,edges,nodes,context (tuple) : edges is nxnx_; nodes is nx_; context is any vector
                     y: edge_existence,edge_category : existence is 0/1; type is integer in [0,len(edge_feat))
         """
-        edges, nodes, context_curr, context_query, y = batch
+        edges = batch['edges']
+        nodes = batch['nodes']
+        context_curr = batch['context_curr']
+        context_query = batch['context_query']
+        y = batch['y']
+
         x = self(edges, nodes, context_curr, context_query)
         losses = self.bce(x, y)
         for analyzer in self.logging_analyzers:
-            self.log('Train: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y))
-        return self.train_analyzer(losses, x_edges=edges, y_edges=y)
+            self.log('Train: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
+        return self.train_analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes)
 
     def test_step(self, batch, batch_idx):
-        edges, nodes, context_curr, context_query, y = batch
+        edges = batch['edges']
+        nodes = batch['nodes']
+        context_curr = batch['context_curr']
+        context_query = batch['context_query']
+        y = batch['y']
+
         x = self(edges, nodes, context_curr, context_query)
         losses = self.bce(x, y)
         for analyzer in self.logging_analyzers:
-            self.log('Test: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y))
+            self.log('Test: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=1e-3)

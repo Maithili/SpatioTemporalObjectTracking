@@ -85,15 +85,16 @@ class StaticGraphLoss(LossAnalyzer):
     def name(self):
         return "Mean Loss On Static Edges"
 
-class SpecificEdgeLoss(LossAnalyzer):
-    def __init__(self, **kwargs):
-        self.idxs = kwargs["edges_of_interest"]
-        print(self.idxs)
-    def __call__(self, loss_tensor, **kwargs):
-        loss_results = {n:loss_tensor[:,i[0],i[1],i[2]].mean() for n,i in self.idxs.items()}
-        return loss_results
-    def name(self):
-        return "Specific Edge Loss"
+# class SpecificEdgeLoss(LossAnalyzer):
+#     def __init__(self, **kwargs):
+#         self.idxs = kwargs["edges_of_interest"]
+#         print(self.idxs)
+#     def __call__(self, loss_tensor, **kwargs):
+#         nodes_in_graph = list(kwargs["nodes"].argmax(axis=1))
+#         loss_results = {n:loss_tensor[:,nodes_in_graph.index(i[0]),i[2],nodes_in_graph.index(i[1])].mean() for n,i in self.idxs.items()}
+#         return loss_results
+#     def name(self):
+#         return "Specific Edge Loss"
 
 class loss_options():
     def __init__(self, data):

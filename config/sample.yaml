@@ -3,5 +3,5 @@ CLASSES_PATH: 'data/routines_1029/classes.json'
 NAME: 
 TIME_ENCODING: external
 LOSS: MeanLoss
-EPOCHS: 100
+EPOCHS: 3
 TEST_SPLIT: 0.1

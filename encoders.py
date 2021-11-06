@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 def time_sine_cosine(t):
     T_freq = [10]
@@ -9,7 +10,7 @@ def time_sine_cosine(t):
     enc = []
     for om in omegas:
         enc = enc + [np.sin(om*t), np.cos(om*t)]
-    return enc
+    return torch.Tensor(enc)
 
 def time_external(t):
     in_t = t
@@ -20,7 +21,7 @@ def time_external(t):
     days = in_t % 7
     in_t = in_t // 7
     weeks = in_t
-    return [weeks, days, hrs, mins]
+    return torch.Tensor([weeks, days, hrs, mins])
 
 def time_external_normalized(t):
     in_t = t
@@ -31,7 +32,7 @@ def time_external_normalized(t):
     days = in_t % 7
     in_t = in_t // 7
     weeks = in_t
-    return [weeks, days/7, hrs/24, mins/60]
+    return torch.Tensor([weeks, days/7, hrs/24, mins/60])
 
 
 time_encoding_options = {

@@ -32,8 +32,7 @@ def run(cfg_in):
                            time_encoder=time_encoding, 
                            test_perc=cfg['TEST_SPLIT'], 
                            edges_of_interest=cfg['EDGES_OF_INTEREST'], 
-                           sample_data=cfg['SAMPLE_DATA'],
-                           sampling_ratio=cfg['SAMPLING_RATIO'])
+                           sample_data=cfg['SAMPLE_DATA'])
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
