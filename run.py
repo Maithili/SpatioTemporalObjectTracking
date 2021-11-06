@@ -32,7 +32,9 @@ def run(cfg_in):
                            time_encoder=time_encoding, 
                            test_perc=cfg['TEST_SPLIT'], 
                            edges_of_interest=cfg['EDGES_OF_INTEREST'], 
-                           sample_data=cfg['SAMPLE_DATA'])
+                           sample_data=cfg['SAMPLE_DATA'],
+                           batch_size=cfg['BATCH_SIZE'],
+                           avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'])
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
@@ -52,7 +54,7 @@ def run(cfg_in):
                               train_analyzer=train_loss, 
                               logging_analyzers=logging_loss_funcs)
 
-    trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger)
+    trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
 
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())

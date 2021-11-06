@@ -6,6 +6,7 @@ from numpy.core.fromnumeric import argmax
 import torch
 import random
 from encoders import time_sine_cosine
+from torch.utils.data import WeightedRandomSampler, DataLoader
 
 
 def pairwise_data(nodes, edges, contexts):
@@ -77,6 +78,10 @@ class DataSplit():
         return len(self.data)
     def __getitem__(self, idx: int):
         return self.data[idx]
+    def weights(self):
+        graphs_in_routine = torch.Tensor([len(d[1]) for d in self.data])
+        return graphs_in_routine/graphs_in_routine.sum()
+
 
 class RoutinesDataset():
     def __init__(self, data_path: str = 'data/example/sample.json', 
@@ -85,7 +90,9 @@ class RoutinesDataset():
                  time_encoder = time_sine_cosine, 
                  dt = 10,
                  edges_of_interest = None,
-                 sample_data = True):
+                 sample_data = True,
+                 batch_size = 1,
+                 avg_samples_per_routine = 1):
 
         self.data_path = data_path
         self.classes_path = classes_path
@@ -94,7 +101,9 @@ class RoutinesDataset():
         self.params['dt'] = dt
         self.params['edges_of_interest'] = edges_of_interest if edges_of_interest is not None else []
         self.params['sample_data'] = sample_data
-        
+        self.params['batch_size'] = batch_size
+        self.params['avg_samples_per_routine'] = avg_samples_per_routine
+
         ## Read and divide data
         self._alldata = self.read_data()
         print(len(self._alldata),' examples found in dataset.')
@@ -174,11 +183,17 @@ class RoutinesDataset():
     def encode_node(self, node):
         return np.array(self.node_keys) == node['id']
 
+    def get_sampler(self, weights):
+        return WeightedRandomSampler(weights=weights,
+                                    num_samples=weights.size()[-1]*self.params['avg_samples_per_routine'],
+                                    replacement=True
+                                    )
+
     def get_train_loader(self):
-        return torch.utils.data.DataLoader(self.train, num_workers=8, batch_size=100, collate_fn=RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data']))
+        return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.get_sampler(self.train.weights()), collate_fn=RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data']))
 
     def get_test_loader(self):
-        return torch.utils.data.DataLoader(self.test, num_workers=8, batch_size=100, collate_fn=RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data']))
+        return DataLoader(self.test, num_workers=8, batch_size=self.params['batch_size'], sampler=self.get_sampler(self.test.weights()), collate_fn=RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data']))
 
     def get_edges_of_interest(self):
         edges = {}
