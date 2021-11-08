@@ -193,7 +193,7 @@ class RoutinesDataset():
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.get_sampler(self.train.weights()), collate_fn=RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data']))
 
     def get_test_loader(self):
-        return DataLoader(self.test, num_workers=8, batch_size=self.params['batch_size'], sampler=self.get_sampler(self.test.weights()), collate_fn=RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data']))
+        return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.get_sampler(self.test.weights()), collate_fn=RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data']))
 
     def get_edges_of_interest(self):
         edges = {}

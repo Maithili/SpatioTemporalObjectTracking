@@ -10,6 +10,7 @@ from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset
 from encoders import time_encoding_options
 from analyzers import loss_options
+from utils import visualize_datapoint
 
 DEFAULT_CONFIG = 'config/default.yaml'
 
@@ -18,12 +19,21 @@ def run(cfg_in):
         cfg = yaml.safe_load(f)
     cfg.update(cfg_in)
 
+    run_name = None
     try:
-        wandb_logger = WandbLogger(name=cfg['NAME'])
+        run_name = cfg['NAME']
     except:
-        wandb_logger = WandbLogger()
+        pass
+
+    tmp_path = os.path.join('logs','temp')
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+    os.makedirs(tmp_path)
+
+    wandb_logger = WandbLogger(name=run_name, save_dir=tmp_path, log_model=True)
     wandb_logger.experiment.config.update(cfg)
-    
+    run_name = wandb_logger.experiment.name
+
     assert cfg['TIME_ENCODING'] in time_encoding_options, 'Time encoding {} specified in config should be one of {}'.format(cfg['TIME_ENCODING'], time_encoding_options.keys())
     time_encoding = time_encoding_options[cfg['TIME_ENCODING']]
 
@@ -58,8 +68,13 @@ def run(cfg_in):
 
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())
+    
+    output_dir = os.path.join('logs',run_name)
+    os.rename(tmp_path, output_dir)
+    print('Outputs saved at ',output_dir)
 
-    wandb_logger.experiment.finish(exit_code=0)
+    visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys)
+    
 
 def run_from_config(config_filename):
     with open(os.path.join('config',config_filename)+'.yaml') as f:

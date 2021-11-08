@@ -9,3 +9,4 @@ lightning-bolts
 comet-ml
 tensorboard
 wandb
+networkx
