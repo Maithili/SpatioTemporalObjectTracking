@@ -12,7 +12,7 @@ node_dictionary['sink'] = {"id": 4, "class_name": "sink", "category": "Furniture
 node_dictionary['cup'] = {"id": 5, "class_name": "cup", "category": "placable_objects", "properties": [], "states": ["CLEAN"], "prefab_name": None, "bounding_box": None}
 node_dictionary['cereal'] = {"id": 6, "class_name": "cereal", "category": "placable_objects", "properties": [], "states": ["CLEAN"], "prefab_name": None, "bounding_box": None}
 node_dictionary['toast'] = {"id": 7, "class_name": "toast", "category": "placable_objects", "properties": [], "states": ["CLEAN"], "prefab_name": None, "bounding_box": None}
-node_dictionary['bread'] = {"id": 8, "class_name": "toast", "category": "placable_objects", "properties": [], "states": ["CLEAN"], "prefab_name": None, "bounding_box": None}
+node_dictionary['bread'] = {"id": 8, "class_name": "bread", "category": "placable_objects", "properties": [], "states": ["CLEAN"], "prefab_name": None, "bounding_box": None}
 
 def edge(from_node, relation, to_node):
     return {'from_id':node_dictionary[from_node]['id'], 'relation_type':relation, 'to_id':node_dictionary[to_node]['id']}
@@ -32,6 +32,12 @@ def time_external(in_t):
     in_t = in_t // 7
     weeks = in_t
     return(weeks, days, hrs, mins)
+
+common_cfg = {
+        'SUFFIX': " with Spectral UnitRegulzn",
+        'EPOCHS': 250,
+        'SEQUENTIAL_PREDICTION': True
+    }
 
 def case1():
     """
@@ -75,17 +81,17 @@ def case1():
     with open(os.path.join(data_dir,'sample.json'),'w') as f:
         json.dump(data, f)
 
-    cfg = {
+    cfg = common_cfg
+    cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - Single edge type",
+        'NAME': "Unit Test - Single edge type"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','INSIDE','table'), 
                               ('cup','INSIDE','sink')],
         'TIME_START': [7,50],
         'TIME_END': [9,10],
-        'EPOCHS': 500
-    }
+    })
     run(cfg)
 
 
@@ -138,18 +144,17 @@ def case2():
     with open(os.path.join(data_dir,'sample.json'),'w') as f:
         json.dump(data, f)
 
-    cfg = {
+    cfg = common_cfg
+    cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - No noise",
+        'NAME': "Unit Test - No noise"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','ON','table'), 
                               ('cup','INSIDE','sink')],
         'TIME_START': [7,50],
-        'TIME_END': [9,10],
-        'EPOCHS': 500,
-        'SEQUENTIAL_PREDICTION': True
-    }
+        'TIME_END': [9,10]
+    })
     run(cfg)
 
     
@@ -200,17 +205,17 @@ def case3():
     with open(os.path.join(data_dir,'sample.json'),'w') as f:
         json.dump(data, f)
 
-    cfg = {
+    cfg = common_cfg
+    cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - Changing context",
+        'NAME': "Unit Test - Changing context"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','INSIDE','table'), 
                               ('cup','INSIDE','sink')],
         'TIME_START': [6,50],
-        'TIME_END': [9,40],
-        'EPOCHS': 500
-    }
+        'TIME_END': [9,40]
+    })
     run(cfg)
 
 def case4():
@@ -268,19 +273,18 @@ def case4():
     with open(os.path.join(data_dir,'sample.json'),'w') as f:
         json.dump(data, f)
 
-    cfg = {
+    cfg = common_cfg
+    cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - 50/50",
+        'NAME': "Unit Test - 50/50"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cereal','INSIDE','cabinet'), 
                               ('cereal','ON','table'), 
                               ('toast','INSIDE','cabinet'), 
                               ('toast','ON','table')],
         'TIME_START': [7,50],
         'TIME_END': [8,30],
-        'EPOCHS': 500,
-        'SAMPLE_DATA': False
-    }
+    })
     run(cfg)
 
 def case5():
@@ -293,7 +297,8 @@ def case5():
         os.makedirs(data_dir)
 
 
-    nodes = [node_dictionary[key] for key in ['kitchen','cabinet','table','cereal','toast']]
+    nodes = [node_dictionary[key] for key in ['kitchen','cabinet','table','cereal','toast','bread']]
+    print(nodes)
 
     with open(os.path.join(data_dir,'classes.json'),'w') as f:
         json.dump({"nodes":nodes, "edges": ["ON","INSIDE","CLOSE"]}, f)
@@ -353,10 +358,11 @@ def case5():
     with open(os.path.join(data_dir,'sample.json'),'w') as f:
         json.dump(data, f)
 
-    cfg = {
+    cfg = common_cfg
+    cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - Context Only",
+        'NAME': "Unit Test - Context Only"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cereal','INSIDE','cabinet'), 
                               ('cereal','ON','table'), 
                               ('toast','INSIDE','cabinet'), 
@@ -365,15 +371,13 @@ def case5():
                               ('bread','ON','table')],
         'TIME_START': [7,50],
         'TIME_END': [8,50],
-        'EPOCHS': 500,
-        'SAMPLE_DATA': False
-    }
+    })
     run(cfg)
 
 
 if __name__ == '__main__':
-    # case1()
+    case1()
     case2()
-    # case3()
-    # case4()
-    # case5()
+    case3()
+    case4()
+    case5()

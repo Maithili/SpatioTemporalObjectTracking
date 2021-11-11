@@ -32,7 +32,7 @@ def _visualize_graph(graph_nodes, graph_edges, node_classes, edge_classes, axs=N
     if pos is None:
         pos = nx.spring_layout(G)
     for ax,edge_cl in zip(axs, edge_classes):
-        if edge_cl == "CLOSE":
+        if edge_cl == "CLOSE" and SINGLE_PLOT:
             continue
         weights = [edge_class_graphs[edge_cl][u][v]['weight'] for u,v in edge_class_graphs[edge_cl].edges()]
         nx.draw_networkx(G, pos=pos, ax=ax, edge_cmap=plt.cm.Blues, edge_vmin = 0 ,edge_vmax = 1 , edgelist=edge_class_graphs[edge_cl].edges(), edge_color=weights, node_size=1000, node_color='#C4EBC8')
@@ -53,15 +53,18 @@ def visualize_datapoint(model, dataloader, node_classes, edge_classes):
 
         x_hat = model.forward(edges, nodes, context)
         if SINGLE_PLOT:
-            _, single_axs = plt.subplots(1,2)
-            axs = np.tile(single_axs.reshape(2,1),(1,len(edge_classes)))
+            fig, single_axs = plt.subplots(1,3)
+            axs = np.tile(single_axs.reshape(3,1),(1,len(edge_classes)))
         else:
-            _, axs = plt.subplots(2,len(edge_classes))
-        positions = _visualize_graph(nodes.squeeze(0), x_hat.squeeze(0), node_classes, edge_classes, axs = axs[0,:])
-        axs[0,1].set_ylabel('Predicted')
-        _visualize_graph(nodes.squeeze(0), y.squeeze(0), node_classes, edge_classes, axs = axs[1,:], pos=positions)
-        axs[0,1].set_ylabel('Actual')
-
+            fig, axs = plt.subplots(3,len(edge_classes))
+        positions = _visualize_graph(nodes.squeeze(0), edges.squeeze(0), node_classes, edge_classes, axs = axs[0,:])
+        axs[0,0].set_ylabel('Input ')
+        _visualize_graph(nodes.squeeze(0), x_hat.squeeze(0), node_classes, edge_classes, axs = axs[1,:], pos=positions)
+        axs[1,0].set_ylabel('Predicted')
+        _visualize_graph(nodes.squeeze(0), y.squeeze(0), node_classes, edge_classes, axs = axs[2,:], pos=positions)
+        axs[2,0].set_ylabel('Actual')
+        fig.suptitle(str(context))
+        
         plt.show()
         # plt.savefig('temp.jpg')
         inp = input('Do you want to visualize another output? (y/n)')

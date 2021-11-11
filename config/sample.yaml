@@ -1,6 +1,6 @@
 DATA_PATH: 'data/routines_1029/sample.json'
 CLASSES_PATH: 'data/routines_1029/classes.json'
-NAME: SequentialPrediction
+NAME: SequentialPrediction w/ SpectralLoss
 TIME_ENCODING: external
 LOSS: MeanLoss
 LOSSES_LOG: 
@@ -8,7 +8,7 @@ LOSSES_LOG:
   - ChangedEdgeLoss
   - EdgeTypeLoss
   - MeanLossWhereExists
-EPOCHS: 100
+EPOCHS: 50
 TEST_SPLIT: 0.1
 BATCH_SIZE: 100
 AVG_SAMPLES_PER_ROUTINE: 50

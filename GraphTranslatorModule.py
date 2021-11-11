@@ -5,9 +5,40 @@ from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
 from analyzers import MeanLoss
 
+THRESH=0.5
+def chebyshev_polynomials(edges, k):
+    """
+    Calculate Chebyshev polynomials up to order k.
+    Result is (batch_size x k x N_nodes x N_nodes)
+    """
+    batch_size, n_nodes, _, _ = edges.size()
+
+    # 1 if max value > thresh else 0 
+    values, _ = edges.max(dim=-1)
+    adj= torch.ceil(values - THRESH)
+
+    # Laplacian applies to symmetric stuff only
+    adj = (adj + adj.permute(0,2,1))/2
+    degree_inv_sqrt = torch.diag_embed(torch.pow((adj.sum(dim=-1))+0.00001,-0.5))
+    I_per_batch = torch.eye(n_nodes).unsqueeze(0).repeat([batch_size,1,1])
+    laplacian = I_per_batch - torch.matmul(torch.matmul(degree_inv_sqrt, adj), degree_inv_sqrt)
+    scaled_laplacian = 2/1.5*laplacian - I_per_batch
+
+    polynomials = torch.cat([I_per_batch.unsqueeze(1), scaled_laplacian.unsqueeze(1)], dim=1)
+
+    def chebyshev_recurrence(t_k_minus_one, t_k_minus_two, scaled_laplacian):
+        next_poly = 2 * torch.matmul(scaled_laplacian,t_k_minus_one) - t_k_minus_two
+        return next_poly
+
+    for _ in range(2, k):
+        next_poly =chebyshev_recurrence(polynomials[:,-1,:,:], polynomials[:,-2,:,:], scaled_laplacian)
+        polynomials=torch.cat([polynomials,next_poly.unsqueeze(1)], dim=1)
+
+    return polynomials
+
 
 class GraphTranslatorModule(LightningModule):
-    def __init__(self, num_nodes, node_feature_len, edge_feature_len, context_len, train_analyzer=MeanLoss(), logging_analyzers=[]):
+    def __init__(self, num_nodes, node_feature_len, edge_feature_len, context_len, train_analyzer=MeanLoss(), logging_analyzers=[], use_spectral_loss=True, num_chebyshev_polys=2):
         super().__init__()
 
         self.num_nodes  = num_nodes 
@@ -17,6 +48,9 @@ class GraphTranslatorModule(LightningModule):
 
         self.train_analyzer = train_analyzer
         self.logging_analyzers = logging_analyzers
+        self.use_spectral_loss = use_spectral_loss
+        self.num_chebyshev_polys = num_chebyshev_polys
+        self.map_spectral_loss = 0
 
         self.hidden_influence_dim = 20
         
@@ -34,6 +68,8 @@ class GraphTranslatorModule(LightningModule):
                                )
 
         self.bce = nn.BCELoss(reduction='none')
+
+        self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
     def forward(self, edges, nodes, context):
         """
@@ -89,10 +125,13 @@ class GraphTranslatorModule(LightningModule):
         y = batch['y']
 
         x = self(edges, nodes, context)
-        losses = self.bce(x, y)
+        losses = self.losses(x, y, nodes)
+        
         for analyzer in self.logging_analyzers:
             self.log('Train: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
-        return self.train_analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes)
+        self.log('Spectral Loss: ',self.map_spectral_loss)
+
+        return self.train_analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss
 
     def test_step(self, batch, batch_idx):
         edges = batch['edges']
@@ -101,9 +140,16 @@ class GraphTranslatorModule(LightningModule):
         y = batch['y']
 
         x = self(edges, nodes, context)
-        losses = self.bce(x, y)
+        losses = self.losses(x, y, nodes)
+
         for analyzer in self.logging_analyzers:
             self.log('Test: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
+
+    def losses(self, x, y, nodes=None):
+        losses = self.bce(x, y)
+        if self.use_spectral_loss:
+            self.map_spectral_loss = self.graph_regularized_spectral_loss(x, nodes)
+        return losses
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=1e-3)
@@ -141,3 +187,13 @@ class GraphTranslatorModule(LightningModule):
         assert(message_to_edge.size()[2]==self.num_nodes)
         assert(message_to_edge.size()[3]==self.hidden_influence_dim*4+self.edge_feature_len+self.context_len)
         return message_to_edge
+
+    def graph_regularized_spectral_loss(self, edges, nodes):
+        # batch_size x k x N_nodes x N_nodes
+        chebyshev_polys = chebyshev_polynomials(edges, self.num_chebyshev_polys)
+        flattened_polys = chebyshev_polys.permute([0,2,3,1]).reshape(-1,self.num_chebyshev_polys)
+        combined_polys = self.weighted_combination(flattened_polys).reshape(-1, self.num_nodes, self.num_nodes)
+        assert edges.size()[0] == combined_polys.size()[0], 'Chebyshev poly combination gone wrong :( '
+        spectral_loss = (torch.matmul(combined_polys, nodes)).square().mean()
+        regularization = abs(1 - sum(p.pow(2.0).sum() for p in self.weighted_combination.parameters()))
+        return (1/3) * spectral_loss + (0.01) * regularization

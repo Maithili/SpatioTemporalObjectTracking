@@ -3,6 +3,7 @@ CLASSES_PATH: 'data/routines_1029/classes.json'
 NAME: 
 TIME_ENCODING: external
 LOSS: MeanLoss
+USE_SPECTRAL_LOSS: True
 LOSSES_LOG: 
   - MeanLoss
   - ChangedEdgeWeightedLoss
@@ -11,6 +12,7 @@ LOSSES_LOG:
   - MeanLossWhereExists
   - EdgeTypeLossWhereExists
   - SpecificEdgeLoss
+NUM_CHEBYSHEV_POLYS: 2
 EDGES_OF_INTEREST:
 EPOCHS: 10
 TEST_SPLIT: 0.2

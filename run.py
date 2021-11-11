@@ -65,7 +65,9 @@ def run(cfg_in = {}):
                               edge_feature_len=data.params['e_len'],
                               context_len=data.params['c_len'],
                               train_analyzer=train_loss, 
-                              logging_analyzers=logging_loss_funcs)
+                              logging_analyzers=logging_loss_funcs,
+                              use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
+                              num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'])
 
     trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
 
