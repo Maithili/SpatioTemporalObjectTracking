@@ -13,7 +13,7 @@ class GraphTranslatorModule(LightningModule):
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
         self.edge_feature_len = edge_feature_len
-        self.total_context_len = 2 * context_len
+        self.context_len = context_len
 
         self.train_analyzer = train_analyzer
         self.logging_analyzers = logging_analyzers
@@ -27,7 +27,7 @@ class GraphTranslatorModule(LightningModule):
                              )
 
         self.mlp_update = nn.Sequential(
-                               nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.total_context_len, 20),
+                               nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.context_len, 20),
                                nn.ReLU(),
                                nn.Linear(20, self.edge_feature_len),
                                nn.Sigmoid()
@@ -35,7 +35,7 @@ class GraphTranslatorModule(LightningModule):
 
         self.bce = nn.BCELoss(reduction='none')
         
-    def forward(self, edges, nodes, context_curr, context_query):
+    def forward(self, edges, nodes, context):
         """
         Args:
             adjacency: batch_size x from_nodes x to_nodes x 1
@@ -56,8 +56,6 @@ class GraphTranslatorModule(LightningModule):
         assert self.num_nodes == num_f_nodes, (str(self.num_nodes) +'!='+ str(num_f_nodes))
         assert self.num_nodes == num_t_nodes, (str(self.num_nodes) +'!='+ str(num_t_nodes))
 
-        context = torch.cat([context_curr, context_query], dim=-1)
-
         x = self.collate_edges(edges=edges, nodes=nodes)
         x = x.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
@@ -71,7 +69,7 @@ class GraphTranslatorModule(LightningModule):
         x = self.message_collection(x, edges, context)
         x = x.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.hidden_influence_dim*4 + self.edge_feature_len + self.total_context_len])
+                  self.hidden_influence_dim*4 + self.edge_feature_len + self.context_len])
         x = self.mlp_update(x).view(size=[batch_size, 
                                           self.num_nodes, 
                                           self.num_nodes, 
@@ -87,11 +85,10 @@ class GraphTranslatorModule(LightningModule):
         """
         edges = batch['edges']
         nodes = batch['nodes']
-        context_curr = batch['context_curr']
-        context_query = batch['context_query']
+        context = batch['context']
         y = batch['y']
 
-        x = self(edges, nodes, context_curr, context_query)
+        x = self(edges, nodes, context)
         losses = self.bce(x, y)
         for analyzer in self.logging_analyzers:
             self.log('Train: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
@@ -100,11 +97,10 @@ class GraphTranslatorModule(LightningModule):
     def test_step(self, batch, batch_idx):
         edges = batch['edges']
         nodes = batch['nodes']
-        context_curr = batch['context_curr']
-        context_query = batch['context_query']
+        context = batch['context']
         y = batch['y']
 
-        x = self(edges, nodes, context_curr, context_query)
+        x = self(edges, nodes, context)
         losses = self.bce(x, y)
         for analyzer in self.logging_analyzers:
             self.log('Test: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
@@ -143,5 +139,5 @@ class GraphTranslatorModule(LightningModule):
         assert(len(message_to_edge.size())==4)
         assert(message_to_edge.size()[1]==self.num_nodes)
         assert(message_to_edge.size()[2]==self.num_nodes)
-        assert(message_to_edge.size()[3]==self.hidden_influence_dim*4+self.edge_feature_len+self.total_context_len)
+        assert(message_to_edge.size()[3]==self.hidden_influence_dim*4+self.edge_feature_len+self.context_len)
         return message_to_edge

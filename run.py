@@ -3,6 +3,7 @@
 import yaml
 import os
 import sys
+import shutil
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
@@ -14,7 +15,7 @@ from utils import visualize_datapoint
 
 DEFAULT_CONFIG = 'config/default.yaml'
 
-def run(cfg_in):
+def run(cfg_in = {}):
     with open(DEFAULT_CONFIG) as f:
         cfg = yaml.safe_load(f)
     cfg.update(cfg_in)
@@ -27,7 +28,7 @@ def run(cfg_in):
 
     tmp_path = os.path.join('logs','temp')
     if os.path.exists(tmp_path):
-        os.remove(tmp_path)
+        shutil.rmtree(tmp_path)
     os.makedirs(tmp_path)
 
     wandb_logger = WandbLogger(name=run_name, save_dir=tmp_path, log_model=True)
@@ -44,7 +45,9 @@ def run(cfg_in):
                            edges_of_interest=cfg['EDGES_OF_INTEREST'], 
                            sample_data=cfg['SAMPLE_DATA'],
                            batch_size=cfg['BATCH_SIZE'],
-                           avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'])
+                           avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
+                           sequential_prediction=cfg['SEQUENTIAL_PREDICTION'],
+                           time_range=(tuple(cfg['TIME_START']), tuple(cfg['TIME_END'])))
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
@@ -69,11 +72,16 @@ def run(cfg_in):
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())
     
-    output_dir = os.path.join('logs',run_name)
-    os.rename(tmp_path, output_dir)
-    print('Outputs saved at ',output_dir)
-
-    visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys)
+    try:
+        output_dir = os.path.join('logs',run_name)
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+        os.rename(tmp_path, output_dir)
+        print('Outputs saved at ',output_dir)
+    except Exception as e:
+        print(e)
+    finally:
+        visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys)
     
 
 def run_from_config(config_filename):
@@ -82,5 +90,8 @@ def run_from_config(config_filename):
     run(cfg)
 
 if __name__ == '__main__':
-    assert len(sys.argv) == 2, "The script requires exactly one argument specifying the config file name, e.g. 'sample'"
-    run_from_config(sys.argv[1])
+    assert len(sys.argv) < 3, "The script can take only one argument specifying the config file name, e.g. 'sample'"
+    if len(sys.argv) > 1:
+        run_from_config(sys.argv[1])
+    else:
+        run()

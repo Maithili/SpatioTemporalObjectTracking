@@ -85,23 +85,31 @@ class StaticGraphLoss(LossAnalyzer):
     def name(self):
         return "Mean Loss On Static Edges"
 
-# class SpecificEdgeLoss(LossAnalyzer):
-#     def __init__(self, **kwargs):
-#         self.idxs = kwargs["edges_of_interest"]
-#         print(self.idxs)
-#     def __call__(self, loss_tensor, **kwargs):
-#         nodes_in_graph = list(kwargs["nodes"].argmax(axis=1))
-#         loss_results = {n:loss_tensor[:,nodes_in_graph.index(i[0]),i[2],nodes_in_graph.index(i[1])].mean() for n,i in self.idxs.items()}
-#         return loss_results
-#     def name(self):
-#         return "Specific Edge Loss"
+class SpecificEdgeLoss(LossAnalyzer):
+    """
+    Use this only when the node is known to be in all graphs. Else behavior can be undefined!
+    """
+    def __init__(self, **kwargs):
+        self.idxs = kwargs["edges_of_interest"]
+        print(self.idxs)
+    def __call__(self, loss_tensor, **kwargs):
+        nodes_in_graphs = (kwargs["nodes"]).argmax(axis=-1)
+        loss_results = {}
+        for n,i in self.idxs.items():
+            graph0, idx0 = np.argwhere(nodes_in_graphs == i[0])
+            graph1, idx1 = np.argwhere(nodes_in_graphs == i[1])
+            assert all(graph0==graph1), "Do NOT use SpecificEdgeLoss when the nodes do not exist in every graph!"
+            loss_results[n] = (loss_tensor[graph0, idx0, idx1,i[2]]).mean()
+        return loss_results
+    def name(self):
+        return "Specific Edge Loss"
 
 class loss_options():
     def __init__(self, data):
         self.options = {x.__name__:x for x in LossAnalyzer.__subclasses__()}
         args = {}
         args["edge_classes"] = data.edge_keys
-        args["weight_for_changed_edges"] = 0.5
+        args["weight_for_changed_edges"] = 0.9
         args["static_nodes"] = data.static_nodes
         args["edges_of_interest"] = data.get_edges_of_interest()
         self.losses = {}

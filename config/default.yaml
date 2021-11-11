@@ -5,13 +5,22 @@ TIME_ENCODING: external
 LOSS: MeanLoss
 LOSSES_LOG: 
   - MeanLoss
+  - ChangedEdgeWeightedLoss
   - ChangedEdgeLoss
   - EdgeTypeLoss
   - MeanLossWhereExists
   - EdgeTypeLossWhereExists
+  - SpecificEdgeLoss
 EDGES_OF_INTEREST:
 EPOCHS: 10
 TEST_SPLIT: 0.2
 SAMPLE_DATA: True
 BATCH_SIZE: 10
 AVG_SAMPLES_PER_ROUTINE: 3
+SEQUENTIAL_PREDICTION: True
+TIME_START:
+  - 6
+  - 0
+TIME_END:
+  - 24
+  - 0
