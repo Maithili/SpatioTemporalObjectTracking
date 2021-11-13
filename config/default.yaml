@@ -1,6 +1,7 @@
 DATA_PATH: 'data/routines_1029/sample.json'
 CLASSES_PATH: 'data/routines_1029/classes.json'
 NAME: 
+DT: 10
 TIME_ENCODING: external
 LOSS: MeanLoss
 USE_SPECTRAL_LOSS: True

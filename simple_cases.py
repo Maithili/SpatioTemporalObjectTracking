@@ -2,6 +2,7 @@
 
 import os
 import json
+import shutil
 from run import run
 
 node_dictionary = {}
@@ -17,12 +18,10 @@ node_dictionary['bread'] = {"id": 8, "class_name": "bread", "category": "placabl
 def edge(from_node, relation, to_node):
     return {'from_id':node_dictionary[from_node]['id'], 'relation_type':relation, 'to_id':node_dictionary[to_node]['id']}
 
-dt = 10
-
-def time_internal(mins, hrs, days=0, weeks=0):
+def time_internal(mins, hrs, days=0, weeks=0, dt=10):
     return int(round(((((weeks*7+days)*24)+hrs)*60+mins)/dt))
 
-def time_external(in_t):
+def time_external(in_t, dt=10):
     in_t = in_t*dt
     mins = in_t % 60
     in_t = in_t // 60
@@ -34,9 +33,10 @@ def time_external(in_t):
     return(weeks, days, hrs, mins)
 
 common_cfg = {
-        'SUFFIX': " with Spectral UnitRegulzn",
+        'SUFFIX': " only Accuracy Loss",
         'EPOCHS': 250,
-        'SEQUENTIAL_PREDICTION': True
+        'SEQUENTIAL_PREDICTION': True,
+        'USE_SPECTRAL_LOSS': False
     }
 
 def case1():
@@ -45,8 +45,9 @@ def case1():
     """
 
     data_dir = 'data/unittests/case1'
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir)
+    os.makedirs(data_dir)
 
     nodes = [node_dictionary[key] for key in ['kitchen','cabinet','table','sink','cup']]
 
@@ -85,7 +86,7 @@ def case1():
     cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - Single edge type"+common_cfg['SUFFIX'],
+        'NAME': "Test - Single edge type"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','INSIDE','table'), 
                               ('cup','INSIDE','sink')],
@@ -102,9 +103,10 @@ def case2():
     """
 
     data_dir = 'data/unittests/case2'
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir)
+    os.makedirs(data_dir)
+    
     nodes = [node_dictionary[key] for key in ['kitchen','cabinet','table','sink','cup']]
 
     with open(os.path.join(data_dir,'classes.json'),'w') as f:
@@ -148,7 +150,7 @@ def case2():
     cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - No noise"+common_cfg['SUFFIX'],
+        'NAME': "Test - No noise"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','ON','table'), 
                               ('cup','INSIDE','sink')],
@@ -164,9 +166,9 @@ def case3():
     """
 
     data_dir = 'data/unittests/case3'
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir)
+    os.makedirs(data_dir)
 
     nodes = [node_dictionary[key] for key in ['kitchen','cabinet','table','sink','cup']]
 
@@ -191,15 +193,15 @@ def case3():
 
     changing_edges = [edges_0, edges_1, edges_2, edges_0]
 
-    graph_times = [time_internal(0,8,0,0), time_internal(20,8,0,0), time_internal(40,8,0,0), time_internal(0,9,0,0)]
-    data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges]})
     graph_times = [time_internal(0,7,0,0), time_internal(20,7,0,0), time_internal(40,7,0,0), time_internal(0,8,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges]})
     graph_times = [time_internal(10,7,0,0), time_internal(30,7,0,0), time_internal(50,7,0,0), time_internal(10,8,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges]})
-    graph_times = [time_internal(30,8,0,0), time_internal(50,8,0,0), time_internal(10,9,0,0), time_internal(30,9,0,0)]
+    graph_times = [time_internal(0,8,0,0), time_internal(20,8,0,0), time_internal(40,8,0,0), time_internal(0,9,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges]})
     graph_times = [time_internal(10,8,0,0), time_internal(30,8,0,0), time_internal(50,8,0,0), time_internal(10,9,0,0)]
+    data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges]})
+    graph_times = [time_internal(30,8,0,0), time_internal(50,8,0,0), time_internal(10,9,0,0), time_internal(30,9,0,0)]
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges]})
 
     with open(os.path.join(data_dir,'sample.json'),'w') as f:
@@ -209,10 +211,11 @@ def case3():
     cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - Changing context"+common_cfg['SUFFIX'],
+        'NAME': "Test - Changing context"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','INSIDE','table'), 
                               ('cup','INSIDE','sink')],
+        'EPOCHS': 500,
         'TIME_START': [6,50],
         'TIME_END': [9,40]
     })
@@ -224,8 +227,9 @@ def case4():
     """
 
     data_dir = 'data/unittests/case4'
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir)
+    os.makedirs(data_dir)
 
 
     nodes = [node_dictionary[key] for key in ['kitchen','cabinet','table','cereal','toast']]
@@ -261,8 +265,13 @@ def case4():
 
     changing_edges_a = [edges_0, edges_1a]
     changing_edges_b = [edges_0, edges_1b]
+    dt = 20
 
-    graph_times = [time_internal(0,8,0,0), time_internal(20,8,0,0)]
+    graph_times = [time_internal(0,8,0,0, dt=dt), time_internal(20,8,0,0, dt=dt)]
+    data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_a]})
+    data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_b]})
+    data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_a]})
+    data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_b]})
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_a]})
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_b]})
     data.append({"times":graph_times, "graphs":[{"nodes":nodes, "edges":edges+fixed_edges} for edges in changing_edges_a]})
@@ -277,13 +286,14 @@ def case4():
     cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - 50/50"+common_cfg['SUFFIX'],
+        'NAME': "Test - 50/50"+common_cfg['SUFFIX'],
+        'DT': dt,
         'EDGES_OF_INTEREST': [('cereal','INSIDE','cabinet'), 
                               ('cereal','ON','table'), 
                               ('toast','INSIDE','cabinet'), 
                               ('toast','ON','table')],
-        'TIME_START': [7,50],
-        'TIME_END': [8,30],
+        'TIME_START': [8,00],
+        'TIME_END': [8,20],
     })
     run(cfg)
 
@@ -293,8 +303,9 @@ def case5():
     """
 
     data_dir = 'data/unittests/case5'
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir)
+    os.makedirs(data_dir)
 
 
     nodes = [node_dictionary[key] for key in ['kitchen','cabinet','table','cereal','toast','bread']]
@@ -362,7 +373,7 @@ def case5():
     cfg.update({
         'DATA_PATH': os.path.join(data_dir,'sample.json'),
         'CLASSES_PATH': os.path.join(data_dir,'classes.json'),
-        'NAME': "Unit Test - Context Only"+common_cfg['SUFFIX'],
+        'NAME': "Test - Context Only"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cereal','INSIDE','cabinet'), 
                               ('cereal','ON','table'), 
                               ('toast','INSIDE','cabinet'), 

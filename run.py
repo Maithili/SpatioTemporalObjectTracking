@@ -38,16 +38,19 @@ def run(cfg_in = {}):
     assert cfg['TIME_ENCODING'] in time_encoding_options, 'Time encoding {} specified in config should be one of {}'.format(cfg['TIME_ENCODING'], time_encoding_options.keys())
     time_encoding = time_encoding_options[cfg['TIME_ENCODING']]
 
+    time_range = tuple(cfg['TIME_START']), tuple(cfg['TIME_END']) if cfg['TIME_START'] is not None and cfg['TIME_END'] is not None else None
+
     data = RoutinesDataset(data_path=cfg['DATA_PATH'], 
                            classes_path=cfg['CLASSES_PATH'], 
                            time_encoder=time_encoding, 
+                           dt=cfg['DT'],
                            test_perc=cfg['TEST_SPLIT'], 
                            edges_of_interest=cfg['EDGES_OF_INTEREST'], 
                            sample_data=cfg['SAMPLE_DATA'],
                            batch_size=cfg['BATCH_SIZE'],
                            avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
                            sequential_prediction=cfg['SEQUENTIAL_PREDICTION'],
-                           time_range=(tuple(cfg['TIME_START']), tuple(cfg['TIME_END'])))
+                           time_range=time_range)
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     

@@ -95,7 +95,7 @@ class RoutinesDataset():
                  batch_size = 1,
                  avg_samples_per_routine = 1,
                  sequential_prediction = True,
-                 time_range = ((6,0),(24,0))):
+                 time_range = None):
 
         self.data_path = data_path
         self.classes_path = classes_path
@@ -186,22 +186,24 @@ class RoutinesDataset():
 
     def make_pairwise(self, data):
         pairwise_samples = []
-        time_min = int((self.params['time_range'][0][1] + self.params['time_range'][0][0]*60)/self.params['dt'])
-        time_max = int((self.params['time_range'][1][1] + self.params['time_range'][1][0]*60)/self.params['dt'])
+        if self.params['time_range'] is not None:
+            time_min = int((self.params['time_range'][0][1] + self.params['time_range'][0][0]*60)/self.params['dt'])
+            time_max = int((self.params['time_range'][1][1] + self.params['time_range'][1][0]*60)/self.params['dt'])
         for routine in data:
             nodes, edges, times = routine
             times = times % (24*60/self.params['dt'])
-            time_min = floor(min(times))
-            time_max = ceil(max(times))
+            if self.params['time_range'] is None:
+                time_min = floor(min(times))
+                time_max = ceil(max(times))
             times = torch.cat([times,torch.Tensor([time_max+1])], dim=-1)
             data_idx = -1
             prev_datapoint = None
-            for t in range(time_min, time_max):
+            for t in range(time_min, time_max+1):
                 if t >= times[data_idx+1]:
                     data_idx += 1
                 if data_idx<0:
                     continue
-                if prev_datapoint:
+                if prev_datapoint is not None:
                     pairwise_samples.append((prev_datapoint, nodes, self.time_encoder((t-1) * self.params['dt']), edges[data_idx]))
                 prev_datapoint = edges[data_idx]
         self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y'])
