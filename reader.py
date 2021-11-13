@@ -42,8 +42,8 @@ class RoutinesCollateFn():
             f = sample - idx
             t = f * times[idx+1] + (1-f) * times[idx]
             return idx, t
-        i,time_i = interp_time(i)
-        j,time_j = interp_time(j)
+        i,time_i = interp_time(i) * self.params['dt']
+        j,time_j = interp_time(j) * self.params['dt']
         return  (edges[i], nodes, self.time_encoder(time_i), self.time_encoder(time_j), edges[j])
 
     def get_datapoint_choose(self, nodes, edges, times):
@@ -202,8 +202,8 @@ class RoutinesDataset():
                 if data_idx<0:
                     continue
                 if prev_datapoint:
-                    pairwise_samples.append((prev_datapoint[0], nodes, prev_datapoint[1], edges[data_idx]))
-                prev_datapoint = edges[data_idx], self.time_encoder(times[data_idx])
+                    pairwise_samples.append((prev_datapoint, nodes, self.time_encoder((t-1) * self.params['dt']), edges[data_idx]))
+                prev_datapoint = edges[data_idx]
         self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y'])
         return pairwise_samples
 
