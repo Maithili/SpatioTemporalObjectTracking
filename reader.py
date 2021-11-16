@@ -22,8 +22,9 @@ class CollateToDict():
 
 
 class RoutinesCollateFn():
-    def __init__(self, time_encoder, sampling=True):
+    def __init__(self, time_encoder, dt, sampling=True):
         self.time_encoder = time_encoder
+        self.dt = dt
         if sampling:
             self.get_datapoint = self.get_datapoint_interpolate
         else:
@@ -41,9 +42,9 @@ class RoutinesCollateFn():
             idx = floor(sample)
             f = sample - idx
             t = f * times[idx+1] + (1-f) * times[idx]
-            return idx, t
-        i,time_i = interp_time(i) * self.params['dt']
-        j,time_j = interp_time(j) * self.params['dt']
+            return idx, t * self.dt
+        i,time_i = interp_time(i) 
+        j,time_j = interp_time(j)
         return  (edges[i], nodes, self.time_encoder(time_i), self.time_encoder(time_j), edges[j])
 
     def get_datapoint_choose(self, nodes, edges, times):
@@ -56,7 +57,6 @@ class RoutinesCollateFn():
 
     def __call__(self, routine_list):
         data = {}
-
         data['edges'] = torch.Tensor()
         data['nodes'] = torch.Tensor()
         data['context'] = torch.Tensor()
@@ -73,16 +73,59 @@ class RoutinesCollateFn():
         return data
 
 class DataSplit():
-    def __init__(self, data):
-        self.data = data
+    def __init__(self, data, time_encoder, dt, time_range):
+        self.time_encoder = time_encoder
+        self.dt = dt
+        self.time_range = time_range
+        self.data = self.make_pairwise(data)
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y'])
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx: int):
         return self.data[idx]
-    def weights(self):
-        graphs_in_routine = torch.Tensor([len(d[1]) for d in self.data])
-        return graphs_in_routine/graphs_in_routine.sum()
+    def sampler(self):
+        return None
+    def make_pairwise(self, data):
+        pairwise_samples = []
+        if self.time_range is not None:
+            time_min = int((self.time_range[0][1] + self.time_range[0][0]*60)/self.dt)
+            time_max = int((self.time_range[1][1] + self.time_range[1][0]*60)/self.dt)
+        for routine in data:
+            nodes, edges, times = routine
+            times = times % (24*60/self.dt)
+            if self.time_range is None:
+                time_min = floor(min(times))
+                time_max = ceil(max(times))
+            times = torch.cat([times,torch.Tensor([time_max+10])], dim=-1)
+            data_idx = -1
+            prev_datapoint = None
+            for t in range(time_min, time_max+1):
+                if t >= times[data_idx+1]:
+                    data_idx += 1
+                if data_idx<0:
+                    continue
+                if prev_datapoint is not None:
+                    pairwise_samples.append((prev_datapoint, nodes, self.time_encoder((t-1) * self.dt), edges[data_idx]))
+                prev_datapoint = edges[data_idx]
+        return pairwise_samples
 
+class DataSplitRoutines():
+    def __init__(self, data, time_encoder, dt, sampling, samples_per_routine):
+        self.data = data
+        self.samples_per_routine = samples_per_routine
+        self.collate_fn = RoutinesCollateFn(time_encoder, dt=dt, sampling=sampling)
+    def __len__(self):
+        return len(self.data) * self.samples_per_routine
+    def __getitem__(self, idx: int):
+        return self.data[idx]
+    def sampler(self):
+        graphs_in_routine = torch.Tensor([len(d[1]) for d in self.data])
+        weights = graphs_in_routine/graphs_in_routine.sum()
+        return WeightedRandomSampler(weights=weights,
+                            num_samples=len(self),
+                            replacement=True
+                            )
+    
 
 class RoutinesDataset():
     def __init__(self, data_path: str = 'data/example/sample.json', 
@@ -107,40 +150,29 @@ class RoutinesDataset():
         self.params['batch_size'] = batch_size
         self.params['avg_samples_per_routine'] = avg_samples_per_routine
         self.params['time_range'] = time_range
-        def noCollate():
-            raise Exception('No collate function defined')
-        self.collate_fn = noCollate
 
-        ## Read and divide data
+        # Read data
         self._alldata = self.read_data()
-        print(len(self._alldata),' examples found in dataset.')
-        # Infer parameters from data
-        nodes, edges, times = self._alldata[0]
+
         # Split the data into train and test
         random.shuffle(self._alldata)
         num_test = int(round(test_perc*len(self._alldata)))
         if sequential_prediction:
-            self.test = DataSplit(self.make_pairwise(self._alldata[:num_test]))
-            self.train = DataSplit(self.make_pairwise(self._alldata[num_test:]))
+            self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.params['time_range'])
+            self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.params['time_range'])
         else:
-            self.test = DataSplit(self._alldata[:num_test])
-            self.train = DataSplit(self._alldata[num_test:])
-            self.collate_fn = RoutinesCollateFn(self.time_encoder, sampling=self.params['sample_data'])
+            self.test = DataSplitRoutines(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.params['sample_data'], self.params['avg_samples_per_routine'])
+            self.train = DataSplitRoutines(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.params['sample_data'], self.params['avg_samples_per_routine'])
+        print(len(self._alldata),' examples found in dataset.')
         print(len(self.train),' examples in train split.')
         print(len(self.test),' examples in test split.')
-        model_data = self.collate_fn([self.train[0]])
+
+        # Infer parameters for the model
+        model_data = self.test.collate_fn([self.test[0]])
         self.params['n_nodes'] = model_data['edges'].size()[1]
         self.params['n_len'] = model_data['nodes'].size()[-1]
         self.params['e_len'] = model_data['edges'].size()[-1]
         self.params['c_len'] = model_data['context'].size()[-1]
-        
-    def log_random_loss(self, analyzers):
-        for d in self.train:
-            random_out = torch.nn.Sigmoid()(torch.randn(self.params['n_nodes'], self.params['n_nodes'], self.params['e_len']))
-            y = d[4]
-            losses = torch.nn.BCELoss()(random_out, y)
-            for analyzer in analyzers:
-                self.log('Random: '+analyzer.name(), analyzer(losses, x_edges=random_out, y_edges=y))
 
     def read_data(self):
         with open(self.classes_path, 'r') as f:
@@ -184,32 +216,6 @@ class RoutinesDataset():
 
         return torch.Tensor(node_features), torch.Tensor(edge_features)
 
-    def make_pairwise(self, data):
-        pairwise_samples = []
-        if self.params['time_range'] is not None:
-            time_min = int((self.params['time_range'][0][1] + self.params['time_range'][0][0]*60)/self.params['dt'])
-            time_max = int((self.params['time_range'][1][1] + self.params['time_range'][1][0]*60)/self.params['dt'])
-        for routine in data:
-            nodes, edges, times = routine
-            times = times % (24*60/self.params['dt'])
-            if self.params['time_range'] is None:
-                time_min = floor(min(times))
-                time_max = ceil(max(times))
-            times = torch.cat([times,torch.Tensor([time_max+1])], dim=-1)
-            data_idx = -1
-            prev_datapoint = None
-            for t in range(time_min, time_max+1):
-                if t >= times[data_idx+1]:
-                    data_idx += 1
-                if data_idx<0:
-                    continue
-                if prev_datapoint is not None:
-                    pairwise_samples.append((prev_datapoint, nodes, self.time_encoder((t-1) * self.params['dt']), edges[data_idx]))
-                prev_datapoint = edges[data_idx]
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y'])
-        return pairwise_samples
-
-
     def get_edges(self, graph, n_id1, n_id2):
         edges = [e for e in graph['edges'] if e['from_id']==n_id1 and e['to_id']==n_id2]
         return edges
@@ -222,17 +228,11 @@ class RoutinesDataset():
     def encode_node(self, node):
         return np.array(self.node_keys) == node['id']
 
-    def get_sampler(self, weights):
-        return WeightedRandomSampler(weights=weights,
-                                    num_samples=weights.size()[-1]*self.params['avg_samples_per_routine'],
-                                    replacement=True
-                                    )
-
     def get_train_loader(self):
-        return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.get_sampler(self.train.weights()), collate_fn=self.collate_fn)
+        return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
 
     def get_test_loader(self):
-        return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.get_sampler(self.test.weights()), collate_fn=self.collate_fn)
+        return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
 
     def get_edges_of_interest(self):
         edges = {}

@@ -33,8 +33,8 @@ def time_external(in_t, dt=10):
     return(weeks, days, hrs, mins)
 
 common_cfg = {
-        'SUFFIX': " only Accuracy Loss",
-        'EPOCHS': 250,
+        'SUFFIX': " Sequential",
+        'EPOCHS': 700,
         'SEQUENTIAL_PREDICTION': True,
         'USE_SPECTRAL_LOSS': False
     }
@@ -215,7 +215,6 @@ def case3():
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','INSIDE','table'), 
                               ('cup','INSIDE','sink')],
-        'EPOCHS': 500,
         'TIME_START': [6,50],
         'TIME_END': [9,40]
     })

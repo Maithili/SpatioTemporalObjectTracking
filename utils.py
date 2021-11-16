@@ -57,13 +57,14 @@ def visualize_datapoint(model, dataloader, node_classes, edge_classes):
             axs = np.tile(single_axs.reshape(3,1),(1,len(edge_classes)))
         else:
             fig, axs = plt.subplots(3,len(edge_classes))
+            axs = axs.reshape(3,len(edge_classes))
         positions = _visualize_graph(nodes.squeeze(0), edges.squeeze(0), node_classes, edge_classes, axs = axs[0,:])
         axs[0,0].set_ylabel('Input ')
         _visualize_graph(nodes.squeeze(0), x_hat.squeeze(0), node_classes, edge_classes, axs = axs[1,:], pos=positions)
         axs[1,0].set_ylabel('Predicted')
         _visualize_graph(nodes.squeeze(0), y.squeeze(0), node_classes, edge_classes, axs = axs[2,:], pos=positions)
         axs[2,0].set_ylabel('Actual')
-        fig.suptitle(str(context))
+        fig.suptitle('Context : '+str(list(context)))
         
         plt.show()
         # plt.savefig('temp.jpg')
