@@ -35,9 +35,7 @@ class RoutinesCollateFn():
         j = random.random()*len(times)
         times = torch.cat([times, torch.Tensor([times[-1]+ (times[-1] - times[-2])])])
         if i > j:
-            t=i
-            i=j
-            j=t
+            i,j = j,i
         def interp_time(sample):
             idx = floor(sample)
             f = sample - idx
@@ -53,7 +51,7 @@ class RoutinesCollateFn():
         while (i>=j):
             i = random.randrange(0, len(times))
             j = random.randrange(0, len(times))
-        return  (edges[i], nodes, self.time_encoder(times[i]), self.time_encoder(times[j]), edges[j])
+        return  (edges[i], nodes, self.time_encoder(times[i] * self.dt), self.time_encoder(times[j] * self.dt), edges[j])
 
     def __call__(self, routine_list):
         data = {}
@@ -73,10 +71,9 @@ class RoutinesCollateFn():
         return data
 
 class DataSplit():
-    def __init__(self, data, time_encoder, dt, time_range):
+    def __init__(self, data, time_encoder, dt):
         self.time_encoder = time_encoder
         self.dt = dt
-        self.time_range = time_range
         self.data = self.make_pairwise(data)
         self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y'])
     def __len__(self):
@@ -87,26 +84,24 @@ class DataSplit():
         return None
     def make_pairwise(self, data):
         pairwise_samples = []
-        if self.time_range is not None:
-            time_min = int((self.time_range[0][1] + self.time_range[0][0]*60)/self.dt)
-            time_max = int((self.time_range[1][1] + self.time_range[1][0]*60)/self.dt)
         for routine in data:
             nodes, edges, times = routine
-            times = times % (24*60/self.dt)
-            if self.time_range is None:
-                time_min = floor(min(times))
-                time_max = ceil(max(times))
-            times = torch.cat([times,torch.Tensor([time_max+10])], dim=-1)
+            assert times[0]==min(times), 'Times need to be monotonically increasing. First element should be min.'
+            assert times[-1]==max(times), 'Times need to be monotonically increasing. Last element should be max.'
+            time_min = floor(times[0])
+            time_max = ceil(times[-1])
+            times = torch.cat([times,torch.Tensor([float("Inf")])], dim=-1)
             data_idx = -1
-            prev_datapoint = None
+            prev_edges = None
             for t in range(time_min, time_max+1):
                 if t >= times[data_idx+1]:
                     data_idx += 1
-                if data_idx<0:
+                if data_idx < 0:
                     continue
-                if prev_datapoint is not None:
-                    pairwise_samples.append((prev_datapoint, nodes, self.time_encoder((t-1) * self.dt), edges[data_idx]))
-                prev_datapoint = edges[data_idx]
+                if prev_edges is not None:
+                    pairwise_samples.append((prev_edges, nodes, self.time_encoder((t-1) * self.dt), edges[data_idx]))
+                prev_edges = edges[data_idx]
+        random.shuffle(pairwise_samples)
         return pairwise_samples
 
 class DataSplitRoutines():
@@ -137,8 +132,7 @@ class RoutinesDataset():
                  sample_data = True,
                  batch_size = 1,
                  avg_samples_per_routine = 1,
-                 sequential_prediction = True,
-                 time_range = None):
+                 sequential_prediction = True):
 
         self.data_path = data_path
         self.classes_path = classes_path
@@ -149,7 +143,6 @@ class RoutinesDataset():
         self.params['sample_data'] = sample_data
         self.params['batch_size'] = batch_size
         self.params['avg_samples_per_routine'] = avg_samples_per_routine
-        self.params['time_range'] = time_range
 
         # Read data
         self._alldata = self.read_data()
@@ -158,12 +151,12 @@ class RoutinesDataset():
         random.shuffle(self._alldata)
         num_test = int(round(test_perc*len(self._alldata)))
         if sequential_prediction:
-            self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.params['time_range'])
-            self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.params['time_range'])
+            self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'])
+            self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'])
         else:
             self.test = DataSplitRoutines(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.params['sample_data'], self.params['avg_samples_per_routine'])
             self.train = DataSplitRoutines(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.params['sample_data'], self.params['avg_samples_per_routine'])
-        print(len(self._alldata),' examples found in dataset.')
+        print(len(self._alldata),' routines found in dataset.')
         print(len(self.train),' examples in train split.')
         print(len(self.test),' examples in test split.')
 

@@ -64,7 +64,8 @@ def visualize_datapoint(model, dataloader, node_classes, edge_classes):
         axs[1,0].set_ylabel('Predicted')
         _visualize_graph(nodes.squeeze(0), y.squeeze(0), node_classes, edge_classes, axs = axs[2,:], pos=positions)
         axs[2,0].set_ylabel('Actual')
-        fig.suptitle('Context : '+str(list(context)))
+        loss = float(model.losses(x_hat, y, nodes).mean())
+        fig.suptitle('Context : '+str(list(context))+'; Loss : '+str(loss))
         
         plt.show()
         # plt.savefig('temp.jpg')

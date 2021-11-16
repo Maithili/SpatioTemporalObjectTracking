@@ -34,7 +34,7 @@ def time_external(in_t, dt=10):
 
 common_cfg = {
         'SUFFIX': " Sequential",
-        'EPOCHS': 700,
+        'EPOCHS': 1000,
         'SEQUENTIAL_PREDICTION': True,
         'USE_SPECTRAL_LOSS': False
     }
@@ -89,9 +89,7 @@ def case1():
         'NAME': "Test - Single edge type"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','INSIDE','table'), 
-                              ('cup','INSIDE','sink')],
-        'TIME_START': [7,50],
-        'TIME_END': [9,10],
+                              ('cup','INSIDE','sink')]
     })
     run(cfg)
 
@@ -153,9 +151,7 @@ def case2():
         'NAME': "Test - No noise"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','ON','table'), 
-                              ('cup','INSIDE','sink')],
-        'TIME_START': [7,50],
-        'TIME_END': [9,10]
+                              ('cup','INSIDE','sink')]
     })
     run(cfg)
 
@@ -214,9 +210,7 @@ def case3():
         'NAME': "Test - Changing context"+common_cfg['SUFFIX'],
         'EDGES_OF_INTEREST': [('cup','INSIDE','cabinet'), 
                               ('cup','INSIDE','table'), 
-                              ('cup','INSIDE','sink')],
-        'TIME_START': [6,50],
-        'TIME_END': [9,40]
+                              ('cup','INSIDE','sink')]
     })
     run(cfg)
 
@@ -290,9 +284,7 @@ def case4():
         'EDGES_OF_INTEREST': [('cereal','INSIDE','cabinet'), 
                               ('cereal','ON','table'), 
                               ('toast','INSIDE','cabinet'), 
-                              ('toast','ON','table')],
-        'TIME_START': [8,00],
-        'TIME_END': [8,20],
+                              ('toast','ON','table')]
     })
     run(cfg)
 
@@ -378,9 +370,7 @@ def case5():
                               ('toast','INSIDE','cabinet'), 
                               ('toast','ON','table'), 
                               ('bread','INSIDE','cabinet'), 
-                              ('bread','ON','table')],
-        'TIME_START': [7,50],
-        'TIME_END': [8,50],
+                              ('bread','ON','table')]
     })
     run(cfg)
 
