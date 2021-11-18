@@ -1,0 +1,16 @@
+DATA_PATH: 'data/scripted_routines_1117/withWeekend_fewObjects_varyingActions_definiteTimes/sample.json'
+CLASSES_PATH: 'data/scripted_routines_1117/withWeekend_fewObjects_varyingActions_definiteTimes/classes.json'
+DATA_INFO: 'data/scripted_routines_1117/withWeekend_fewObjects_varyingActions_definiteTimes/info.json'
+NAME: withWeekend_fewObjects_varyingActions_definiteTimes
+TIME_ENCODING: external
+LOSS: MeanLoss
+LOSSES_LOG: 
+  - MeanLoss
+  - ChangedEdgeLoss
+  - EdgeTypeLoss
+  - MeanLossWhereExists
+EPOCHS: 500
+TEST_SPLIT: 0.1
+BATCH_SIZE: 10
+SEQUENTIAL_PREDICTION: True
+USE_SPECTRAL_LOSS: False

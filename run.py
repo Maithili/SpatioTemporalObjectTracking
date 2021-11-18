@@ -1,6 +1,7 @@
 #!/home/maithili/repos/GraphTrans/.venv/bin/python
 
 import yaml
+import json
 import os
 import sys
 import shutil
@@ -19,6 +20,23 @@ def run(cfg_in = {}):
     with open(DEFAULT_CONFIG) as f:
         cfg = yaml.safe_load(f)
     cfg.update(cfg_in)
+    if cfg_in['DATA_INFO'] is not None:
+        with open(cfg_in['DATA_INFO']) as f:
+            cfg['DATA_INFO'] = json.load(f)
+    
+    assert cfg['TIME_ENCODING'] in time_encoding_options, 'Time encoding {} specified in config should be one of {}'.format(cfg['TIME_ENCODING'], time_encoding_options.keys())
+    time_encoding = time_encoding_options[cfg['TIME_ENCODING']]
+
+    data = RoutinesDataset(data_path=cfg['DATA_PATH'], 
+                           classes_path=cfg['CLASSES_PATH'], 
+                           time_encoder=time_encoding, 
+                           dt=cfg['DT'],
+                           test_perc=cfg['TEST_SPLIT'], 
+                           edges_of_interest=cfg['EDGES_OF_INTEREST'], 
+                           sample_data=cfg['SAMPLE_DATA'],
+                           batch_size=cfg['BATCH_SIZE'],
+                           avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
+                           sequential_prediction=cfg['SEQUENTIAL_PREDICTION'])
 
     run_name = None
     try:
@@ -34,20 +52,6 @@ def run(cfg_in = {}):
     wandb_logger = WandbLogger(name=run_name, save_dir=tmp_path, log_model=True)
     wandb_logger.experiment.config.update(cfg)
     run_name = wandb_logger.experiment.name
-
-    assert cfg['TIME_ENCODING'] in time_encoding_options, 'Time encoding {} specified in config should be one of {}'.format(cfg['TIME_ENCODING'], time_encoding_options.keys())
-    time_encoding = time_encoding_options[cfg['TIME_ENCODING']]
-
-    data = RoutinesDataset(data_path=cfg['DATA_PATH'], 
-                           classes_path=cfg['CLASSES_PATH'], 
-                           time_encoder=time_encoding, 
-                           dt=cfg['DT'],
-                           test_perc=cfg['TEST_SPLIT'], 
-                           edges_of_interest=cfg['EDGES_OF_INTEREST'], 
-                           sample_data=cfg['SAMPLE_DATA'],
-                           batch_size=cfg['BATCH_SIZE'],
-                           avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
-                           sequential_prediction=cfg['SEQUENTIAL_PREDICTION'])
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     

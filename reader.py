@@ -8,6 +8,8 @@ import random
 from encoders import time_sine_cosine
 from torch.utils.data import WeightedRandomSampler, DataLoader
 
+from utils import visualize_routine
+
 class CollateToDict():
     def __init__(self, dict_labels):
         self.dict_labels = dict_labels
@@ -138,7 +140,7 @@ class RoutinesDataset():
         self.classes_path = classes_path
         self.time_encoder = time_encoder
         self.params = {}
-        self.params['dt'] = dt
+        self.params['dt'] = dt    # Overwritten if present in classes
         self.params['edges_of_interest'] = edges_of_interest if edges_of_interest is not None else []
         self.params['sample_data'] = sample_data
         self.params['batch_size'] = batch_size
@@ -175,8 +177,13 @@ class RoutinesDataset():
         
         self.read_classes(classes)
 
+        inp = input(f'Do you want to visualize all {len(data)} routines?')
+        viz = (inp == 'y')
+
         training_data = []
         for routine in data:
+            if viz:
+                visualize_routine(routine, dt=self.params['dt'])
             nodes, edges = self.read_graphs(routine["graphs"])
             times = torch.Tensor(routine["times"])
             training_data.append((nodes, edges, times))
