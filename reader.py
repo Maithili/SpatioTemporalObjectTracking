@@ -193,6 +193,7 @@ class RoutinesDataset():
     def read_classes(self, classes):
         self.node_keys = [n['id'] for n in classes['nodes']]
         self.node_classes = [n['class_name'] for n in classes['nodes']]
+        self.node_categories = [n['category'] for n in classes['nodes']]
         self.edge_keys = classes['edges']
         if 'dt' in classes:
             self.params['dt'] = classes['dt']
