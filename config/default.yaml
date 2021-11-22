@@ -13,6 +13,7 @@ LOSSES_LOG:
   - MeanLossWhereExists
   - EdgeTypeLossWhereExists
   - SpecificEdgeLoss
+  - DynamicGraphLoss
 NUM_CHEBYSHEV_POLYS: 2
 EDGES_OF_INTEREST:
 EPOCHS: 10

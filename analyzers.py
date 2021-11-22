@@ -78,12 +78,29 @@ class ChangedEdgeWeightedLoss(LossAnalyzer):
 
 class StaticGraphLoss(LossAnalyzer):
     def __init__(self, **kwargs):
-        self.static_nodes = kwargs["static_nodes"]
+        self.static_node_ids = kwargs["static_node_ids"]
     def __call__(self, loss_tensor, **kwargs):
-        loss_static = loss_tensor[self.static_nodes,self.static_nodes].mean()
+        nodes_in_graphs = (kwargs["nodes"]).argmax(axis=-1)
+        print(self.static_node_ids)
+        static_node_idxs = np.isin(self.static_node_ids)
+        loss_static = loss_tensor[static_node_idxs, static_node_idxs].mean()
         return loss_static
     def name(self):
         return "Mean Loss On Static Edges"
+
+class DynamicGraphLoss(LossAnalyzer):
+    def __init__(self, **kwargs):
+        self.static_node_ids = kwargs["static_node_ids"]
+    def __call__(self, loss_tensor, **kwargs):
+        nodes = kwargs["nodes"]
+        nodes_in_graphs = (nodes).argmax(axis=-1)
+        dyn_idx = np.logical_not(np.isin(nodes_in_graphs, self.static_node_ids))
+        loss_dyn_idx = np.fromfunction(lambda b,i,j :  (dyn_idx[b,i] + dyn_idx[b,j]), shape=nodes.shape, dtype=int)
+        loss_dyn_idx = np.stack([loss_dyn_idx]*loss_tensor.shape[-1],axis=-1)
+        dyn_loss = (loss_tensor.detach().numpy() * loss_dyn_idx).mean()
+        return dyn_loss
+    def name(self):
+        return "Mean Loss On Dynamic Edges"
 
 class SpecificEdgeLoss(LossAnalyzer):
     """
@@ -110,7 +127,7 @@ class loss_options():
         args = {}
         args["edge_classes"] = data.edge_keys
         args["weight_for_changed_edges"] = 0.9
-        args["static_nodes"] = data.static_nodes
+        args["static_node_ids"] = data.static_nodes
         args["edges_of_interest"] = data.get_edges_of_interest()
         self.losses = {}
         for name,clas in self.options.items():
