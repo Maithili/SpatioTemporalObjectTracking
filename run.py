@@ -37,7 +37,8 @@ def run(cfg_in = {}):
                            sample_data=cfg['SAMPLE_DATA'],
                            batch_size=cfg['BATCH_SIZE'],
                            avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
-                           sequential_prediction=cfg['SEQUENTIAL_PREDICTION'])
+                           sequential_prediction=cfg['SEQUENTIAL_PREDICTION'],
+                           only_dynamic_edges = cfg['ONLY_DYNAMIC_EDGES'])
 
     run_name = None
     try:

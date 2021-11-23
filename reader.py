@@ -134,7 +134,8 @@ class RoutinesDataset():
                  sample_data = True,
                  batch_size = 1,
                  avg_samples_per_routine = 1,
-                 sequential_prediction = True):
+                 sequential_prediction = True,
+                 only_dynamic_edges = False):
 
         self.data_path = data_path
         self.classes_path = classes_path
@@ -145,6 +146,7 @@ class RoutinesDataset():
         self.params['sample_data'] = sample_data
         self.params['batch_size'] = batch_size
         self.params['avg_samples_per_routine'] = avg_samples_per_routine
+        self.params['only_dynamic_edges'] = only_dynamic_edges
 
         # Read data
         self._alldata = self.read_data()
@@ -213,6 +215,8 @@ class RoutinesDataset():
         for i,graph in enumerate(graphs):
             for j,n1 in enumerate(node_ids):
                 for k,n2 in enumerate(node_ids):
+                    if self.params['only_dynamic_edges'] and (n1 in self.static_nodes) and (n2 in self.static_nodes):
+                        continue
                     edge_features[i,j,k,:]= self.encode_edge(self.get_edges(graph, n1, n2))
 
         return torch.Tensor(node_features), torch.Tensor(edge_features)
