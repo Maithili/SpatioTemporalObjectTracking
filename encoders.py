@@ -34,9 +34,28 @@ def time_external_normalized(t):
     weeks = in_t
     return torch.Tensor([weeks, days/7, hrs/24, mins/60])
 
+def clock_time_with_weekend_bit(t, weekend_days):
+    in_t = t
+    mins = in_t % 60
+    in_t = in_t // 60
+    hrs = in_t % 24
+    in_t = in_t // 24
+    days = in_t % 7
+    weekend = 1 if days in weekend_days else 0
+    return torch.Tensor([weekend, hrs, mins])
 
-time_encoding_options = {
-    'sine_cosine': time_sine_cosine,
-    'external': time_external,
-    'external_normalized': time_external_normalized
-}
+class TimeEncodingOptions():
+    def __init__(self, weekend_days):
+        self.weekend_days = weekend_days
+    def __call__(self, encoder_option):
+        if encoder_option == 'sine_cosine':
+            return time_sine_cosine
+        elif encoder_option == 'external':
+            return time_external
+        elif encoder_option == 'external_normalized':
+            return time_external_normalized
+        elif encoder_option == 'clock_time_with_weekend_bit':
+            assert self.weekend_days is not None, 'Require weekend days list to use clock_time_with_weekend_bit encoder'
+            return lambda t : clock_time_with_weekend_bit(t, self.weekend_days)
+        else:
+            raise LookupError('Time encoding option is invalid!')

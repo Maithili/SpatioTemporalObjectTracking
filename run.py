@@ -10,7 +10,7 @@ from pytorch_lightning.loggers import WandbLogger
 
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset
-from encoders import time_encoding_options
+from encoders import TimeEncodingOptions
 from analyzers import loss_options
 from utils import visualize_datapoint
 
@@ -20,12 +20,13 @@ def run(cfg_in = {}):
     with open(DEFAULT_CONFIG) as f:
         cfg = yaml.safe_load(f)
     cfg.update(cfg_in)
+    cfg['DATA_INFO'] = {}
     if cfg_in['DATA_INFO'] is not None:
         with open(cfg_in['DATA_INFO']) as f:
             cfg['DATA_INFO'] = json.load(f)
     
-    assert cfg['TIME_ENCODING'] in time_encoding_options, 'Time encoding {} specified in config should be one of {}'.format(cfg['TIME_ENCODING'], time_encoding_options.keys())
-    time_encoding = time_encoding_options[cfg['TIME_ENCODING']]
+    time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
+    time_encoding = time_options(cfg['TIME_ENCODING'])
 
     data = RoutinesDataset(data_path=cfg['DATA_PATH'], 
                            classes_path=cfg['CLASSES_PATH'], 
