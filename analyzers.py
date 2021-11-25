@@ -26,15 +26,15 @@ class MeanLoss(LossAnalyzer):
     def name(self):
         return "Mean Loss"
 
-class EdgeTypeLoss(LossAnalyzer):
-    def __init__(self, **kwargs):
-        self.labels = kwargs["edge_classes"]
-    def __call__(self, loss_tensor, **kwargs):
-        assert(len(self.labels) == loss_tensor.size()[-1])
-        losses_by_type = {self.labels[i]: loss_tensor[:,:,:,i].mean() for i in range(len(self.labels))}
-        return losses_by_type
-    def name(self):
-        return "Loss by Edge Type"
+# class EdgeTypeLoss(LossAnalyzer):
+#     def __init__(self, **kwargs):
+#         self.labels = kwargs["edge_classes"]
+#     def __call__(self, loss_tensor, **kwargs):
+#         assert(len(self.labels) == loss_tensor.size()[1])
+#         losses_by_type = {self.labels[i]: loss_tensor[:,i,:,:].mean() for i in range(len(self.labels))}
+#         return losses_by_type
+#     def name(self):
+#         return "Loss by Edge Type"
 
 class MeanLossWhereExists(LossAnalyzer):
     def __init__(self, **kwargs):
@@ -95,9 +95,9 @@ class DynamicGraphLoss(LossAnalyzer):
         nodes = kwargs["nodes"]
         nodes_in_graphs = (nodes).argmax(axis=-1)
         dyn_idx = np.logical_not(np.isin(nodes_in_graphs, self.static_node_ids))
-        loss_dyn_idx = np.fromfunction(lambda b,i,j :  (dyn_idx[b,i] + dyn_idx[b,j]), shape=nodes.shape, dtype=int)
+        loss_dyn_idx = np.fromfunction(lambda b,i,j :  np.logical_or(dyn_idx[b,i], dyn_idx[b,j]), shape=nodes.shape, dtype=int)
         loss_dyn_idx = np.stack([loss_dyn_idx]*loss_tensor.shape[-1],axis=-1)
-        dyn_loss = (loss_tensor.detach().numpy() * loss_dyn_idx).mean()
+        dyn_loss = (loss_tensor[torch.from_numpy(loss_dyn_idx)]).mean()
         return dyn_loss
     def name(self):
         return "Mean Loss On Dynamic Edges"

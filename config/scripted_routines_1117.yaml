@@ -7,7 +7,6 @@ LOSS: MeanLoss
 LOSSES_LOG: 
   - MeanLoss
   - ChangedEdgeLoss
-  - EdgeTypeLoss
   - MeanLossWhereExists
   - DynamicGraphLoss
 EPOCHS: 500
@@ -15,3 +14,4 @@ TEST_SPLIT: 0.1
 BATCH_SIZE: 10
 SEQUENTIAL_PREDICTION: True
 USE_SPECTRAL_LOSS: False
+ALLOW_MULTIPLE_EDGE_TYPES: False

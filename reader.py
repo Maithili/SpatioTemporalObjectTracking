@@ -135,7 +135,8 @@ class RoutinesDataset():
                  batch_size = 1,
                  avg_samples_per_routine = 1,
                  sequential_prediction = True,
-                 only_dynamic_edges = False):
+                 only_dynamic_edges = False,
+                 allow_multiple_edge_types=False):
 
         self.data_path = data_path
         self.classes_path = classes_path
@@ -147,6 +148,7 @@ class RoutinesDataset():
         self.params['batch_size'] = batch_size
         self.params['avg_samples_per_routine'] = avg_samples_per_routine
         self.params['only_dynamic_edges'] = only_dynamic_edges
+        self.params['allow_multiple_edge_types'] = allow_multiple_edge_types
 
         # Read data
         self._alldata = self.read_data()
@@ -168,7 +170,10 @@ class RoutinesDataset():
         model_data = self.test.collate_fn([self.test[0]])
         self.params['n_nodes'] = model_data['edges'].size()[1]
         self.params['n_len'] = model_data['nodes'].size()[-1]
-        self.params['e_len'] = model_data['edges'].size()[-1]
+        if self.params['allow_multiple_edge_types']:
+            self.params['e_len'] = len(self.edge_keys)
+        else:
+            self.params['e_len'] = len(self.edge_keys) + 1
         self.params['c_len'] = model_data['context'].size()[-1]
 
     def read_data(self):
@@ -186,6 +191,8 @@ class RoutinesDataset():
         for routine in data:
             if viz:
                 visualize_routine(routine, dt=self.params['dt'])
+                inp = input(f'Do you want to visualize the next routine?')
+                viz = (inp == 'y')
             nodes, edges = self.read_graphs(routine["graphs"])
             times = torch.Tensor(routine["times"])
             training_data.append((nodes, edges, times))
@@ -211,7 +218,10 @@ class RoutinesDataset():
             node_features[i] = self.encode_node(nid)
         node_features = np.array(node_features)
 
-        edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)))
+        if self.params['allow_multiple_edge_types']:
+            edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)))
+        else:
+            edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), 1))
         for i,graph in enumerate(graphs):
             for j,n1 in enumerate(node_ids):
                 for k,n2 in enumerate(node_ids):
@@ -227,7 +237,15 @@ class RoutinesDataset():
 
     def encode_edge(self, edges):
         valid = lambda rel: rel in [e['relation_type'] for e in edges]
-        encoding = [1 if valid(c) else 0 for c in self.edge_keys]
+        if self.params['allow_multiple_edge_types']:
+            encoding = [1 if valid(c) else 0 for c in self.edge_keys]
+        else:
+            encoding = -1
+            for i,c in enumerate(self.edge_keys):
+                if valid(c):
+                    encoding = i
+                    break
+            encoding += 1
         return encoding
 
     def encode_node(self, node):

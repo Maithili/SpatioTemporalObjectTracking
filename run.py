@@ -38,7 +38,8 @@ def run(cfg_in = {}):
                            batch_size=cfg['BATCH_SIZE'],
                            avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
                            sequential_prediction=cfg['SEQUENTIAL_PREDICTION'],
-                           only_dynamic_edges = cfg['ONLY_DYNAMIC_EDGES'])
+                           only_dynamic_edges = cfg['ONLY_DYNAMIC_EDGES'],
+                           allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
 
     run_name = None
     try:
@@ -59,7 +60,7 @@ def run(cfg_in = {}):
     
     losses = loss_options(data)
 
-    assert cfg['LOSS'] in losses, 'Loss {} specified in config should be one of {}'.format(cfg['LOSS'], losses.keys())
+    assert cfg['LOSS'] in losses, 'Loss {} specified in config is invalid'
     train_loss = losses(cfg['LOSS'])
     logging_loss_funcs = []
     for logging_loss in cfg['LOSSES_LOG']:
@@ -73,7 +74,8 @@ def run(cfg_in = {}):
                               train_analyzer=train_loss, 
                               logging_analyzers=logging_loss_funcs,
                               use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
-                              num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'])
+                              num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
+                              allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
 
     trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
 
@@ -89,8 +91,9 @@ def run(cfg_in = {}):
     except Exception as e:
         print(e)
     finally:
-        visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys)
-    
+        # visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys)
+        pass
+
 
 def run_from_config(config_filename):
     with open(os.path.join('config',config_filename)+'.yaml') as f:

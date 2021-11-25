@@ -6,7 +6,6 @@ LOSS: MeanLoss
 LOSSES_LOG: 
   - MeanLoss
   - ChangedEdgeLoss
-  - EdgeTypeLoss
   - MeanLossWhereExists
 EPOCHS: 50
 TEST_SPLIT: 0.1

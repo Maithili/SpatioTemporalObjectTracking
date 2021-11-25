@@ -38,13 +38,14 @@ def chebyshev_polynomials(edges, k):
 
 
 class GraphTranslatorModule(LightningModule):
-    def __init__(self, num_nodes, node_feature_len, edge_feature_len, context_len, train_analyzer=MeanLoss(), logging_analyzers=[], use_spectral_loss=True, num_chebyshev_polys=2):
+    def __init__(self, num_nodes, node_feature_len, edge_feature_len, context_len, train_analyzer=MeanLoss(), logging_analyzers=[], use_spectral_loss=True, num_chebyshev_polys=2, allow_multiple_edge_types=False):
         super().__init__()
 
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
         self.edge_feature_len = edge_feature_len
         self.context_len = context_len
+        self.allow_multiple_edge_types = allow_multiple_edge_types
 
         self.train_analyzer = train_analyzer
         self.logging_analyzers = logging_analyzers
@@ -60,14 +61,22 @@ class GraphTranslatorModule(LightningModule):
                              nn.Linear(20, self.hidden_influence_dim),
                              )
 
-        self.mlp_update = nn.Sequential(
+        if allow_multiple_edge_types:
+            self.mlp_update = nn.Sequential(
                                nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.context_len, 20),
                                nn.ReLU(),
                                nn.Linear(20, self.edge_feature_len),
                                nn.Sigmoid()
                                )
-
-        self.bce = nn.BCELoss(reduction='none')
+            self.accuracy_loss = nn.BCELoss(reduction='none')
+        
+        else:
+            self.mlp_update = nn.Sequential(
+                               nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.context_len, 20),
+                               nn.ReLU(),
+                               nn.Linear(20, self.edge_feature_len),
+                               )
+            self.accuracy_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.permute(0,3,1,2), y.squeeze(-1).long())).unsqueeze(-1)
 
         self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
@@ -123,8 +132,12 @@ class GraphTranslatorModule(LightningModule):
         nodes = batch['nodes']
         context = batch['context']
         y = batch['y']
-
-        x = self(edges, nodes, context)
+        if not self.allow_multiple_edge_types:
+            edges_in = F.one_hot(edges.squeeze(-1).long(), num_classes = self.edge_feature_len)
+        else:
+            edges_in = edges
+        
+        x = self(edges_in, nodes, context)
         losses = self.losses(x, y, nodes)
         
         for analyzer in self.logging_analyzers:
@@ -138,15 +151,19 @@ class GraphTranslatorModule(LightningModule):
         nodes = batch['nodes']
         context = batch['context']
         y = batch['y']
+        if not self.allow_multiple_edge_types:
+            edges_in = F.one_hot(edges.squeeze(-1).long(), num_classes = self.edge_feature_len)
+        else:
+            edges_in = edges
 
-        x = self(edges, nodes, context)
+        x = self(edges_in, nodes, context)
         losses = self.losses(x, y, nodes)
 
         for analyzer in self.logging_analyzers:
             self.log('Test: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
 
     def losses(self, x, y, nodes=None):
-        losses = self.bce(x, y)
+        losses = self.accuracy_loss(x, y)
         if self.use_spectral_loss:
             self.map_spectral_loss = self.graph_regularized_spectral_loss(x, nodes)
         return losses

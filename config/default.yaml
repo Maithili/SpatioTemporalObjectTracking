@@ -9,7 +9,6 @@ LOSSES_LOG:
   - MeanLoss
   - ChangedEdgeWeightedLoss
   - ChangedEdgeLoss
-  - EdgeTypeLoss
   - MeanLossWhereExists
   - EdgeTypeLossWhereExists
   - SpecificEdgeLoss
@@ -23,4 +22,5 @@ BATCH_SIZE: 10
 AVG_SAMPLES_PER_ROUTINE: 10
 SEQUENTIAL_PREDICTION: True
 ONLY_DYNAMIC_EDGES: False
+ALLOW_MULTIPLE_EDGE_TYPES: False
 DATA_INFO: 
