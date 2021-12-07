@@ -138,7 +138,8 @@ class RoutinesDataset():
                  avg_samples_per_routine = 1,
                  sequential_prediction = True,
                  only_dynamic_edges = False,
-                 allow_multiple_edge_types=False):
+                 allow_multiple_edge_types=False,
+                 ignore_close_edges=True):
 
         self.data_path = data_path
         self.classes_path = classes_path
@@ -151,6 +152,7 @@ class RoutinesDataset():
         self.params['avg_samples_per_routine'] = avg_samples_per_routine
         self.params['only_dynamic_edges'] = only_dynamic_edges
         self.params['allow_multiple_edge_types'] = allow_multiple_edge_types
+        self.params['ignore_close_edges'] = ignore_close_edges
 
         # Read data
         self._alldata = self.read_data()
@@ -209,6 +211,8 @@ class RoutinesDataset():
         self.node_classes = [n['class_name'] for n in classes['nodes']]
         self.node_categories = [n['category'] for n in classes['nodes']]
         self.edge_keys = classes['edges']
+        if self.params['ignore_close_edges']:
+            self.edge_keys.remove("CLOSE")
         if 'dt' in classes:
             self.params['dt'] = classes['dt']
         static = lambda category : category in ["Furniture", "Room"]

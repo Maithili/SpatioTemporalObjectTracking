@@ -39,7 +39,8 @@ def run(cfg_in = {}):
                            avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
                            sequential_prediction=cfg['SEQUENTIAL_PREDICTION'],
                            only_dynamic_edges = cfg['ONLY_DYNAMIC_EDGES'],
-                           allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
+                           allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'],
+                           ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])
 
     run_name = None
     try:
