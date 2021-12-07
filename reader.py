@@ -10,6 +10,8 @@ from torch.utils.data import WeightedRandomSampler, DataLoader
 
 from utils import visualize_routine
 
+INTERACTIVE = True
+
 class CollateToDict():
     def __init__(self, dict_labels):
         self.dict_labels = dict_labels
@@ -184,7 +186,10 @@ class RoutinesDataset():
         
         self.read_classes(classes)
 
-        inp = input(f'Do you want to visualize all {len(data)} routines?')
+        if INTERACTIVE:
+            inp = input(f'Do you want to visualize all {len(data)} routines?')
+        else:
+            inp = 'n'
         viz = (inp == 'y')
 
         training_data = []
