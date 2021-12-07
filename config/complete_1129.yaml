@@ -1,0 +1,17 @@
+DATA_PATH: 'data/complete1129/sample.json'
+CLASSES_PATH: 'data/complete1129/classes.json'
+DATA_INFO: 'data/complete1129/info.json'
+NAME: SM_NoClose_withWeekendBit
+TIME_ENCODING: clock_time_with_weekend_bit
+LOSS: MeanLoss
+LOSSES_LOG: 
+  - MeanLoss
+  - ChangedEdgeLoss
+  - MeanLossWhereExists
+  - DynamicGraphLoss
+EPOCHS: 20
+TEST_SPLIT: 0.1
+BATCH_SIZE: 10
+SEQUENTIAL_PREDICTION: True
+USE_SPECTRAL_LOSS: False
+ALLOW_MULTIPLE_EDGE_TYPES: False
