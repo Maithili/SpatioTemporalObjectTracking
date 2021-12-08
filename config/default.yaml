@@ -1,6 +1,4 @@
-DATA_PATH: 'data/routines_1029/sample.json'
-CLASSES_PATH: 'data/routines_1029/classes.json'
-NAME: 
+NAME: null
 DT: 10
 TIME_ENCODING: external
 LOSS: MeanFilter
@@ -14,7 +12,7 @@ LOSSES_LOG:
   - filters.SpecificEdgeFilter
   - DynamicGraphFilter
 NUM_CHEBYSHEV_POLYS: 2
-EDGES_OF_INTEREST:
+EDGES_OF_INTEREST: null
 EPOCHS: 10
 TEST_SPLIT: 0.2
 SAMPLE_DATA: True
@@ -24,4 +22,4 @@ SEQUENTIAL_PREDICTION: True
 ONLY_DYNAMIC_EDGES: False
 ALLOW_MULTIPLE_EDGE_TYPES: False
 IGNORE_CLOSE_EDGES: True
-DATA_INFO: 
+DATA_INFO: null

@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import shutil
+import argparse
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
@@ -16,15 +17,20 @@ from utils import visualize_datapoint
 
 DEFAULT_CONFIG = 'config/default.yaml'
 
-def run(cfg_in = {}):
-    with open(DEFAULT_CONFIG) as f:
-        cfg = yaml.safe_load(f)
-    cfg.update(cfg_in)
-    cfg['DATA_INFO'] = {}
-    if cfg_in['DATA_INFO'] is not None:
-        with open(cfg_in['DATA_INFO']) as f:
-            cfg['DATA_INFO'] = json.load(f)
+def run(cfg = {}, path = None):
     
+    if path is not None:
+        cfg['DATA_PATH'] = os.path.join(path, 'sample.json')
+        cfg['CLASSES_PATH'] = os.path.join(path, 'classes.json')
+        cfg['DATA_INFO'] = os.path.join(path, 'info.json')
+        if cfg['NAME'] is None:
+            cfg['NAME'] = os.path.basename(path)
+    else:
+        print('No path provided. Will read from config file...')
+
+    with open(cfg['DATA_INFO']) as f:
+        cfg['DATA_INFO'] = json.load(f)
+
     time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
     time_encoding = time_options(cfg['TIME_ENCODING'])
 
@@ -42,18 +48,12 @@ def run(cfg_in = {}):
                            allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'],
                            ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])
 
-    run_name = None
-    try:
-        run_name = cfg['NAME']
-    except:
-        pass
-
     tmp_path = os.path.join('logs','temp')
     if os.path.exists(tmp_path):
         shutil.rmtree(tmp_path)
     os.makedirs(tmp_path)
 
-    wandb_logger = WandbLogger(name=run_name, save_dir=tmp_path, log_model=True)
+    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir=tmp_path, log_model=True)
     wandb_logger.experiment.config.update(cfg)
     run_name = wandb_logger.experiment.name
 
@@ -96,14 +96,19 @@ def run(cfg_in = {}):
         pass
 
 
-def run_from_config(config_filename):
-    with open(os.path.join('config',config_filename)+'.yaml') as f:
-        cfg = yaml.safe_load(f)
-    run(cfg)
 
 if __name__ == '__main__':
-    assert len(sys.argv) < 3, "The script can take only one argument specifying the config file name, e.g. 'sample'"
-    if len(sys.argv) > 1:
-        run_from_config(sys.argv[1])
-    else:
-        run()
+    parser = argparse.ArgumentParser(description='Run model on routines.')
+    parser.add_argument('--path', type=str, help='Path where the data lives. Must contain sample, info and classes json files.')
+    parser.add_argument('--cfg', type=str, help='Name of config file.')
+
+    args = parser.parse_args()
+    assert len(sys.argv) < 4, "The script can take only one argument specifying the config file name, e.g. 'sample'"
+
+    with open(DEFAULT_CONFIG) as f:
+        cfg = yaml.safe_load(f)
+    if args.cfg is not None:
+        with open(os.path.join('config',args.cfg)+'.yaml') as f:
+            cfg.update(yaml.safe_load(f))
+    print(cfg)
+    run(cfg=cfg, path=args.path)
