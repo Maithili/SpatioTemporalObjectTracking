@@ -48,14 +48,18 @@ def run(cfg = {}, path = None):
                            allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'],
                            ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])
 
-    tmp_path = os.path.join('logs','temp')
-    if os.path.exists(tmp_path):
-        shutil.rmtree(tmp_path)
-    os.makedirs(tmp_path)
+    output_dir = os.path.join('logs',cfg['NAME'])
+    if os.path.exists(output_dir):
+        n = 1
+        new_dir = output_dir + "_"+str(n)
+        while os.path.exists(new_dir):
+            n += 1
+            new_dir = output_dir + "_"+str(n)
+        output_dir = new_dir
+    os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir=tmp_path, log_model=True)
+    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir=output_dir, log_model=True)
     wandb_logger.experiment.config.update(cfg)
-    run_name = wandb_logger.experiment.name
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
@@ -83,17 +87,8 @@ def run(cfg = {}, path = None):
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())
     
-    try:
-        output_dir = os.path.join('logs',run_name)
-        if os.path.exists(output_dir):
-            shutil.rmtree(output_dir)
-        os.rename(tmp_path, output_dir)
-        print('Outputs saved at ',output_dir)
-    except Exception as e:
-        print(e)
-    finally:
-        # visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys)
-        pass
+    print('Outputs saved at ',output_dir)
+    # visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys)
 
 
 
