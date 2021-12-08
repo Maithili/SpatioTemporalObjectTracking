@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-class LossAnalyzer():
+class MetricsFilter():
     """
     Base class to analyze the loss for useful metrics
     """
@@ -18,15 +18,15 @@ class LossAnalyzer():
     def name(self):
         return "Zero"
 
-class MeanLoss(LossAnalyzer):
+class MeanFilter(MetricsFilter):
     def __init__(self, **kwargs):
         super().__init__()
     def __call__(self, loss_tensor, **kwargs):
         return loss_tensor.mean()
     def name(self):
-        return "Mean Loss"
+        return "Mean"
 
-# class EdgeTypeLoss(LossAnalyzer):
+# class EdgeTypeFilter(MetricsFilter):
 #     def __init__(self, **kwargs):
 #         self.labels = kwargs["edge_classes"]
 #     def __call__(self, loss_tensor, **kwargs):
@@ -36,16 +36,16 @@ class MeanLoss(LossAnalyzer):
 #     def name(self):
 #         return "Loss by Edge Type"
 
-class MeanLossWhereExists(LossAnalyzer):
+class MeanWhereExistsFilter(MetricsFilter):
     def __init__(self, **kwargs):
         pass
     def __call__(self, loss_tensor, **kwargs):
         mean_loss_where_exists = loss_tensor[np.where(kwargs["y_edges"])].mean()
         return mean_loss_where_exists
     def name(self):
-        return "Mean Loss Where Edge Exists"
+        return "Mean Where Edge Exists"
 
-class EdgeTypeLossWhereExists(LossAnalyzer):
+class EdgeTypeWhereExistsFilter(MetricsFilter):
     def __init__(self, **kwargs):
         self.labels = kwargs["edge_classes"]
     def __call__(self, loss_tensor, **kwargs):
@@ -53,30 +53,30 @@ class EdgeTypeLossWhereExists(LossAnalyzer):
         losses_by_type = {self.labels[i]: loss_tensor[:,:,:,i][kwargs["y_edges"][:,:,:,i]>0].mean() for i in range(len(self.labels))}
         return losses_by_type
     def name(self):
-        return "Loss by Edge Type Where Edge Exists"
+        return "Metric by Edge Type Where Edge Exists"
 
-class ChangedEdgeLoss(LossAnalyzer):
+class ChangedEdgeFilter(MetricsFilter):
     def __init__(self, **kwargs):
         pass
     def __call__(self, loss_tensor, **kwargs):
-        loss_at_change = loss_tensor[np.where(kwargs["x_edges"]!=kwargs["y_edges"])]
+        loss_at_change = loss_tensor[kwargs["x_edges"]!=kwargs["y_edges"]]
         mean_loss_at_change = loss_at_change.mean()
         return mean_loss_at_change
     def name(self):
-        return "Mean Loss On Changed Edges"
+        return "Mean On Changed Edges"
 
-class ChangedEdgeWeightedLoss(LossAnalyzer):
+class ChangedEdgeWeightedFilter(MetricsFilter):
     def __init__(self, **kwargs):
         self.weight_changed_edges = kwargs["weight_for_changed_edges"]
     def __call__(self, loss_tensor, **kwargs):
-        loss_at_change = loss_tensor[np.where(kwargs["x_edges"]!=kwargs["y_edges"])]
+        loss_at_change = loss_tensor[kwargs["x_edges"]!=kwargs["y_edges"]]
         mean_loss_at_change = loss_at_change.mean()
         mean_loss = loss_tensor.mean()
         return self.weight_changed_edges * mean_loss_at_change + (1 - self.weight_changed_edges) * mean_loss
     def name(self):
-        return "Mean Loss Weighted On Changed Edges"
+        return "Mean Weighted On Changed Edges"
 
-class StaticGraphLoss(LossAnalyzer):
+class StaticGraphFilter(MetricsFilter):
     def __init__(self, **kwargs):
         self.static_node_ids = kwargs["static_node_ids"]
     def __call__(self, loss_tensor, **kwargs):
@@ -86,9 +86,9 @@ class StaticGraphLoss(LossAnalyzer):
         loss_static = loss_tensor[static_node_idxs, static_node_idxs].mean()
         return loss_static
     def name(self):
-        return "Mean Loss On Static Edges"
+        return "Mean On Static Edges"
 
-class DynamicGraphLoss(LossAnalyzer):
+class DynamicGraphFilter(MetricsFilter):
     def __init__(self, **kwargs):
         self.static_node_ids = kwargs["static_node_ids"]
     def __call__(self, loss_tensor, **kwargs):
@@ -100,9 +100,9 @@ class DynamicGraphLoss(LossAnalyzer):
         dyn_loss = (loss_tensor[torch.from_numpy(loss_dyn_idx)]).mean()
         return dyn_loss
     def name(self):
-        return "Mean Loss On Dynamic Edges"
+        return "Mean On Dynamic Edges"
 
-class SpecificEdgeLoss(LossAnalyzer):
+class SpecificEdgeFilter(MetricsFilter):
     """
     Use this only when the node is known to be in all graphs. Else behavior can be undefined!
     """
@@ -119,11 +119,11 @@ class SpecificEdgeLoss(LossAnalyzer):
             loss_results[n] = (loss_tensor[graph0, idx0, idx1,i[2]]).mean()
         return loss_results
     def name(self):
-        return "Specific Edge Loss"
+        return "Specific Edge"
 
-class loss_options():
+class loss_filter_options():
     def __init__(self, data):
-        self.options = {x.__name__:x for x in LossAnalyzer.__subclasses__()}
+        self.options = {x.__name__:x for x in MetricsFilter.__subclasses__()}
         args = {}
         args["edge_classes"] = data.edge_keys
         args["weight_for_changed_edges"] = 0.9

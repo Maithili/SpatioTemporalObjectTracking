@@ -1,4 +1,4 @@
-#!/home/maithili/repos/GraphTrans/.venv/bin/python
+#!./.venv/bin/python
 
 import yaml
 import json
@@ -11,7 +11,7 @@ from pytorch_lightning.loggers import WandbLogger
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset
 from encoders import TimeEncodingOptions
-from analyzers import loss_options
+from filters import loss_filter_options
 from utils import visualize_datapoint
 
 DEFAULT_CONFIG = 'config/default.yaml'
@@ -59,13 +59,13 @@ def run(cfg_in = {}):
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
-    losses = loss_options(data)
+    losses = loss_filter_options(data)
 
-    assert cfg['LOSS'] in losses, 'Loss {} specified in config is invalid'
+    assert cfg['LOSS'] in losses, 'Loss {} specified in config is invalid'.format(cfg['LOSS'])
     train_loss = losses(cfg['LOSS'])
     logging_loss_funcs = []
     for logging_loss in cfg['LOSSES_LOG']:
-        assert logging_loss in losses, 'Loss {} specified in config should be one of {}'.format(logging_loss, losses.keys())
+        assert logging_loss in losses, f'Loss {logging_loss} specified in config should be one of {losses.keys()}'
         logging_loss_funcs.append(losses(logging_loss))
 
     model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],

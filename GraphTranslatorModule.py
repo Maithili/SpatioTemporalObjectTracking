@@ -3,7 +3,7 @@ from torch.nn import functional as F
 from torch import nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
-from analyzers import MeanLoss
+from filters import MeanFilter
 
 THRESH=0.5
 def chebyshev_polynomials(edges, k):
@@ -38,7 +38,7 @@ def chebyshev_polynomials(edges, k):
 
 
 class GraphTranslatorModule(LightningModule):
-    def __init__(self, num_nodes, node_feature_len, edge_feature_len, context_len, train_analyzer=MeanLoss(), logging_analyzers=[], use_spectral_loss=True, num_chebyshev_polys=2, allow_multiple_edge_types=False):
+    def __init__(self, num_nodes, node_feature_len, edge_feature_len, context_len, train_analyzer=MeanFilter(), logging_analyzers=[], use_spectral_loss=True, num_chebyshev_polys=2, allow_multiple_edge_types=False):
         super().__init__()
 
         self.num_nodes  = num_nodes 
@@ -69,6 +69,7 @@ class GraphTranslatorModule(LightningModule):
                                nn.Sigmoid()
                                )
             self.accuracy_loss = nn.BCELoss(reduction='none')
+            self.inference_accuracy = lambda x,y: ((x > 0.5).to(dtype=int) == y).to(dtype=float)
         
         else:
             self.mlp_update = nn.Sequential(
@@ -77,6 +78,7 @@ class GraphTranslatorModule(LightningModule):
                                nn.Linear(20, self.edge_feature_len),
                                )
             self.accuracy_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.permute(0,3,1,2), y.squeeze(-1).long())).unsqueeze(-1)
+            self.inference_accuracy = lambda x,y: (x.argmax(-1) == y.squeeze(-1)).to(dtype=float).unsqueeze(-1)
 
         self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
@@ -141,7 +143,7 @@ class GraphTranslatorModule(LightningModule):
         losses = self.losses(x, y, nodes)
         
         for analyzer in self.logging_analyzers:
-            self.log('Train: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
+            self.log('Train loss : '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
         self.log('Spectral Loss: ',self.map_spectral_loss)
 
         return self.train_analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss
@@ -158,9 +160,14 @@ class GraphTranslatorModule(LightningModule):
 
         x = self(edges_in, nodes, context)
         losses = self.losses(x, y, nodes)
+        accuracy = self.inference_accuracy(x,y)
+        no_change_accuracy = self.inference_accuracy(edges_in,y)
 
         for analyzer in self.logging_analyzers:
-            self.log('Test: '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
+            self.log('Test accuracy : '+analyzer.name(), analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes))
+            self.log('Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(no_change_accuracy, x_edges=edges, y_edges=y, nodes=nodes)/ analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes))
+
+        return self.train_analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss
 
     def losses(self, x, y, nodes=None):
         losses = self.accuracy_loss(x, y)

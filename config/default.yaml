@@ -3,16 +3,16 @@ CLASSES_PATH: 'data/routines_1029/classes.json'
 NAME: 
 DT: 10
 TIME_ENCODING: external
-LOSS: MeanLoss
+LOSS: MeanFilter
 USE_SPECTRAL_LOSS: True
 LOSSES_LOG: 
-  - MeanLoss
-  - ChangedEdgeWeightedLoss
-  - ChangedEdgeLoss
-  - MeanLossWhereExists
-  - EdgeTypeLossWhereExists
-  - SpecificEdgeLoss
-  - DynamicGraphLoss
+  - MeanFilter
+  - ChangedEdgeWeightedFilter
+  - ChangedEdgeFilter
+  - MeanWhereExistsFilter
+  - EdgeTypeWhereExistsFilter
+  - filters.SpecificEdgeFilter
+  - DynamicGraphFilter
 NUM_CHEBYSHEV_POLYS: 2
 EDGES_OF_INTEREST:
 EPOCHS: 10

@@ -3,12 +3,12 @@ CLASSES_PATH: 'data/scripted_routines_1117/fewObjects_definiteActions_definiteTi
 DATA_INFO: 'data/scripted_routines_1117/fewObjects_definiteActions_definiteTimes/info.json'
 NAME: fewObjects_definiteActions_definiteTimes
 TIME_ENCODING: external
-LOSS: MeanLoss
+LOSS: MeanFilter
 LOSSES_LOG: 
-  - MeanLoss
-  - ChangedEdgeLoss
-  - MeanLossWhereExists
-  - DynamicGraphLoss
+  - MeanFilter
+  - ChangedEdgeFilter
+  - MeanWhereExistsFilter
+  - DynamicGraphFilter
 EPOCHS: 500
 TEST_SPLIT: 0.1
 BATCH_SIZE: 10
