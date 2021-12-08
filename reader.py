@@ -10,7 +10,7 @@ from torch.utils.data import WeightedRandomSampler, DataLoader
 
 from utils import visualize_routine
 
-INTERACTIVE = True
+INTERACTIVE = False
 
 class CollateToDict():
     def __init__(self, dict_labels):

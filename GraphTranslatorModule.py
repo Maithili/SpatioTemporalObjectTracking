@@ -141,9 +141,11 @@ class GraphTranslatorModule(LightningModule):
         
         x = self(edges_in, nodes, context)
         losses = self.losses(x, y, nodes)
+        no_change_loss = self.losses(edges_in.to(float), y, nodes)
         
         for analyzer in self.logging_analyzers:
             self.log('Train loss : '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
+            self.log('Train loss (w.r.t no change): '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes)/analyzer(no_change_loss, x_edges=edges, y_edges=y, nodes=nodes))
         self.log('Spectral Loss: ',self.map_spectral_loss)
 
         return self.train_analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss
@@ -165,7 +167,7 @@ class GraphTranslatorModule(LightningModule):
 
         for analyzer in self.logging_analyzers:
             self.log('Test accuracy : '+analyzer.name(), analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes))
-            self.log('Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(no_change_accuracy, x_edges=edges, y_edges=y, nodes=nodes)/ analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes))
+            self.log('Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes)/analyzer(no_change_accuracy, x_edges=edges, y_edges=y, nodes=nodes))
 
         return self.train_analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss
 

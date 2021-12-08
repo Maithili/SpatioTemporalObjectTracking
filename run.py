@@ -110,5 +110,4 @@ if __name__ == '__main__':
     if args.cfg is not None:
         with open(os.path.join('config',args.cfg)+'.yaml') as f:
             cfg.update(yaml.safe_load(f))
-    print(cfg)
     run(cfg=cfg, path=args.path)
