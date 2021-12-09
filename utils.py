@@ -5,6 +5,7 @@ from networkx.classes import graph
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Colormap
+from torch.nn import functional as F
 
 from encoders import time_external
 
@@ -61,9 +62,10 @@ def _visualize_graph(graph_nodes, graph_edges, node_classes, edge_classes, axs=N
     return _draw_graph(G, graphs_per_edge_class, edge_classes, axs=axs, pos=pos, colors=colors)
 
 
-def visualize_datapoint(model, dataloader, node_classes, edge_classes, node_categories = []):
+def visualize_datapoint(model, dataloader, node_classes, edge_classes, node_categories = [], softmax=False):
     data_list = list(dataloader)
     inp = input('Do you want to visualize any output? (y/n)')
+
 
     while(inp == 'y' and len(data_list)>0):
         data = data_list.pop()
@@ -72,20 +74,33 @@ def visualize_datapoint(model, dataloader, node_classes, edge_classes, node_cate
         context = data['context']
         y = data['y']
 
+        if softmax:
+            edges = F.one_hot(edges.squeeze(-1).long(), num_classes = len(edge_classes)+1)
+        
         x_hat = model.forward(edges, nodes, context)
+        loss = float(model.losses(x_hat, y, nodes).mean())
+        
+        if softmax:
+            x_hat = F.softmax(x_hat,dim=-1)
+            edges = edges[:,:,:,1:]
+            x_hat = x_hat[:,:,:,1:]
+            y = F.one_hot(y.squeeze(-1).long(), num_classes = len(edge_classes)+1)[:,:,:,1:]
+        
         if SINGLE_PLOT:
             fig, single_axs = plt.subplots(1,3)
             axs = np.tile(single_axs.reshape(3,1),(1,len(edge_classes)))
         else:
             fig, axs = plt.subplots(3,len(edge_classes))
             axs = axs.reshape(3,len(edge_classes))
+
+        assert list(x_hat.size())==[1,len(node_classes), len(node_classes), len(edge_classes)], f"Wrong output size {x_hat.size()} vs {[1, len(node_classes), len(node_classes), len(edge_classes)]}"
+        assert list(y.size())==[1, len(node_classes), len(node_classes), len(edge_classes)], f"Wrong GT size {x_hat.size()} vs {[1, len(node_classes), len(node_classes), len(edge_classes)]}"
         positions = _visualize_graph(nodes.squeeze(0), edges.squeeze(0), node_classes, edge_classes, axs = axs[0,:], node_categories=node_categories)
         axs[0,0].set_ylabel('Input ')
         _visualize_graph(nodes.squeeze(0), x_hat.squeeze(0), node_classes, edge_classes, axs = axs[1,:], pos=positions, node_categories=node_categories)
         axs[1,0].set_ylabel('Predicted')
         _visualize_graph(nodes.squeeze(0), y.squeeze(0), node_classes, edge_classes, axs = axs[2,:], pos=positions, node_categories=node_categories)
         axs[2,0].set_ylabel('Actual')
-        loss = float(model.losses(x_hat, y, nodes).mean())
         fig.suptitle('Context : '+str(list(context))+'; Loss : '+str(loss))
         
         plt.show()

@@ -10,7 +10,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
 from GraphTranslatorModule import GraphTranslatorModule
-from reader import RoutinesDataset
+from reader import RoutinesDataset, INTERACTIVE
 from encoders import TimeEncodingOptions
 from filters import loss_filter_options
 from utils import visualize_datapoint
@@ -88,7 +88,8 @@ def run(cfg = {}, path = None):
     trainer.test(model, data.get_test_loader())
     
     print('Outputs saved at ',output_dir)
-    # visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys)
+    if INTERACTIVE:
+        visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys, softmax=not cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
 
 
 

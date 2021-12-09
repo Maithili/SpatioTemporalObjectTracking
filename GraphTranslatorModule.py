@@ -167,6 +167,7 @@ class GraphTranslatorModule(LightningModule):
 
         for analyzer in self.logging_analyzers:
             self.log('Test accuracy : '+analyzer.name(), analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes))
+            self.log('No change Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(no_change_accuracy, x_edges=edges, y_edges=y, nodes=nodes))
             self.log('Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes)/analyzer(no_change_accuracy, x_edges=edges, y_edges=y, nodes=nodes))
 
         return self.train_analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss

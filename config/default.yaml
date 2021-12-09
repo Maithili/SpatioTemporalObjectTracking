@@ -9,7 +9,7 @@ LOSSES_LOG:
   - ChangedEdgeFilter
   - MeanWhereExistsFilter
   - EdgeTypeWhereExistsFilter
-  - filters.SpecificEdgeFilter
+  - SpecificEdgeFilter
   - DynamicGraphFilter
 NUM_CHEBYSHEV_POLYS: 2
 EDGES_OF_INTEREST: null
