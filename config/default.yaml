@@ -1,16 +1,16 @@
 NAME: null
 DT: 10
 TIME_ENCODING: external
-LOSS: MeanFilter
 USE_SPECTRAL_LOSS: True
-LOSSES_LOG: 
-  - MeanFilter
-  - ChangedEdgeWeightedFilter
-  - ChangedEdgeFilter
-  - MeanWhereExistsFilter
-  - EdgeTypeWhereExistsFilter
-  - SpecificEdgeFilter
-  - DynamicGraphFilter
+EDGE_LOSS_TRAIN: Mean
+EDGE_LOG: 
+  - Mean
+  - Changed
+  - Dynamic
+  - Selected
+NODE_LOSS_TRAIN: Mean
+NODE_LOG: 
+  - Mean
 NUM_CHEBYSHEV_POLYS: 2
 EDGES_OF_INTEREST: null
 EPOCHS: 10

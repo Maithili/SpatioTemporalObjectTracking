@@ -12,7 +12,7 @@ from pytorch_lightning.loggers import WandbLogger
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE
 from encoders import TimeEncodingOptions
-from filters import loss_filter_options
+from filters import OutputFilters
 from utils import visualize_datapoint
 
 DEFAULT_CONFIG = 'config/default.yaml'
@@ -63,21 +63,13 @@ def run(cfg = {}, path = None):
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
-    losses = loss_filter_options(data)
-
-    assert cfg['LOSS'] in losses, 'Loss {} specified in config is invalid'.format(cfg['LOSS'])
-    train_loss = losses(cfg['LOSS'])
-    logging_loss_funcs = []
-    for logging_loss in cfg['LOSSES_LOG']:
-        assert logging_loss in losses, f'Loss {logging_loss} specified in config should be one of {losses.keys()}'
-        logging_loss_funcs.append(losses(logging_loss))
+    output_filters = OutputFilters(data, train_filter_edges = cfg['EDGE_LOSS_TRAIN'], train_filter_nodes = cfg['NODE_LOSS_TRAIN'], log_filters_edges = cfg['EDGE_LOG'], log_filters_nodes = cfg['NODE_LOG'])
 
     model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                               node_feature_len=data.params['n_len'],
                               edge_feature_len=data.params['e_len'],
                               context_len=data.params['c_len'],
-                              train_analyzer=train_loss, 
-                              logging_analyzers=logging_loss_funcs,
+                              output_filters=output_filters, 
                               use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
                               num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
                               allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'])

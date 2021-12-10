@@ -47,7 +47,7 @@ class RoutinesCollateFn():
             return idx, t * self.dt
         i,time_i = interp_time(i) 
         j,time_j = interp_time(j)
-        return  (edges[i], nodes, self.time_encoder(time_i), self.time_encoder(time_j), edges[j])
+        return  (edges[i], nodes[i], self.time_encoder(time_i), self.time_encoder(time_j), edges[j], nodes[j])
 
     def get_datapoint_choose(self, nodes, edges, times):
         i = random.randrange(0, len(times))
@@ -55,22 +55,24 @@ class RoutinesCollateFn():
         while (i>=j):
             i = random.randrange(0, len(times))
             j = random.randrange(0, len(times))
-        return  (edges[i], nodes, self.time_encoder(times[i] * self.dt), self.time_encoder(times[j] * self.dt), edges[j])
+        return  (edges[i], nodes[i], self.time_encoder(times[i] * self.dt), self.time_encoder(times[j] * self.dt), edges[j], nodes[j])
 
     def __call__(self, routine_list):
         data = {}
         data['edges'] = torch.Tensor()
         data['nodes'] = torch.Tensor()
         data['context'] = torch.Tensor()
-        data['y'] = torch.Tensor()
+        data['y_edges'] = torch.Tensor()
+        data['y_nodes'] = torch.Tensor()
 
         for routine in routine_list:
-            e1, n, c1, c2, e2 = self.get_datapoint(routine[0], routine[1], routine[2])
+            e1, n1, c1, c2, e2, n2 = self.get_datapoint(routine[0], routine[1], routine[2])
             data['edges'] = torch.cat([data['edges'], e1.unsqueeze(0)], dim=0)
-            data['nodes'] = torch.cat([data['nodes'], n.unsqueeze(0)], dim=0)
+            data['nodes'] = torch.cat([data['nodes'], n1.unsqueeze(0)], dim=0)
             c = torch.cat([c1,c2], dim=-1)
             data['context'] = torch.cat([data['context'], c.unsqueeze(0)], dim=0)
-            data['y'] = torch.cat([data['y'], e2.unsqueeze(0)], dim=0)
+            data['y_edges'] = torch.cat([data['y_edges'], e2.unsqueeze(0)], dim=0)
+            data['y_nodes'] = torch.cat([data['y_nodes'], n2.unsqueeze(0)], dim=0)
 
         return data
 
@@ -79,7 +81,7 @@ class DataSplit():
         self.time_encoder = time_encoder
         self.dt = dt
         self.data = self.make_pairwise(data)
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y'])
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes'])
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx: int):
@@ -103,8 +105,9 @@ class DataSplit():
                 if data_idx < 0:
                     continue
                 if prev_edges is not None:
-                    pairwise_samples.append((prev_edges, nodes, self.time_encoder((t-1) * self.dt), edges[data_idx]))
+                    pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder((t-1) * self.dt), edges[data_idx], nodes[data_idx]))
                 prev_edges = edges[data_idx]
+                prev_nodes = nodes[data_idx]
         random.shuffle(pairwise_samples)
         return pairwise_samples
 
@@ -222,17 +225,16 @@ class RoutinesDataset():
         nodes = graphs[0]['nodes']
         node_ids = [n['id'] for n in nodes]
 
-        node_features = [None] * len(nodes)
-        for i,nid in enumerate(nodes):
-            node_features[i] = self.encode_node(nid)
-        node_features = np.array(node_features)
-
+        node_features = np.zeros((len(graphs), len(nodes), len(self.node_keys)))
         if self.params['allow_multiple_edge_types']:
             edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)))
         else:
             edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)+1))
         for i,graph in enumerate(graphs):
+            graph_nodes = [[node for node in graph['nodes'] if node['id'] == nid][0] for nid in node_ids]
             for j,n1 in enumerate(node_ids):
+                node_features[i,j,:] = self.encode_node(graph_nodes[j])
+                node_features = np.array(node_features)
                 for k,n2 in enumerate(node_ids):
                     if self.params['only_dynamic_edges'] and (n1 in self.static_nodes) and (n2 in self.static_nodes):
                         continue
