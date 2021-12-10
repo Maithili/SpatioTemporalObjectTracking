@@ -230,7 +230,7 @@ class RoutinesDataset():
         if self.params['allow_multiple_edge_types']:
             edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)))
         else:
-            edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), 1))
+            edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)+1))
         for i,graph in enumerate(graphs):
             for j,n1 in enumerate(node_ids):
                 for k,n2 in enumerate(node_ids):
@@ -249,12 +249,12 @@ class RoutinesDataset():
         if self.params['allow_multiple_edge_types']:
             encoding = [1 if valid(c) else 0 for c in self.edge_keys]
         else:
-            encoding = -1
+            encoding = np.zeros(1+len(self.edge_keys))
             for i,c in enumerate(self.edge_keys):
                 if valid(c):
-                    encoding = i
+                    encoding[1+i] = 1
                     break
-            encoding += 1
+            encoding[0] = 1-sum(encoding[1:])
         return encoding
 
     def encode_node(self, node):

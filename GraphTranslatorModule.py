@@ -61,24 +61,25 @@ class GraphTranslatorModule(LightningModule):
                              nn.Linear(20, self.hidden_influence_dim),
                              )
 
+        ## edge update layers
         if allow_multiple_edge_types:
-            self.mlp_update = nn.Sequential(
+            self.mlp_update_edges = nn.Sequential(
                                nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.context_len, 20),
                                nn.ReLU(),
                                nn.Linear(20, self.edge_feature_len),
                                nn.Sigmoid()
                                )
-            self.accuracy_loss = nn.BCELoss(reduction='none')
+            self.accuracy_loss_edge = nn.BCELoss(reduction='none')
             self.inference_accuracy = lambda x,y: ((x > 0.5).to(dtype=int) == y).to(dtype=float)
         
         else:
-            self.mlp_update = nn.Sequential(
+            self.mlp_update_edges = nn.Sequential(
                                nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.context_len, 20),
                                nn.ReLU(),
-                               nn.Linear(20, self.edge_feature_len),
+                               nn.Linear(20, self.edge_feature_len)
                                )
-            self.accuracy_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.permute(0,3,1,2), y.squeeze(-1).long())).unsqueeze(-1)
-            self.inference_accuracy = lambda x,y: (x.argmax(-1) == y.squeeze(-1)).to(dtype=float).unsqueeze(-1)
+            self.accuracy_loss_edge = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.permute(0,3,1,2), y.argmax(-1).long())).unsqueeze(-1)
+            self.inference_accuracy = lambda x,y: (x.argmax(-1) == y.argmax(-1)).to(dtype=float).unsqueeze(-1)
 
         self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
@@ -113,11 +114,11 @@ class GraphTranslatorModule(LightningModule):
                   self.num_nodes, 
                   self.num_nodes, 
                   self.hidden_influence_dim])
-        x = self.message_collection(x, edges, context)
+        x = self.message_collection_edges(x, edges, context)
         x = x.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
                   self.hidden_influence_dim*4 + self.edge_feature_len + self.context_len])
-        x = self.mlp_update(x).view(size=[batch_size, 
+        x = self.mlp_update_edges(x).view(size=[batch_size, 
                                           self.num_nodes, 
                                           self.num_nodes, 
                                           self.edge_feature_len])
@@ -134,18 +135,17 @@ class GraphTranslatorModule(LightningModule):
         nodes = batch['nodes']
         context = batch['context']
         y = batch['y']
-        if not self.allow_multiple_edge_types:
-            edges_in = F.one_hot(edges.squeeze(-1).long(), num_classes = self.edge_feature_len)
-        else:
-            edges_in = edges
         
-        x = self(edges_in, nodes, context)
+        x = self(edges, nodes, context)
         losses = self.losses(x, y, nodes)
-        no_change_loss = self.losses(edges_in.to(float), y, nodes)
+        no_change_loss = self.losses(edges.to(float), y, nodes)
         
+        analyzer_edges = edges.argmax(-1).unsqueeze(-1)
+        analyzer_y = y.argmax(-1).unsqueeze(-1)
+
         for analyzer in self.logging_analyzers:
-            self.log('Train loss : '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
-            self.log('Train loss (w.r.t no change): '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes)/analyzer(no_change_loss, x_edges=edges, y_edges=y, nodes=nodes))
+            self.log('Train loss : '+analyzer.name(), analyzer(losses, x_edges=analyzer_edges, y_edges=analyzer_y, nodes=nodes))
+            self.log('Train loss (w.r.t no change): '+analyzer.name(), analyzer(losses, x_edges=analyzer_edges, y_edges=analyzer_y, nodes=nodes)/analyzer(no_change_loss, x_edges=analyzer_edges, y_edges=analyzer_y, nodes=nodes))
         self.log('Spectral Loss: ',self.map_spectral_loss)
 
         return self.train_analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss
@@ -155,25 +155,24 @@ class GraphTranslatorModule(LightningModule):
         nodes = batch['nodes']
         context = batch['context']
         y = batch['y']
-        if not self.allow_multiple_edge_types:
-            edges_in = F.one_hot(edges.squeeze(-1).long(), num_classes = self.edge_feature_len)
-        else:
-            edges_in = edges
 
-        x = self(edges_in, nodes, context)
+        x = self(edges, nodes, context)
         losses = self.losses(x, y, nodes)
         accuracy = self.inference_accuracy(x,y)
-        no_change_accuracy = self.inference_accuracy(edges_in,y)
+        no_change_accuracy = self.inference_accuracy(edges,y)
+        
+        analyzer_edges = edges.argmax(-1).unsqueeze(-1)
+        analyzer_y = y.argmax(-1).unsqueeze(-1)
 
         for analyzer in self.logging_analyzers:
-            self.log('Test accuracy : '+analyzer.name(), analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes))
-            self.log('No change Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(no_change_accuracy, x_edges=edges, y_edges=y, nodes=nodes))
-            self.log('Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes)/analyzer(no_change_accuracy, x_edges=edges, y_edges=y, nodes=nodes))
+            self.log('Test accuracy : '+analyzer.name(), analyzer(accuracy, x_edges=analyzer_edges, y_edges=analyzer_y, nodes=nodes))
+            self.log('No change Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(no_change_accuracy, x_edges=analyzer_edges, y_edges=analyzer_y, nodes=nodes))
+            self.log('Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(accuracy, x_edges=analyzer_edges, y_edges=analyzer_y, nodes=nodes)/analyzer(no_change_accuracy, x_edges=analyzer_edges, y_edges=analyzer_y, nodes=nodes))
 
         return self.train_analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss
 
     def losses(self, x, y, nodes=None):
-        losses = self.accuracy_loss(x, y)
+        losses = self.accuracy_loss_edge(x, y)
         if self.use_spectral_loss:
             self.map_spectral_loss = self.graph_regularized_spectral_loss(x, nodes)
         return losses
@@ -192,7 +191,7 @@ class GraphTranslatorModule(LightningModule):
         assert(concatenated.size()[3]==self.node_feature_len*2+self.edge_feature_len)
         return concatenated
 
-    def message_collection(self, edge_influence, edges, context):
+    def message_collection_edges(self, edge_influence, edges, context):
         # context = batch_size x context_length
         # edge_influence : batch_size x from_nodes x to_nodes x hidden_influence_dim
 
