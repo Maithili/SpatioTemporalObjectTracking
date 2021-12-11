@@ -39,7 +39,9 @@ def chebyshev_polynomials(edges, k):
 class GraphTranslatorModule(LightningModule):
     def __init__(self, 
                 num_nodes, 
-                node_feature_len, 
+                node_feature_len,
+                node_class_len,
+                node_state_len,
                 edge_feature_len, 
                 context_len, 
                 output_filters, 
@@ -52,6 +54,9 @@ class GraphTranslatorModule(LightningModule):
 
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
+        self.node_class_len = node_class_len
+        self.node_state_len = node_state_len
+        assert node_feature_len == node_class_len + node_state_len, f"Node class and state lengths should sum up to feature length, i.e. {node_class_len} + {node_state_len} == {node_feature_len}"
         self.edge_feature_len = edge_feature_len
         self.context_len = context_len
         self.output_filters = output_filters
@@ -96,9 +101,9 @@ class GraphTranslatorModule(LightningModule):
                                nn.ReLU(),
                                nn.Linear(20, self.node_feature_len)
                                )
-        self.accuracy_loss_node = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.permute(0,2,1), y.argmax(-1).long())).unsqueeze(-1)
+        self.node_class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.argmax(-1).long())
+        self.node_state_loss = lambda xs,ys: ((nn.MSELoss(reduction='none')(torch.tanh(xs), ys)) * torch.abs(ys)).sum(-1) / (torch.abs(ys)).sum(-1)
         self.inference_accuracy_node = lambda x,y: (x.argmax(-1) == y.argmax(-1)).to(dtype=float).unsqueeze(-1)
-
 
         self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
@@ -171,7 +176,7 @@ class GraphTranslatorModule(LightningModule):
         edges_pred, nodes_pred = self(edges, nodes, context)
         edge_losses, node_losses = self.losses(edges_pred, nodes_pred, y_edges, y_nodes, nodes)
         
-        self.output_filters.set_data_info(x_edges = edges.argmax(-1).unsqueeze(-1), y_edges = y_edges.argmax(-1).unsqueeze(-1), nodes=nodes)
+        self.output_filters.set_data_info(x_edges = edges.argmax(-1).unsqueeze(-1), y_edges = y_edges.argmax(-1).unsqueeze(-1), node_classes=nodes[:,:,:self.node_class_len])
         self.log("Train loss", self.output_filters.logging_metrics(edge_losses, node_losses))
 
         return self.output_filters.train_metric(edge_losses, node_losses) + self.map_spectral_loss
@@ -187,17 +192,18 @@ class GraphTranslatorModule(LightningModule):
         edge_accuracy = self.inference_accuracy_edge(edges_pred,y_edges)
         node_accuracy = self.inference_accuracy_edge(nodes_pred,y_nodes)
         
-        self.output_filters.set_data_info(x_edges=edges.argmax(-1).unsqueeze(-1), y_edges=y_edges.argmax(-1).unsqueeze(-1), nodes=nodes)
+        self.output_filters.set_data_info(x_edges=edges.argmax(-1).unsqueeze(-1), y_edges=y_edges.argmax(-1).unsqueeze(-1), node_classes=nodes[:,:,:self.node_class_len])
         self.log("Test accuracy", self.output_filters.logging_metrics(edge_accuracy, node_accuracy))
 
         return self.output_filters.train_metric(edge_accuracy, node_accuracy) + self.map_spectral_loss
 
     def losses(self, edges_pred, nodes_pred, edges_actual, nodes_actual, nodes_in):
         edge_losses = self.accuracy_loss_edge(edges_pred, edges_actual)
-        node_losses = self.accuracy_loss_node(nodes_pred, nodes_actual)
+        node_class_losses = self.node_class_loss(nodes_pred[:,:,:self.node_class_len], nodes_actual[:,:,:self.node_class_len])
+        node_state_losses = self.node_state_loss(nodes_pred[:,:,self.node_class_len:], nodes_actual[:,:,self.node_class_len:])
         if self.use_spectral_loss:
             self.map_spectral_loss = self.graph_regularized_spectral_loss(edges_pred, nodes_in)
-        return edge_losses, node_losses
+        return edge_losses, (node_class_losses + node_state_losses)
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=1e-3)

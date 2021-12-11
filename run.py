@@ -43,7 +43,6 @@ def run(cfg = {}, path = None):
                            sample_data=cfg['SAMPLE_DATA'],
                            batch_size=cfg['BATCH_SIZE'],
                            avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
-                           sequential_prediction=cfg['SEQUENTIAL_PREDICTION'],
                            only_dynamic_edges = cfg['ONLY_DYNAMIC_EDGES'],
                            allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'],
                            ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])
@@ -67,6 +66,8 @@ def run(cfg = {}, path = None):
 
     model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                               node_feature_len=data.params['n_len'],
+                              node_class_len=data.params['n_class_len'],
+                              node_state_len=data.params['n_state_len'],
                               edge_feature_len=data.params['e_len'],
                               context_len=data.params['c_len'],
                               output_filters=output_filters, 

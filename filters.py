@@ -52,7 +52,7 @@ class OutputFilters():
         return mean_loss_at_change
 
     def dynamic_edges_mean(self, data):
-        nodes = self.data_info["nodes"]
+        nodes = self.data_info["node_classes"]
         nodes_in_graphs = (nodes).argmax(axis=-1)
         dyn_idx = np.logical_not(np.isin(nodes_in_graphs, self.static_info["static_node_ids"]))
         loss_dyn_idx = np.fromfunction(lambda b,i,j :  np.logical_or(dyn_idx[b,i], dyn_idx[b,j]), shape=nodes.shape, dtype=int)
@@ -61,7 +61,7 @@ class OutputFilters():
         return dyn_loss
 
     def selected_edge_losses(self, data):
-        nodes_in_graphs = (self.data_info["nodes"]).argmax(axis=-1)
+        nodes_in_graphs = (self.data_info["node_classes"]).argmax(axis=-1)
         loss_results = {}
         for n,i in self.idxs.items():
             graph0, idx0 = np.argwhere(nodes_in_graphs == i[0])

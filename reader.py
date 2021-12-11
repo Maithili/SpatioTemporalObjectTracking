@@ -1,12 +1,10 @@
 import json
 import numpy as np
-from os import path as osp
 from math import ceil, floor
-from numpy.core.fromnumeric import argmax
 import torch
 import random
 from encoders import time_sine_cosine
-from torch.utils.data import WeightedRandomSampler, DataLoader
+from torch.utils.data import DataLoader
 
 from utils import visualize_routine
 
@@ -24,63 +22,11 @@ class CollateToDict():
                 data[label]=torch.cat([data[label], tensor.unsqueeze(0)], dim=0)
         return data
 
-
-class RoutinesCollateFn():
-    def __init__(self, time_encoder, dt, sampling=True):
-        self.time_encoder = time_encoder
-        self.dt = dt
-        if sampling:
-            self.get_datapoint = self.get_datapoint_interpolate
-        else:
-            self.get_datapoint = self.get_datapoint_choose
-
-    def get_datapoint_interpolate(self, nodes, edges, times):
-        i = random.random()*len(times)
-        j = random.random()*len(times)
-        times = torch.cat([times, torch.Tensor([times[-1]+ (times[-1] - times[-2])])])
-        if i > j:
-            i,j = j,i
-        def interp_time(sample):
-            idx = floor(sample)
-            f = sample - idx
-            t = f * times[idx+1] + (1-f) * times[idx]
-            return idx, t * self.dt
-        i,time_i = interp_time(i) 
-        j,time_j = interp_time(j)
-        return  (edges[i], nodes[i], self.time_encoder(time_i), self.time_encoder(time_j), edges[j], nodes[j])
-
-    def get_datapoint_choose(self, nodes, edges, times):
-        i = random.randrange(0, len(times))
-        j = random.randrange(0, len(times))
-        while (i>=j):
-            i = random.randrange(0, len(times))
-            j = random.randrange(0, len(times))
-        return  (edges[i], nodes[i], self.time_encoder(times[i] * self.dt), self.time_encoder(times[j] * self.dt), edges[j], nodes[j])
-
-    def __call__(self, routine_list):
-        data = {}
-        data['edges'] = torch.Tensor()
-        data['nodes'] = torch.Tensor()
-        data['context'] = torch.Tensor()
-        data['y_edges'] = torch.Tensor()
-        data['y_nodes'] = torch.Tensor()
-
-        for routine in routine_list:
-            e1, n1, c1, c2, e2, n2 = self.get_datapoint(routine[0], routine[1], routine[2])
-            data['edges'] = torch.cat([data['edges'], e1.unsqueeze(0)], dim=0)
-            data['nodes'] = torch.cat([data['nodes'], n1.unsqueeze(0)], dim=0)
-            c = torch.cat([c1,c2], dim=-1)
-            data['context'] = torch.cat([data['context'], c.unsqueeze(0)], dim=0)
-            data['y_edges'] = torch.cat([data['y_edges'], e2.unsqueeze(0)], dim=0)
-            data['y_nodes'] = torch.cat([data['y_nodes'], n2.unsqueeze(0)], dim=0)
-
-        return data
-
 class DataSplit():
-    def __init__(self, data, time_encoder, dt):
+    def __init__(self, routines, time_encoder, dt):
         self.time_encoder = time_encoder
         self.dt = dt
-        self.data = self.make_pairwise(data)
+        self.data = self.make_pairwise(routines)
         self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes'])
     def __len__(self):
         return len(self.data)
@@ -88,9 +34,9 @@ class DataSplit():
         return self.data[idx]
     def sampler(self):
         return None
-    def make_pairwise(self, data):
+    def make_pairwise(self, routines):
         pairwise_samples = []
-        for routine in data:
+        for routine in routines:
             nodes, edges, times = routine
             assert times[0]==min(times), 'Times need to be monotonically increasing. First element should be min.'
             assert times[-1]==max(times), 'Times need to be monotonically increasing. Last element should be max.'
@@ -110,23 +56,6 @@ class DataSplit():
                 prev_nodes = nodes[data_idx]
         random.shuffle(pairwise_samples)
         return pairwise_samples
-
-class DataSplitRoutines():
-    def __init__(self, data, time_encoder, dt, sampling, samples_per_routine):
-        self.data = data
-        self.samples_per_routine = samples_per_routine
-        self.collate_fn = RoutinesCollateFn(time_encoder, dt=dt, sampling=sampling)
-    def __len__(self):
-        return len(self.data) * self.samples_per_routine
-    def __getitem__(self, idx: int):
-        return self.data[idx]
-    def sampler(self):
-        graphs_in_routine = torch.Tensor([len(d[1]) for d in self.data])
-        weights = graphs_in_routine/graphs_in_routine.sum()
-        return WeightedRandomSampler(weights=weights,
-                            num_samples=len(self),
-                            replacement=True
-                            )
     
 
 class RoutinesDataset():
@@ -139,7 +68,6 @@ class RoutinesDataset():
                  sample_data = True,
                  batch_size = 1,
                  avg_samples_per_routine = 1,
-                 sequential_prediction = True,
                  only_dynamic_edges = False,
                  allow_multiple_edge_types=False,
                  ignore_close_edges=True):
@@ -163,12 +91,8 @@ class RoutinesDataset():
         # Split the data into train and test
         random.shuffle(self._alldata)
         num_test = int(round(test_perc*len(self._alldata)))
-        if sequential_prediction:
-            self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'])
-            self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'])
-        else:
-            self.test = DataSplitRoutines(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.params['sample_data'], self.params['avg_samples_per_routine'])
-            self.train = DataSplitRoutines(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.params['sample_data'], self.params['avg_samples_per_routine'])
+        self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'])
+        self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'])
         print(len(self._alldata),' routines found in dataset.')
         print(len(self.train),' examples in train split.')
         print(len(self.test),' examples in test split.')
@@ -177,10 +101,7 @@ class RoutinesDataset():
         model_data = self.test.collate_fn([self.test[0]])
         self.params['n_nodes'] = model_data['edges'].size()[1]
         self.params['n_len'] = model_data['nodes'].size()[-1]
-        if self.params['allow_multiple_edge_types']:
-            self.params['e_len'] = len(self.edge_keys)
-        else:
-            self.params['e_len'] = len(self.edge_keys) + 1
+        self.params['e_len'] = model_data['edges'].size()[-1]
         self.params['c_len'] = model_data['context'].size()[-1]
 
     def read_data(self):
@@ -213,6 +134,12 @@ class RoutinesDataset():
         self.node_keys = [n['id'] for n in classes['nodes']]
         self.node_classes = [n['class_name'] for n in classes['nodes']]
         self.node_categories = [n['category'] for n in classes['nodes']]
+        self.node_states = {}
+        for i,state_pairs in enumerate(classes['node_states']):
+            self.node_states[state_pairs[0]] = np.zeros(len(classes['node_states']))
+            self.node_states[state_pairs[0]][i] = -1
+            self.node_states[state_pairs[1]] = np.zeros(len(classes['node_states']))
+            self.node_states[state_pairs[1]][i] = 1
         self.edge_keys = classes['edges']
         if self.params['ignore_close_edges']:
             self.edge_keys.remove("CLOSE")
@@ -225,7 +152,10 @@ class RoutinesDataset():
         nodes = graphs[0]['nodes']
         node_ids = [n['id'] for n in nodes]
 
-        node_features = np.zeros((len(graphs), len(nodes), len(self.node_keys)))
+        self.params['n_class_len'] = len(self.node_keys)
+        self.params['n_state_len'] = int(round(len(self.node_states)/2))
+        node_feature_len = self.params['n_class_len'] + self.params['n_state_len']
+        node_features = np.zeros((len(graphs), len(nodes), node_feature_len))
         if self.params['allow_multiple_edge_types']:
             edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)))
         else:
@@ -234,7 +164,6 @@ class RoutinesDataset():
             graph_nodes = [[node for node in graph['nodes'] if node['id'] == nid][0] for nid in node_ids]
             for j,n1 in enumerate(node_ids):
                 node_features[i,j,:] = self.encode_node(graph_nodes[j])
-                node_features = np.array(node_features)
                 for k,n2 in enumerate(node_ids):
                     if self.params['only_dynamic_edges'] and (n1 in self.static_nodes) and (n2 in self.static_nodes):
                         continue
@@ -260,7 +189,9 @@ class RoutinesDataset():
         return encoding
 
     def encode_node(self, node):
-        return np.array(self.node_keys) == node['id']
+        node_class = np.array(self.node_keys) == node['id']
+        node_state = sum([self.node_states[s] for s in node['states']])
+        return np.concatenate((node_class,node_state))
 
     def get_train_loader(self):
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
