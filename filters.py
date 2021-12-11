@@ -34,9 +34,14 @@ class OutputFilters():
         edge_loss = self.train_filter['edges'](edges_tensor)
         return self.node_weight * node_loss + (1 - self.node_weight) * edge_loss
 
-    def logging_metrics(self, edges_tensor, nodes_tensor, prefix = ''):
-        metrics = {prefix+"Nodes "+f[0]: f[1](nodes_tensor) for f in self.log_filters['nodes']}
-        metrics.update({prefix+"Edges "+f[0]: f[1](edges_tensor) for f in self.log_filters['edges']})
+    def logging_metrics(self, edges_tensor=None, node_class_tensor=None, node_state_tensor=None, prefix = ''):
+        metrics = {}
+        if node_class_tensor is not None:
+            metrics.update({prefix+"Node Class "+f[0]: f[1](node_class_tensor) for f in self.log_filters['nodes']})
+        if node_state_tensor is not None:
+            metrics.update({prefix+"Node State "+f[0]: f[1](node_state_tensor) for f in self.log_filters['nodes']})
+        if edges_tensor is not None:
+            metrics.update({prefix+"Edges "+f[0]: f[1](edges_tensor) for f in self.log_filters['edges']})
         return metrics
 
     def mean(self, data):

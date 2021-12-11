@@ -103,7 +103,8 @@ class GraphTranslatorModule(LightningModule):
                                )
         self.node_class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.argmax(-1).long())
         self.node_state_loss = lambda xs,ys: ((nn.MSELoss(reduction='none')(torch.tanh(xs), ys)) * torch.abs(ys)).sum(-1) / (torch.abs(ys)).sum(-1)
-        self.inference_accuracy_node = lambda x,y: (x.argmax(-1) == y.argmax(-1)).to(dtype=float).unsqueeze(-1)
+        self.inference_accuracy_node_class = lambda xc,yc: (xc.argmax(-1) == yc.argmax(-1)).to(dtype=float)
+        self.inference_accuracy_node_state = lambda xs,ys: ((torch.round(torch.tanh(xs)).to(int) == ys.to(int)).to(dtype=float) * torch.abs(ys)).sum(-1) / (torch.abs(ys)).sum(-1)
 
         self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
@@ -174,12 +175,12 @@ class GraphTranslatorModule(LightningModule):
         y_nodes = batch['y_nodes']
         
         edges_pred, nodes_pred = self(edges, nodes, context)
-        edge_losses, node_losses = self.losses(edges_pred, nodes_pred, y_edges, y_nodes, nodes)
+        edge_losses, node_class_losses, node_state_losses = self.losses(edges_pred, nodes_pred, y_edges, y_nodes, nodes)
         
         self.output_filters.set_data_info(x_edges = edges.argmax(-1).unsqueeze(-1), y_edges = y_edges.argmax(-1).unsqueeze(-1), node_classes=nodes[:,:,:self.node_class_len])
-        self.log("Train loss", self.output_filters.logging_metrics(edge_losses, node_losses))
+        self.log("Train loss", self.output_filters.logging_metrics(edge_losses, node_class_losses, node_state_losses))
 
-        return self.output_filters.train_metric(edge_losses, node_losses) + self.map_spectral_loss
+        return self.output_filters.train_metric(edge_losses, node_class_losses+node_state_losses) + self.map_spectral_loss
 
     def test_step(self, batch, batch_idx):
         edges = batch['edges']
@@ -189,13 +190,12 @@ class GraphTranslatorModule(LightningModule):
         y_nodes = batch['y_nodes']
 
         edges_pred, nodes_pred = self(edges, nodes, context)
-        edge_accuracy = self.inference_accuracy_edge(edges_pred,y_edges)
-        node_accuracy = self.inference_accuracy_edge(nodes_pred,y_nodes)
-        
-        self.output_filters.set_data_info(x_edges=edges.argmax(-1).unsqueeze(-1), y_edges=y_edges.argmax(-1).unsqueeze(-1), node_classes=nodes[:,:,:self.node_class_len])
-        self.log("Test accuracy", self.output_filters.logging_metrics(edge_accuracy, node_accuracy))
+        edge_accuracy, node_class_accuracy, node_state_accuracy = self.inference_accuracy(edges_pred, nodes_pred, y_edges, y_nodes)
 
-        return self.output_filters.train_metric(edge_accuracy, node_accuracy) + self.map_spectral_loss
+        self.output_filters.set_data_info(x_edges=edges.argmax(-1).unsqueeze(-1), y_edges=y_edges.argmax(-1).unsqueeze(-1), node_classes=nodes[:,:,:self.node_class_len])
+        self.log("Test accuracy", self.output_filters.logging_metrics(edge_accuracy, node_class_accuracy, node_state_accuracy))
+
+        return self.output_filters.train_metric(edge_accuracy, node_class_accuracy+node_state_accuracy) + self.map_spectral_loss
 
     def losses(self, edges_pred, nodes_pred, edges_actual, nodes_actual, nodes_in):
         edge_losses = self.accuracy_loss_edge(edges_pred, edges_actual)
@@ -203,7 +203,13 @@ class GraphTranslatorModule(LightningModule):
         node_state_losses = self.node_state_loss(nodes_pred[:,:,self.node_class_len:], nodes_actual[:,:,self.node_class_len:])
         if self.use_spectral_loss:
             self.map_spectral_loss = self.graph_regularized_spectral_loss(edges_pred, nodes_in)
-        return edge_losses, (node_class_losses + node_state_losses)
+        return edge_losses, node_class_losses, node_state_losses
+
+    def inference_accuracy(self, edges_pred, nodes_pred, edges_actual, nodes_actual):
+        edge_accuracy = self.inference_accuracy_edge(edges_pred,edges_actual)
+        node_class_accuracy = self.inference_accuracy_node_class(nodes_pred[:,:,:self.node_class_len],nodes_actual[:,:,:self.node_class_len])
+        node_state_accuracy = self.inference_accuracy_node_state(nodes_pred[:,:,self.node_class_len:],nodes_actual[:,:,self.node_class_len:])
+        return edge_accuracy, node_class_accuracy, node_state_accuracy
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=1e-3)
