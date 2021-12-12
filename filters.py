@@ -2,6 +2,25 @@ from logging import log
 import torch
 import numpy as np
 
+def changingNodesPrecisionRecall(edges_in, edges_out, edges_gt, allow_multiple_edge_types, threshold = 0.5):
+    def edge_exists(e):
+        # Binary per edge type
+        if allow_multiple_edge_types:
+            return ((e > threshold).sum(-1) > 0).to(float)
+        # Softmax situation
+        else:
+            return (e.argmax(-1)>0).to(float)
+        
+    existing_edges_in = edge_exists(edges_in)
+    changes_out = torch.abs(edge_exists(edges_out) - existing_edges_in)
+    changes_gt = torch.abs(edge_exists(edges_gt) - existing_edges_in)
+    true_positive = (changes_out * changes_gt).sum()
+    eps = 10e-5
+    pred_positive = changes_out.sum()
+    gt_positive = changes_gt.sum()
+    # precision, recall
+    return true_positive/gt_positive, true_positive/pred_positive
+
 class OutputFilters():
     def __init__(self, data, train_filter_nodes="mean", train_filter_edges="mean", log_filters_nodes=[], log_filters_edges=[], train_weight_nodes = 0.5):
         self.static_info = {}

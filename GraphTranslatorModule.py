@@ -3,6 +3,7 @@ from torch.nn import functional as F
 from torch import nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
+from filters import changingNodesPrecisionRecall
 
 THRESH=0.5
 def chebyshev_polynomials(edges, k):
@@ -180,6 +181,10 @@ class GraphTranslatorModule(LightningModule):
         self.output_filters.set_data_info(x_edges = edges.argmax(-1).unsqueeze(-1), y_edges = y_edges.argmax(-1).unsqueeze(-1), node_classes=nodes[:,:,:self.node_class_len])
         self.log("Train loss", self.output_filters.logging_metrics(edge_losses, node_class_losses, node_state_losses))
 
+        prec, rec = changingNodesPrecisionRecall(edges_in = edges, edges_out = edges_pred, edges_gt = y_edges, allow_multiple_edge_types = self.allow_multiple_edge_types)
+        self.log("Train Precison : ",prec)
+        self.log("Train Recall : ",rec)
+
         return self.output_filters.train_metric(edge_losses, node_class_losses+node_state_losses) + self.map_spectral_loss
 
     def test_step(self, batch, batch_idx):
@@ -194,6 +199,10 @@ class GraphTranslatorModule(LightningModule):
 
         self.output_filters.set_data_info(x_edges=edges.argmax(-1).unsqueeze(-1), y_edges=y_edges.argmax(-1).unsqueeze(-1), node_classes=nodes[:,:,:self.node_class_len])
         self.log("Test accuracy", self.output_filters.logging_metrics(edge_accuracy, node_class_accuracy, node_state_accuracy))
+
+        prec, rec = changingNodesPrecisionRecall(edges_in = edges, edges_out = edges_pred, edges_gt = y_edges, allow_multiple_edge_types = self.allow_multiple_edge_types)
+        self.log("Test Precison : ",prec)
+        self.log("Test Recall : ",rec)
 
         return self.output_filters.train_metric(edge_accuracy, node_class_accuracy+node_state_accuracy) + self.map_spectral_loss
 
