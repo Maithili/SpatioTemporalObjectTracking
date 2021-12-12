@@ -49,7 +49,8 @@ class GraphTranslatorModule(LightningModule):
                 use_spectral_loss=True, 
                 num_chebyshev_polys=2, 
                 allow_multiple_edge_types=False,
-                node_accuracy_weight=0.5):
+                node_accuracy_weight=0.5,
+                learn_nodes=False):
         
         super().__init__()
 
@@ -104,8 +105,12 @@ class GraphTranslatorModule(LightningModule):
                                )
         self.node_class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.argmax(-1).long())
         self.node_state_loss = lambda xs,ys: ((nn.MSELoss(reduction='none')(torch.tanh(xs), ys)) * torch.abs(ys)).sum(-1) / (torch.abs(ys)).sum(-1)
-        self.inference_accuracy_node_class = lambda xc,yc: (xc.argmax(-1) == yc.argmax(-1)).to(dtype=float)
-        self.inference_accuracy_node_state = lambda xs,ys: ((torch.round(torch.tanh(xs)).to(int) == ys.to(int)).to(dtype=float) * torch.abs(ys)).sum(-1) / (torch.abs(ys)).sum(-1)
+        if learn_nodes:
+            self.inference_accuracy_node_class = lambda xc,yc: (xc.argmax(-1) == yc.argmax(-1)).to(dtype=float)
+            self.inference_accuracy_node_state = lambda xs,ys: ((torch.round(torch.tanh(xs)).to(int) == ys.to(int)).to(dtype=float) * torch.abs(ys)).sum(-1) / (torch.abs(ys)).sum(-1)
+        else:
+            self.inference_accuracy_node_class = lambda xc,yc: torch.zeros_like(xc.sum(-1))
+            self.inference_accuracy_node_state = lambda xs,ys: torch.zeros_like(xs.sum(-1))
 
         self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         

@@ -73,7 +73,8 @@ def run(cfg = {}, path = None):
                               output_filters=output_filters, 
                               use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
                               num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
-                              allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
+                              allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'],
+                              learn_nodes=cfg['LEARN_NODES'])
 
     trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
 
