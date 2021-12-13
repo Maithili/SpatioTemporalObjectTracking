@@ -1,10 +1,6 @@
 TIME_ENCODING: external
 EPOCHS: 100
 EDGE_LOSS_TRAIN: Mean
-EDGE_LOG: 
-  - Mean
-  - Changed
-  - Dynamic
 NODE_LOSS_TRAIN: Mean
 NODE_LOG: 
   - Mean

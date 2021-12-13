@@ -5,9 +5,13 @@ USE_SPECTRAL_LOSS: True
 EDGE_LOSS_TRAIN: Mean
 EDGE_LOG: 
   - Mean
-  - Changed
+  - Changes (Predicted)
   - Dynamic
-  - Selected
+  - Precision
+  - Recall
+  - TP Mean
+  - FP Mean
+  - TN Mean
 NODE_LOSS_TRAIN: Mean
 NODE_LOG: 
   - Mean

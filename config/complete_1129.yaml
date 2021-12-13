@@ -1,12 +1,12 @@
 DATA_PATH: 'data/complete1129/sample.json'
 CLASSES_PATH: 'data/complete1129/classes.json'
 DATA_INFO: 'data/complete1129/info.json'
-NAME: SM_NoClose_withWeekendBit
+NAME: complete
 TIME_ENCODING: clock_time_with_weekend_bit
 EDGE_LOSS_TRAIN: Mean
 EDGE_LOG: 
   - Mean
-  - Changed
+  - Changes
   - Static
   - Dynamic
 NODE_LOSS_TRAIN: Mean

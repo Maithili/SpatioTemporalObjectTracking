@@ -2,24 +2,6 @@ from logging import log
 import torch
 import numpy as np
 
-def changingNodesPrecisionRecall(edges_in, edges_out, edges_gt, allow_multiple_edge_types, threshold = 0.5):
-    def edge_exists(e):
-        # Binary per edge type
-        if allow_multiple_edge_types:
-            return ((e > threshold).sum(-1) > 0).to(float)
-        # Softmax situation
-        else:
-            return (e.argmax(-1)>0).to(float)
-        
-    existing_edges_in = edge_exists(edges_in)
-    changes_out = torch.abs(edge_exists(edges_out) - existing_edges_in)
-    changes_gt = torch.abs(edge_exists(edges_gt) - existing_edges_in)
-    true_positive = (changes_out * changes_gt).sum()
-    eps = 10e-5
-    pred_positive = changes_out.sum()
-    gt_positive = changes_gt.sum()
-    # precision, recall
-    return true_positive/gt_positive, true_positive/pred_positive
 
 class OutputFilters():
     def __init__(self, data, train_filter_nodes="mean", train_filter_edges="mean", log_filters_nodes=[], log_filters_edges=[], train_weight_nodes = 0.5):
@@ -34,9 +16,14 @@ class OutputFilters():
         }
         self.filter_options_edges = {
             "Mean": self.mean,
-            "Changed": self.changed_edges_mean,
+            "Changes (Predicted)": self.changed_edges_mean,
             "Dynamic": self.dynamic_edges_mean,
             "Selected": self.selected_edge_losses,
+            "Precision": self.precision,
+            "Recall": self.recall,
+            "TP Mean": self.tp_mean,
+            "FP Mean": self.fp_mean,
+            "TN Mean": self.tn_mean,
         }
         self.train_filter = {'nodes':self.filter_options_nodes[train_filter_nodes], 
                              'edges':self.filter_options_edges[train_filter_edges]}
@@ -47,6 +34,29 @@ class OutputFilters():
     
     def set_data_info(self, **kwargs):
         self.data_info = kwargs
+        def edge_exists(e):
+            # Binary per edge type
+            if self.data_info["pred_edges"].size()[-1] > 1:
+                return ((e > 0.5).sum(-1) > 0).to(float)
+            # Softmax situation
+            else:
+                return (e.squeeze() > 0).to(float)
+        
+        existing_edges_in = edge_exists(self.data_info["x_edges"])
+        changes_out = ((torch.abs(edge_exists(self.data_info["pred_edges"]) - existing_edges_in)).sum(-1) > 0).unsqueeze(-1).unsqueeze(-1)
+        changes_gt = ((torch.abs(edge_exists(self.data_info["y_edges"]) - existing_edges_in)).sum(-1) > 0).unsqueeze(-1).unsqueeze(-1)
+        true_positive_nodes = torch.logical_and(changes_out, changes_gt)
+        true_positive = true_positive_nodes.sum()
+        pred_positive = changes_out.sum()
+        gt_positive = changes_gt.sum()
+
+        self.precision = true_positive/gt_positive
+        self.recall = true_positive/pred_positive
+
+        repeat_size = [1, 1, self.data_info["pred_edges"].size()[2], self.data_info["pred_edges"].size()[3]]
+        self.mask_tp = true_positive_nodes.repeat(repeat_size)
+        self.mask_fp = torch.logical_xor(changes_out, true_positive_nodes).repeat(repeat_size)
+        self.mask_tn = torch.logical_xor(changes_gt, true_positive_nodes).repeat(repeat_size)
 
     def train_metric(self, edges_tensor, nodes_tensor):
         node_loss = self.train_filter['nodes'](nodes_tensor)
@@ -93,3 +103,18 @@ class OutputFilters():
             assert all(graph0==graph1), "Do NOT use SpecificEdgeLoss when the nodes do not exist in every graph!"
             loss_results[n] = (data[graph0, idx0, idx1,i[2]]).mean()
         return loss_results
+
+    def precision(self, data):
+        return self.precision
+
+    def recall(self, data):
+        return self.recall
+
+    def tp_mean(self, data):
+        return data[self.mask_tp].mean()
+
+    def fp_mean(self, data):
+        return data[self.mask_fp].mean()
+
+    def tn_mean(self, data):
+        return data[self.mask_tn].mean()
