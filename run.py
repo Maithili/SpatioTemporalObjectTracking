@@ -44,7 +44,7 @@ def run(cfg = {}, path = None):
                            batch_size=cfg['BATCH_SIZE'],
                            avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
                            only_dynamic_edges = cfg['ONLY_DYNAMIC_EDGES'],
-                           allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'],
+                           tree_formuation = cfg['TREE_FORMULATION'],
                            ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])
 
     output_dir = os.path.join('logs',cfg['NAME'])
@@ -62,7 +62,6 @@ def run(cfg = {}, path = None):
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
-    output_filters = OutputFilters(data, train_filter_edges = cfg['EDGE_LOSS_TRAIN'], train_filter_nodes = cfg['NODE_LOSS_TRAIN'], log_filters_edges = cfg['EDGE_LOG'], log_filters_nodes = cfg['NODE_LOG'])
 
     model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                               node_feature_len=data.params['n_len'],
@@ -70,10 +69,9 @@ def run(cfg = {}, path = None):
                               node_state_len=data.params['n_state_len'],
                               edge_feature_len=data.params['e_len'],
                               context_len=data.params['c_len'],
-                              output_filters=output_filters, 
                               use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
                               num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
-                              allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'],
+                              tree_formulation=cfg['TREE_FORMULATION'],
                               learn_nodes=cfg['LEARN_NODES'])
 
     trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
@@ -82,8 +80,8 @@ def run(cfg = {}, path = None):
     trainer.test(model, data.get_test_loader())
     
     print('Outputs saved at ',output_dir)
-    if INTERACTIVE:
-        visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys, softmax=not cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
+    # if INTERACTIVE:
+    #     visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys, softmax=not cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
 
 
 

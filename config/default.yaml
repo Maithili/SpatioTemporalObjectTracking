@@ -2,19 +2,6 @@ NAME: null
 DT: 10
 TIME_ENCODING: external
 USE_SPECTRAL_LOSS: True
-EDGE_LOSS_TRAIN: Mean
-EDGE_LOG: 
-  - Mean
-  - Changes (Predicted)
-  - Dynamic
-  - Precision
-  - Recall
-  - TP Mean
-  - FP Mean
-  - TN Mean
-NODE_LOSS_TRAIN: Mean
-NODE_LOG: 
-  - Mean
 NUM_CHEBYSHEV_POLYS: 2
 EDGES_OF_INTEREST: null
 EPOCHS: 10
@@ -23,7 +10,7 @@ SAMPLE_DATA: True
 BATCH_SIZE: 10
 AVG_SAMPLES_PER_ROUTINE: 10
 ONLY_DYNAMIC_EDGES: False
-ALLOW_MULTIPLE_EDGE_TYPES: False
+TREE_FORMULATION: True
 IGNORE_CLOSE_EDGES: True
 DATA_INFO: null
 LEARN_NODES: False

@@ -10,6 +10,23 @@ from utils import visualize_routine
 
 INTERACTIVE = False
 
+def _densify(edges):
+    dense_edges = edges.copy()
+    for _ in range(edges.shape[-1]):
+        new_edges = np.matmul(dense_edges, edges)
+        new_edges = new_edges * (dense_edges==0)
+        if (new_edges==0).all():
+            break
+        dense_edges += new_edges
+    return dense_edges
+
+def _sparsify(edges):
+    dense_edges = _densify(edges.copy())
+    remove = np.matmul(dense_edges, dense_edges)
+    sparse_edges = dense_edges * (remove==0).astype(int)
+    assert (sparse_edges.sum(axis=-1)).max() == 1, "Matrix not really a tree"
+    return sparse_edges
+
 class CollateToDict():
     def __init__(self, dict_labels):
         self.dict_labels = dict_labels
@@ -69,7 +86,7 @@ class RoutinesDataset():
                  batch_size = 1,
                  avg_samples_per_routine = 1,
                  only_dynamic_edges = False,
-                 allow_multiple_edge_types=False,
+                 tree_formuation=False,
                  ignore_close_edges=True):
 
         self.data_path = data_path
@@ -82,7 +99,7 @@ class RoutinesDataset():
         self.params['batch_size'] = batch_size
         self.params['avg_samples_per_routine'] = avg_samples_per_routine
         self.params['only_dynamic_edges'] = only_dynamic_edges
-        self.params['allow_multiple_edge_types'] = allow_multiple_edge_types
+        self.params['tree_formuation'] = tree_formuation
         self.params['ignore_close_edges'] = ignore_close_edges
 
         # Read data
@@ -101,7 +118,7 @@ class RoutinesDataset():
         model_data = self.test.collate_fn([self.test[0]])
         self.params['n_nodes'] = model_data['edges'].size()[1]
         self.params['n_len'] = model_data['nodes'].size()[-1]
-        self.params['e_len'] = model_data['edges'].size()[-1]
+        self.params['e_len'] = 1
         self.params['c_len'] = model_data['context'].size()[-1]
 
     def read_data(self):
@@ -156,10 +173,7 @@ class RoutinesDataset():
         self.params['n_state_len'] = int(round(len(self.node_states)/2))
         node_feature_len = self.params['n_class_len'] + self.params['n_state_len']
         node_features = np.zeros((len(graphs), len(nodes), node_feature_len))
-        if self.params['allow_multiple_edge_types']:
-            edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)))
-        else:
-            edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), len(self.edge_keys)+1))
+        edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), 1))
         for i,graph in enumerate(graphs):
             graph_nodes = [[node for node in graph['nodes'] if node['id'] == nid][0] for nid in node_ids]
             for j,n1 in enumerate(node_ids):
@@ -168,7 +182,8 @@ class RoutinesDataset():
                     if self.params['only_dynamic_edges'] and (n1 in self.static_nodes) and (n2 in self.static_nodes):
                         continue
                     edge_features[i,j,k,:]= self.encode_edge(self.get_edges(graph, n1, n2))
-
+            if self.params['tree_formuation']:
+                edge_features[i,:,:,0] = _sparsify(edge_features[i,:,:,0])
         return torch.Tensor(node_features), torch.Tensor(edge_features)
 
     def get_edges(self, graph, n_id1, n_id2):
@@ -177,15 +192,11 @@ class RoutinesDataset():
 
     def encode_edge(self, edges):
         valid = lambda rel: rel in [e['relation_type'] for e in edges]
-        if self.params['allow_multiple_edge_types']:
-            encoding = [1 if valid(c) else 0 for c in self.edge_keys]
-        else:
-            encoding = np.zeros(1+len(self.edge_keys))
-            for i,c in enumerate(self.edge_keys):
-                if valid(c):
-                    encoding[1+i] = 1
-                    break
-            encoding[0] = 1-sum(encoding[1:])
+        encoding = 0
+        for c in self.edge_keys:
+            if valid(c):
+                encoding = 1
+                break
         return encoding
 
     def encode_node(self, node):
