@@ -1,6 +1,7 @@
 import json
 import numpy as np
 from math import ceil, floor
+from numpy.core.numeric import zeros_like
 import torch
 import random
 from encoders import time_sine_cosine
@@ -40,11 +41,12 @@ class CollateToDict():
         return data
 
 class DataSplit():
-    def __init__(self, routines, time_encoder, dt):
+    def __init__(self, routines, time_encoder, dt, active_edges_func):
         self.time_encoder = time_encoder
         self.dt = dt
+        self.active_edges_func = active_edges_func
         self.data = self.make_pairwise(routines)
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes'])
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask'])
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx: int):
@@ -68,7 +70,8 @@ class DataSplit():
                 if data_idx < 0:
                     continue
                 if prev_edges is not None:
-                    pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder((t-1) * self.dt), edges[data_idx], nodes[data_idx]))
+                    edges_mask = self.active_edges_func(nodes[data_idx])
+                    pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder((t-1) * self.dt), edges[data_idx], nodes[data_idx], edges_mask))
                 prev_edges = edges[data_idx]
                 prev_nodes = nodes[data_idx]
         random.shuffle(pairwise_samples)
@@ -85,7 +88,7 @@ class RoutinesDataset():
                  sample_data = True,
                  batch_size = 1,
                  avg_samples_per_routine = 1,
-                 only_dynamic_edges = False,
+                 only_seen_edges = False,
                  tree_formuation=False,
                  ignore_close_edges=True):
 
@@ -98,7 +101,7 @@ class RoutinesDataset():
         self.params['sample_data'] = sample_data
         self.params['batch_size'] = batch_size
         self.params['avg_samples_per_routine'] = avg_samples_per_routine
-        self.params['only_dynamic_edges'] = only_dynamic_edges
+        self.params['only_seen_edges'] = only_seen_edges
         self.params['tree_formuation'] = tree_formuation
         self.params['ignore_close_edges'] = ignore_close_edges
 
@@ -108,8 +111,8 @@ class RoutinesDataset():
         # Split the data into train and test
         random.shuffle(self._alldata)
         num_test = int(round(test_perc*len(self._alldata)))
-        self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'])
-        self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'])
+        self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.get_active_edges)
+        self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.get_active_edges)
         print(len(self._alldata),' routines found in dataset.')
         print(len(self.train),' examples in train split.')
         print(len(self.test),' examples in test split.')
@@ -118,7 +121,6 @@ class RoutinesDataset():
         model_data = self.test.collate_fn([self.test[0]])
         self.params['n_nodes'] = model_data['edges'].size()[1]
         self.params['n_len'] = model_data['nodes'].size()[-1]
-        self.params['e_len'] = 1
         self.params['c_len'] = model_data['context'].size()[-1]
 
     def read_data(self):
@@ -151,6 +153,12 @@ class RoutinesDataset():
         self.node_keys = [n['id'] for n in classes['nodes']]
         self.node_classes = [n['class_name'] for n in classes['nodes']]
         self.node_categories = [n['category'] for n in classes['nodes']]
+        # Diagonal nodes are always irrelevant
+        self.active_edges = 1 - np.eye(len(classes['nodes']))
+        # Room nodes don't need parents
+        self.active_edges[np.where(np.array(self.node_categories) == "Rooms"),:] = 0
+        self.seen_edges = np.zeros_like(self.active_edges)
+
         self.node_states = {}
         for i,state_pairs in enumerate(classes['node_states']):
             self.node_states[state_pairs[0]] = np.zeros(len(classes['node_states']))
@@ -173,17 +181,19 @@ class RoutinesDataset():
         self.params['n_state_len'] = int(round(len(self.node_states)/2))
         node_feature_len = self.params['n_class_len'] + self.params['n_state_len']
         node_features = np.zeros((len(graphs), len(nodes), node_feature_len))
-        edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids), 1))
+        edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids)))
         for i,graph in enumerate(graphs):
             graph_nodes = [[node for node in graph['nodes'] if node['id'] == nid][0] for nid in node_ids]
             for j,n1 in enumerate(node_ids):
                 node_features[i,j,:] = self.encode_node(graph_nodes[j])
                 for k,n2 in enumerate(node_ids):
-                    if self.params['only_dynamic_edges'] and (n1 in self.static_nodes) and (n2 in self.static_nodes):
-                        continue
-                    edge_features[i,j,k,:]= self.encode_edge(self.get_edges(graph, n1, n2))
+                    edge_features[i,j,k]= self.encode_edge(self.get_edges(graph, n1, n2))
+                    if self.params['only_seen_edges'] and edge_features[i,j,k] == 1:
+                        self.seen_edges[self.get_class_from_id(n1), self.get_class_from_id(n2)] = 1
             if self.params['tree_formuation']:
-                edge_features[i,:,:,0] = _sparsify(edge_features[i,:,:,0])
+                edge_features[i,:,:] = _sparsify(edge_features[i,:,:])
+        if self.params['only_seen_edges']:
+            self.active_edges[self.seen_edges == 0] = 0
         return torch.Tensor(node_features), torch.Tensor(edge_features)
 
     def get_edges(self, graph, n_id1, n_id2):
@@ -203,6 +213,17 @@ class RoutinesDataset():
         node_class = np.array(self.node_keys) == node['id']
         node_state = sum([self.node_states[s] for s in node['states']])
         return np.concatenate((node_class,node_state))
+
+    def get_class_from_id(self, id):
+        return self.node_keys.index(id)
+
+    def get_active_edges(self, enc_list):
+        node_classes = [enc[:len(self.node_keys)].argmax() for enc in enc_list]
+        active_edges = np.zeros((len(node_classes), len(node_classes)))
+        for i,n1 in enumerate(node_classes):
+            for j,n2 in enumerate(node_classes):
+                active_edges[i,j] = self.active_edges[n1,n2]
+        return torch.Tensor(active_edges)
 
     def get_train_loader(self):
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)

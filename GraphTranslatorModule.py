@@ -35,32 +35,29 @@ def chebyshev_polynomials(edges, k):
 
     return polynomials
 
-def _get_masks(gt_tensor, inference_tensor):
+def _get_masks(gt_tensor, output_tensor):
     masks = {}
-    masks['tp'] = torch.logical_and(gt_tensor, inference_tensor)
-    masks['fp'] = torch.logical_and(torch.logical_not(gt_tensor), inference_tensor)
-    masks['fn'] = torch.logical_and(gt_tensor, torch.logical_not(inference_tensor))
-    masks['tn'] = torch.logical_and(torch.logical_not(gt_tensor), torch.logical_not(inference_tensor))
+    masks['correct'] = gt_tensor == output_tensor
+    masks['wrong'] = gt_tensor != output_tensor
     return masks
 
-def _classification_metrics(gt_tensor, output_tensor, inference_tensor, loss_tensor):
-    masks = _get_masks(gt_tensor, inference_tensor)
-    result = {'eval':{} ,'losses':{}}
-    result['eval']['accuracy'] = (masks['tp'].sum()+masks['tn'].sum())/torch.numel(gt_tensor)
-    result['eval']['precision'] = (masks['tp'].sum())/(masks['fn'].sum() + (masks['tp'].sum()))
-    result['eval']['recall'] = (masks['tp'].sum())/(masks['fp'].sum() + (masks['tp'].sum()))
+def _classification_metrics(gt_tensor, output_tensor, loss_tensor):
+    masks = _get_masks(gt_tensor, output_tensor)
+    result = {'accuracy':None ,'losses':{}}
+    result['accuracy'] = (masks['correct'].sum())/torch.numel(gt_tensor)
     result['losses']['mean'] = loss_tensor.mean()
-    result['losses']['tp'] = loss_tensor[masks['tp']].sum()/masks['tp'].sum()
-    result['losses']['fp'] = loss_tensor[masks['fp']].sum()/masks['fp'].sum()
-    result['losses']['fn'] = loss_tensor[masks['fn']].sum()/masks['fn'].sum()
-    result['losses']['tn'] = loss_tensor[masks['tn']].sum()/masks['tn'].sum()
+    result['losses']['correct'] = loss_tensor[masks['correct']].sum()/masks['correct'].sum()
+    result['losses']['wrong'] = loss_tensor[masks['wrong']].sum()/masks['wrong'].sum()
     return result
 
-def _binary_metrics(input_tensor, output_tensor, inference_tensor):
+def _binary_metrics(gtt_tensor, output_tensor, loss_tensor):
     return {}
 
-def evaluate(input, output, gt, losses, inferences):
-    location_results = _classification_metrics(gt['location'], output['location'], inferences['location'], losses['location'])
+def evaluate(gt, losses, output, evaluate_node):
+    gt_tensor = gt['location'][evaluate_node]
+    output_tensor = output['location'][evaluate_node]
+    loss_tensor = losses['location'][evaluate_node]
+    location_results = _classification_metrics(gt_tensor, output_tensor, loss_tensor)
     return {'location':location_results}
 
 class GraphTranslatorModule(LightningModule):
@@ -69,7 +66,6 @@ class GraphTranslatorModule(LightningModule):
                 node_feature_len,
                 node_class_len,
                 node_state_len,
-                edge_feature_len, 
                 context_len, 
                 use_spectral_loss=True, 
                 num_chebyshev_polys=2, 
@@ -84,7 +80,6 @@ class GraphTranslatorModule(LightningModule):
         self.node_class_len = node_class_len
         self.node_state_len = node_state_len
         assert node_feature_len == node_class_len + node_state_len, f"Node class and state lengths should sum up to feature length, i.e. {node_class_len} + {node_state_len} == {node_feature_len}"
-        self.edge_feature_len = edge_feature_len
         self.context_len = context_len
         self.node_accuracy_weight = node_accuracy_weight
 
@@ -95,19 +90,19 @@ class GraphTranslatorModule(LightningModule):
         self.hidden_influence_dim = 20
         
         self.mlp_influence = nn.Sequential(
-                             nn.Linear(self.node_feature_len*2+self.edge_feature_len, 20),
+                             nn.Linear(self.node_feature_len*2 + 1, 20),
                              nn.ReLU(),
                              nn.Linear(20, self.hidden_influence_dim),
                              )
 
         ## edge update layers
         self.mlp_update_edges = nn.Sequential(
-                               nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.context_len, 20),
+                               nn.Linear(self.hidden_influence_dim*4 + 1 + self.context_len, 20),
                                nn.ReLU(),
-                               nn.Linear(20, self.edge_feature_len)
+                               nn.Linear(20, 1)
                                )
-        self.accuracy_loss_edge = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.squeeze(-1).permute(0,2,1), y.squeeze(-1).long()))
-        self.inference_edge = lambda x: x.squeeze(-1).argmax(-1)
+        self.location_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.squeeze(-1).permute(0,2,1), y.squeeze(-1).long()))
+        self.inference_location = lambda x: x.squeeze(-1).argmax(-1)
 
         ## node update layers
         self.mlp_update_nodes = nn.Sequential(
@@ -116,13 +111,13 @@ class GraphTranslatorModule(LightningModule):
                                nn.Linear(20, self.node_feature_len)
                                )
         if learn_nodes:
-            self.node_class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.long())
-            self.node_state_loss = lambda xs,ys: ((nn.MSELoss(reduction='none')(torch.tanh(xs), ys)) * torch.abs(ys)).sum(-1) / (torch.abs(ys)).sum(-1)
+            self.class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.long())
+            self.state_loss = lambda xs,ys: ((nn.MSELoss(reduction='none')(torch.tanh(xs), ys)) * torch.abs(ys)).sum(-1) / (torch.abs(ys)).sum(-1)
         else:
-            self.node_class_loss = lambda xc,yc: torch.zeros_like(xc.sum(-1))
-            self.node_state_loss = lambda xs,ys: torch.zeros_like(xs.sum(-1))
-        self.inference_node_class = lambda xc: xc.argmax(-1)
-        self.inference_node_state = lambda xs: torch.round(torch.tanh(xs)).to(int)
+            self.class_loss = lambda xc,yc: torch.zeros_like(xc.sum(-1))
+            self.state_loss = lambda xs,ys: torch.zeros_like(xs.sum(-1))
+        self.inference_class = lambda xc: xc.argmax(-1)
+        self.inference_state = lambda xs: torch.round(torch.tanh(xs)).to(int)
 
         self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
@@ -137,20 +132,19 @@ class GraphTranslatorModule(LightningModule):
         """
 
         batch_size, num_nodes, node_feature_len = nodes.size()
-        batch_size_e, num_f_nodes, num_t_nodes, edge_feature_len = edges.size()
+        batch_size_e, num_f_nodes, num_t_nodes = edges.size()
         
         # Sanity check input dimensions
         assert batch_size == batch_size_e, "Different edge and node batch sizes"
-        assert self.edge_feature_len == edge_feature_len, (str(self.edge_feature_len) +'!='+ str(edge_feature_len))
         assert self.node_feature_len == node_feature_len, (str(self.node_feature_len) +'!='+ str(node_feature_len))
         assert self.num_nodes == num_nodes, (str(self.num_nodes) +'!='+ str(num_nodes))
         assert self.num_nodes == num_f_nodes, (str(self.num_nodes) +'!='+ str(num_f_nodes))
         assert self.num_nodes == num_t_nodes, (str(self.num_nodes) +'!='+ str(num_t_nodes))
 
-        x = self.collate_edges(edges=edges, nodes=nodes)
+        x = self.collate_edges(edges=edges.unsqueeze(-1), nodes=nodes)
         x = x.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.node_feature_len * 2 + self.edge_feature_len])
+                  self.node_feature_len * 2 + 1])
         x = self.mlp_influence(x)
         x = x.view(
             size=[batch_size, 
@@ -159,14 +153,13 @@ class GraphTranslatorModule(LightningModule):
                   self.hidden_influence_dim])
 
         ## edge update
-        xe = self.message_collection_edges(x, edges, context)
+        xe = self.message_collection_edges(x, edges.unsqueeze(-1), context)
         xe = xe.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.hidden_influence_dim*4 + self.edge_feature_len + self.context_len])
+                  self.hidden_influence_dim*4 + 1 + self.context_len])
         xe = self.mlp_update_edges(xe).view(size=[batch_size, 
                                           self.num_nodes, 
-                                          self.num_nodes, 
-                                          self.edge_feature_len])
+                                          self.num_nodes])
 
         ## node update
         xn = self.message_collection_nodes(x, nodes, context)
@@ -185,43 +178,56 @@ class GraphTranslatorModule(LightningModule):
         context = batch['context']
         y_edges = batch['y_edges']
         y_nodes = batch['y_nodes']
+        dyn_edges = batch['dynamic_edges_mask']
         
         edges_pred, nodes_pred = self(edges, nodes, context)
+        assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
+        edges_pred[dyn_edges == 0] = -float("inf")
+        evaluate_node = dyn_edges.sum(-1) > 0
 
-        input = {'class':nodes[:,:,:self.node_class_len], 'state':nodes[:,:,self.node_class_len:], 'location':self.inference_edge(edges)}
-        output_probs = {'class':nodes_pred[:,:,:self.node_class_len], 'state':nodes_pred[:,:,self.node_class_len:], 'location':edges_pred}
-        gt = {'class':y_nodes[:,:,:self.node_class_len], 'state':y_nodes[:,:,self.node_class_len:], 'location':self.inference_edge(y_edges)}
-        losses = self.losses(output_probs, gt)
-        inferences = self.inference(output_probs, gt)
+        input = {'class':self.inference_class(nodes[:,:,:self.node_class_len]), 
+                 'state':nodes[:,:,self.node_class_len:], 
+                 'location':self.inference_location(edges)}
+                 
+        output_probs = {'class':nodes_pred[:,:,:self.node_class_len], 
+                        'state':nodes_pred[:,:,self.node_class_len:], 
+                        'location':edges_pred}
+
+        gt = {'class':self.inference_class(y_nodes[:,:,:self.node_class_len]), 
+              'state':y_nodes[:,:,self.node_class_len:], 
+              'location':self.inference_location(y_edges)}
+
+        losses = {'class':self.class_loss(output_probs['class'], gt['class']),
+                  'state':self.state_loss(output_probs['state'], gt['state']),
+                  'location':self.location_loss(output_probs['location'], gt['location'])}
+
+        output = {'class':self.inference_class(output_probs['class']),
+                  'state':self.inference_state(output_probs['state']),
+                  'location':self.inference_location(output_probs['location'])}
         
-        eval = evaluate(input, output_probs, gt, losses, inferences)
+        # for result, name in zip([input, gt, losses, output], ['input', 'gt', 'losses', 'output']):
+        #     assert list(result['class'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())
+        #     assert list(result['location'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())
 
-        return eval['location']
+        # assert list(output_probs['class'].size())[:-1] == list(nodes.size())[:-1], 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), nodes.size())
+        # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
+
+        eval = evaluate(gt, losses, output, evaluate_node)
+
+        return eval['location'], {'input':input, 'output_probs':output_probs, 'gt':gt, 'losses':losses, 'output':output, 'evaluate_node':evaluate_node}
 
 
     def training_step(self, batch, batch_idx):
-        eval = self.step(batch)
-        self.log('Train performance',eval['eval'])
+        eval,_ = self.step(batch)
+        self.log('Train accuracy',eval['accuracy'])
         self.log('Train losses',eval['losses'])
         return eval['losses']['mean'] + self.map_spectral_loss
 
     def test_step(self, batch, batch_idx):
-        eval = self.step(batch)
-        self.log('Test performance',eval['eval'])
+        eval,_ = self.step(batch)
+        self.log('Test accuracy',eval['accuracy'])
         self.log('Test losses',eval['losses'])
         return 
-
-    def losses(self, output, gt):
-        location_losses = self.accuracy_loss_edge(output['location'], gt['location'])
-        class_losses = self.node_class_loss(output['class'], gt['state'])
-        state_losses = self.node_state_loss(output['class'], gt['state'])
-        return {'location':location_losses, 'class':class_losses, 'state':state_losses}
-
-    def inference(self, output, gt):
-        location_inference = self.inference_edge(output['location'])
-        class_inference = self.inference_node_class(output['class'])
-        state_inference = self.inference_node_state(output['class'])
-        return {'location':location_inference, 'class':class_inference, 'state':state_inference}
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=1e-3)
@@ -234,7 +240,7 @@ class GraphTranslatorModule(LightningModule):
         assert(len(concatenated.size())==4)
         assert(concatenated.size()[1]==self.num_nodes)
         assert(concatenated.size()[2]==self.num_nodes)
-        assert(concatenated.size()[3]==self.node_feature_len*2+self.edge_feature_len)
+        assert(concatenated.size()[3]==self.node_feature_len*2+1)
         return concatenated
 
     def message_collection_edges(self, edge_influence, edges, context):
@@ -257,7 +263,7 @@ class GraphTranslatorModule(LightningModule):
         assert(len(message_to_edge.size())==4)
         assert(message_to_edge.size()[1]==self.num_nodes)
         assert(message_to_edge.size()[2]==self.num_nodes)
-        assert(message_to_edge.size()[3]==self.hidden_influence_dim*4+self.edge_feature_len+self.context_len)
+        assert(message_to_edge.size()[3]==self.hidden_influence_dim*4+1+self.context_len)
         return message_to_edge
 
     def message_collection_nodes(self, edge_influence, nodes, context):

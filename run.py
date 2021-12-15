@@ -43,7 +43,7 @@ def run(cfg = {}, path = None):
                            sample_data=cfg['SAMPLE_DATA'],
                            batch_size=cfg['BATCH_SIZE'],
                            avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
-                           only_dynamic_edges = cfg['ONLY_DYNAMIC_EDGES'],
+                           only_seen_edges = cfg['ONLY_SEEN_EDGES'],
                            tree_formuation = cfg['TREE_FORMULATION'],
                            ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])
 
@@ -67,7 +67,6 @@ def run(cfg = {}, path = None):
                               node_feature_len=data.params['n_len'],
                               node_class_len=data.params['n_class_len'],
                               node_state_len=data.params['n_state_len'],
-                              edge_feature_len=data.params['e_len'],
                               context_len=data.params['c_len'],
                               use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
                               num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
@@ -81,7 +80,7 @@ def run(cfg = {}, path = None):
     
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:
-        visualize_datapoint(model, data.get_single_example_test_loader(), data.node_classes)
+        visualize_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
 
 
 

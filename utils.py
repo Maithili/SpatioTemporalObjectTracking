@@ -20,6 +20,8 @@ category_colors = {
     "placable_objects": "#C99DA3"
 }
 
+node_colors_by_active = ["#C99DA3", "#996888"]
+
 days = ["Monday", 'Tuesday', "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 def _get_node_info(graph_nodes, node_classes):
@@ -36,11 +38,13 @@ def _draw_graph(G, ax=None, pos=None, colors = "#996888"):
     return pos
 
 
-def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, node_categories=[]):
+def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, node_categories=[], node_color=None):
     G = nx.DiGraph()
     graph_node_names = _get_node_info(graph_nodes, node_classes)
     colors = "#996888"
-    if node_categories:
+    if node_color is not None:
+        colors = node_color
+    elif node_categories:
         categories = _get_node_info(graph_nodes, node_categories)
         colors = [category_colors[c] for c in categories]
     G.add_nodes_from(graph_node_names)
@@ -53,30 +57,41 @@ def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, 
     return _draw_graph(G, ax=ax, pos=pos, colors=colors)
 
 
-def visualize_datapoint(model, dataloader, node_classes, node_categories = []):
+def visualize_datapoint(model, dataloader, node_classes, node_categories = [], use_output_nodes = False):
     data_list = list(dataloader)
     inp = input('Do you want to visualize any output? (y/n)')
 
-
     while(inp == 'y' and len(data_list)>0):
         data = data_list.pop()
-        edges = data['edges']
-        nodes = data['nodes']
-        context = data['context']
-        y = data['y_edges']
-
-        x_hat, _ = model.forward(edges, nodes, context)
-        # loss = float(model.losses(x_hat, y, nodes).mean())
+        eval, details = model.step(data)
         
-        fig, axs = plt.subplots(3)
+        colors = [node_colors_by_active[act] for act in details['evaluate_node'].squeeze(0)]
 
-        positions = _visualize_graph(nodes.squeeze(0), edges.squeeze(0).squeeze(-1), node_classes, ax = axs[0], node_categories=node_categories)
-        axs[0].set_title('Input ')
-        _visualize_graph(nodes.squeeze(0), x_hat.squeeze(0).squeeze(-1), node_classes, ax = axs[1], pos=positions, node_categories=node_categories)
-        axs[1].set_title('Predicted')
-        _visualize_graph(nodes.squeeze(0), y.squeeze(0).squeeze(-1), node_classes, ax = axs[2], pos=positions, node_categories=node_categories)
-        axs[2].set_title('Actual')
-        fig.suptitle('Context : '+str(list(context))) #+'; Loss : '+str(loss))
+        fig, axs = plt.subplots(2,2)
+
+        ax = axs[0][0]
+        positions = _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['input']['location'].squeeze(0)), node_classes, ax = ax, node_categories=node_categories, node_color=colors)
+        ax.set_title('Input')
+
+        ax = axs[1][0]
+        if use_output_nodes:
+            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        else:
+            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        ax.set_title('Predicted (probabilities)')
+            
+        ax = axs[1][1]
+        if use_output_nodes:
+            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        else:
+            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        ax.set_title('Predicted')
+        
+        ax = axs[0][1]
+        _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), F.one_hot(details['gt']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        ax.set_title('Expected')
+
+        fig.suptitle('Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy']))
         
         plt.show()
         # plt.savefig('temp.jpg')
@@ -84,7 +99,7 @@ def visualize_datapoint(model, dataloader, node_classes, node_categories = []):
 
 
 
-def visualize_routine(routine, dt=10, sparsify=True, remove_close = True):
+def visualize_routine(routine, dt=10, sparsify=False):
     graphs = routine['graphs']
     times = routine['times']
     num_plots = len(graphs)
@@ -100,10 +115,9 @@ def visualize_routine(routine, dt=10, sparsify=True, remove_close = True):
         G = nx.DiGraph()
         G.add_nodes_from(node_ids)
         for edge in graph['edges']:
-            if remove_close and edge['relation_type'] == "CLOSE":
-                continue
-            n1, n2 = edge['from_id'], edge['to_id']
-            G.add_edge(n1, n2, weight=1)
+            if edge['relation_type'] in ["INSIDE","ON"]:
+                n1, n2 = edge['from_id'], edge['to_id']
+                G.add_edge(n1, n2, weight=1)
         
         if sparsify:
             for nid in node_ids:
@@ -124,7 +138,6 @@ def visualize_routine(routine, dt=10, sparsify=True, remove_close = True):
             pos = nx.shell_layout(G, nlist=nlist)
             # pos = nx.spring_layout(G)
         nx.draw_networkx(G, pos=pos, ax=axs[i], edge_cmap=plt.cm.Blues, edge_vmin = 0 ,edge_vmax = 1, node_size=300, node_color=node_colors, labels = node_labels)
-        nx.draw_networkx_edge_labels(G, pos=pos, ax=axs[i])
         th = time_external(t*dt)
         axs[i].set_title(str(int(th[2]))+':'+str(int(th[3])))
     th = [int(t) for t in th]
