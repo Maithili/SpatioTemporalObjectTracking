@@ -24,7 +24,7 @@ def _sparsify(edges):
     dense_edges = _densify(edges.copy())
     remove = np.matmul(dense_edges, dense_edges)
     sparse_edges = dense_edges * (remove==0).astype(int)
-    assert (sparse_edges.sum(axis=-1)).max() == 1, "Matrix not really a tree"
+    assert (sparse_edges.sum(axis=-1)).max() == 1, f"Matrix not really a tree \n{edges} \n{dense_edges} \n{sparse_edges}"
     return sparse_edges
 
 class CollateToDict():
@@ -209,6 +209,9 @@ class RoutinesDataset():
 
     def get_test_loader(self):
         return DataLoader(self.test, num_workers=8, batch_size=len(self.test), sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
+
+    def get_single_example_test_loader(self):
+        return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
 
     def get_edges_of_interest(self):
         edges = {}

@@ -80,8 +80,8 @@ def run(cfg = {}, path = None):
     trainer.test(model, data.get_test_loader())
     
     print('Outputs saved at ',output_dir)
-    # if INTERACTIVE:
-    #     visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys, softmax=not cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
+    if INTERACTIVE:
+        visualize_datapoint(model, data.get_single_example_test_loader(), data.node_classes)
 
 
 
