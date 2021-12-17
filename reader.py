@@ -41,10 +41,10 @@ class CollateToDict():
         return data
 
 class DataSplit():
-    def __init__(self, routines, time_encoder, dt, active_edges_func):
+    def __init__(self, routines, time_encoder, dt, active_edges):
         self.time_encoder = time_encoder
         self.dt = dt
-        self.active_edges_func = active_edges_func
+        self.active_edges = active_edges
         self.data = self.make_pairwise(routines)
         self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask'])
     def __len__(self):
@@ -70,8 +70,9 @@ class DataSplit():
                 if data_idx < 0:
                     continue
                 if prev_edges is not None:
-                    edges_mask = self.active_edges_func(nodes[data_idx])
+                    edges_mask = self.active_edges
                     pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder((t-1) * self.dt), edges[data_idx], nodes[data_idx], edges_mask))
+                    assert not(((edges_mask-edges[data_idx])<0).any())
                 prev_edges = edges[data_idx]
                 prev_nodes = nodes[data_idx]
         random.shuffle(pairwise_samples)
@@ -111,8 +112,8 @@ class RoutinesDataset():
         # Split the data into train and test
         random.shuffle(self._alldata)
         num_test = int(round(test_perc*len(self._alldata)))
-        self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.get_active_edges)
-        self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.get_active_edges)
+        self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.active_edges)
+        self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.active_edges)
         print(len(self._alldata),' routines found in dataset.')
         print(len(self.train),' examples in train split.')
         print(len(self.test),' examples in test split.')
@@ -147,10 +148,14 @@ class RoutinesDataset():
             times = torch.Tensor(routine["times"])
             training_data.append((nodes, edges, times))
 
+        if self.params['only_seen_edges']:
+            self.active_edges[self.seen_edges == 0] = 0
+        self.active_edges = torch.Tensor(self.active_edges)
+        
         return training_data
 
     def read_classes(self, classes):
-        self.node_keys = [n['id'] for n in classes['nodes']]
+        self.node_ids = [n['id'] for n in classes['nodes']]
         self.node_classes = [n['class_name'] for n in classes['nodes']]
         self.node_categories = [n['category'] for n in classes['nodes']]
         # Diagonal nodes are always irrelevant
@@ -174,26 +179,24 @@ class RoutinesDataset():
         self.static_nodes = [n['id'] for n in classes['nodes'] if static(n['category'])]
 
     def read_graphs(self, graphs):
-        nodes = graphs[0]['nodes']
-        node_ids = [n['id'] for n in nodes]
-
-        self.params['n_class_len'] = len(self.node_keys)
+        self.params['n_class_len'] = len(self.node_ids)
         self.params['n_state_len'] = int(round(len(self.node_states)/2))
         node_feature_len = self.params['n_class_len'] + self.params['n_state_len']
-        node_features = np.zeros((len(graphs), len(nodes), node_feature_len))
-        edge_features = np.zeros((len(graphs), len(node_ids), len(node_ids)))
+        node_features = np.zeros((len(graphs), len(self.node_ids), node_feature_len))
+        edge_features = np.zeros((len(graphs), len(self.node_ids), len(self.node_ids)))
         for i,graph in enumerate(graphs):
-            graph_nodes = [[node for node in graph['nodes'] if node['id'] == nid][0] for nid in node_ids]
-            for j,n1 in enumerate(node_ids):
-                node_features[i,j,:] = self.encode_node(graph_nodes[j])
-                for k,n2 in enumerate(node_ids):
+            node_features[i,:,:len(self.node_ids)] = np.eye(len(self.node_ids))
+            for j,n1 in enumerate(self.node_ids):
+                graph_node_j = [node for node in graph['nodes'] if node['id'] == n1]
+                if graph_node_j:
+                    node_features[i,j,:] = self.encode_node(graph_node_j[0])
+                for k,n2 in enumerate(self.node_ids):
                     edge_features[i,j,k]= self.encode_edge(self.get_edges(graph, n1, n2))
-                    if self.params['only_seen_edges'] and edge_features[i,j,k] == 1:
-                        self.seen_edges[self.get_class_from_id(n1), self.get_class_from_id(n2)] = 1
+            assert (node_features[i,:,:len(self.node_ids)] == np.eye(len(self.node_ids))).all(), "Nodes out-of-order!!"
             if self.params['tree_formuation']:
                 edge_features[i,:,:] = _sparsify(edge_features[i,:,:])
-        if self.params['only_seen_edges']:
-            self.active_edges[self.seen_edges == 0] = 0
+            if self.params['only_seen_edges']:
+                self.seen_edges[:,:] += edge_features[i,:,:]
         return torch.Tensor(node_features), torch.Tensor(edge_features)
 
     def get_edges(self, graph, n_id1, n_id2):
@@ -210,20 +213,12 @@ class RoutinesDataset():
         return encoding
 
     def encode_node(self, node):
-        node_class = np.array(self.node_keys) == node['id']
+        node_class = np.array(self.node_ids) == node['id']
         node_state = sum([self.node_states[s] for s in node['states']])
         return np.concatenate((node_class,node_state))
 
     def get_class_from_id(self, id):
-        return self.node_keys.index(id)
-
-    def get_active_edges(self, enc_list):
-        node_classes = [enc[:len(self.node_keys)].argmax() for enc in enc_list]
-        active_edges = np.zeros((len(node_classes), len(node_classes)))
-        for i,n1 in enumerate(node_classes):
-            for j,n2 in enumerate(node_classes):
-                active_edges[i,j] = self.active_edges[n1,n2]
-        return torch.Tensor(active_edges)
+        return self.node_ids.index(id)
 
     def get_train_loader(self):
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
