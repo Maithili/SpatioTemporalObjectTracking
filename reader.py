@@ -72,7 +72,7 @@ class DataSplit():
                 if prev_edges is not None:
                     edges_mask = self.active_edges
                     pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder((t-1) * self.dt), edges[data_idx], nodes[data_idx], edges_mask))
-                    assert not(((edges_mask-edges[data_idx])<0).any())
+                    # assert not(((edges_mask-edges[data_idx])<0).any())
                 prev_edges = edges[data_idx]
                 prev_nodes = nodes[data_idx]
         random.shuffle(pairwise_samples)
@@ -88,7 +88,6 @@ class RoutinesDataset():
                  edges_of_interest = None,
                  sample_data = True,
                  batch_size = 1,
-                 avg_samples_per_routine = 1,
                  only_seen_edges = False,
                  tree_formuation=False,
                  ignore_close_edges=True):
@@ -101,7 +100,6 @@ class RoutinesDataset():
         self.params['edges_of_interest'] = edges_of_interest if edges_of_interest is not None else []
         self.params['sample_data'] = sample_data
         self.params['batch_size'] = batch_size
-        self.params['avg_samples_per_routine'] = avg_samples_per_routine
         self.params['only_seen_edges'] = only_seen_edges
         self.params['tree_formuation'] = tree_formuation
         self.params['ignore_close_edges'] = ignore_close_edges
@@ -160,8 +158,10 @@ class RoutinesDataset():
         self.node_categories = [n['category'] for n in classes['nodes']]
         # Diagonal nodes are always irrelevant
         self.active_edges = 1 - np.eye(len(classes['nodes']))
-        # Room nodes don't need parents
+        # Rooms, furniture and appliances nodes don't move
         self.active_edges[np.where(np.array(self.node_categories) == "Rooms"),:] = 0
+        self.active_edges[np.where(np.array(self.node_categories) == "Furniture"),:] = 0
+        self.active_edges[np.where(np.array(self.node_categories) == "Appliances"),:] = 0
         self.seen_edges = np.zeros_like(self.active_edges)
 
         self.node_states = {}
@@ -171,7 +171,7 @@ class RoutinesDataset():
             self.node_states[state_pairs[1]] = np.zeros(len(classes['node_states']))
             self.node_states[state_pairs[1]][i] = 1
         self.edge_keys = classes['edges']
-        if self.params['ignore_close_edges']:
+        if self.params['ignore_close_edges'] and "CLOSE" in self.edge_keys:
             self.edge_keys.remove("CLOSE")
         if 'dt' in classes:
             self.params['dt'] = classes['dt']
@@ -214,7 +214,10 @@ class RoutinesDataset():
 
     def encode_node(self, node):
         node_class = np.array(self.node_ids) == node['id']
-        node_state = sum([self.node_states[s] for s in node['states']])
+        if node['states']:
+            node_state = sum([self.node_states[s] for s in node['states']])
+        else:
+            node_state = np.zeros_like(self.node_states["CLEAN"])
         return np.concatenate((node_class,node_state))
 
     def get_class_from_id(self, id):

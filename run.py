@@ -42,7 +42,6 @@ def run(cfg = {}, path = None):
                            edges_of_interest=cfg['EDGES_OF_INTEREST'], 
                            sample_data=cfg['SAMPLE_DATA'],
                            batch_size=cfg['BATCH_SIZE'],
-                           avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
                            only_seen_edges = cfg['ONLY_SEEN_EDGES'],
                            tree_formuation = cfg['TREE_FORMULATION'],
                            ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])

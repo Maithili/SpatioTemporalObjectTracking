@@ -94,7 +94,7 @@ def visualize_datapoint(model, dataloader, node_classes, node_categories = [], u
         fig.suptitle('Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy']))
         
         plt.show()
-        # plt.savefig('temp.jpg')
+        plt.savefig('temp.jpg')
         inp = input('Do you want to visualize another output? (y/n)')
 
 
@@ -143,4 +143,5 @@ def visualize_routine(routine, dt=10, sparsify=False):
     th = [int(t) for t in th]
     fig.suptitle("Week "+str(th[0])+" - "+days[th[1]])
     plt.show()
+    plt.savefig('temp.jpg')
     

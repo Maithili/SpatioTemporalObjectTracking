@@ -1,4 +1,4 @@
-#!/home/maithili/repos/GraphTrans/.venv/bin/python
+#!./.venv/bin/python
 
 import os
 import json
