@@ -71,7 +71,8 @@ class GraphTranslatorModule(LightningModule):
                 num_chebyshev_polys=2, 
                 tree_formulation=False,
                 node_accuracy_weight=0.5,
-                learn_nodes=False):
+                learn_nodes=False,
+                edges_as_attention=True):
         
         super().__init__()
 
@@ -82,12 +83,18 @@ class GraphTranslatorModule(LightningModule):
         assert node_feature_len == node_class_len + node_state_len, f"Node class and state lengths should sum up to feature length, i.e. {node_class_len} + {node_state_len} == {node_feature_len}"
         self.context_len = context_len
         self.node_accuracy_weight = node_accuracy_weight
+        self.edges_as_attention = edges_as_attention
 
         self.use_spectral_loss = use_spectral_loss
         self.num_chebyshev_polys = num_chebyshev_polys
         self.map_spectral_loss = 0
 
         self.hidden_influence_dim = 20
+
+        if edges_as_attention:
+            self.edges_update_input_dim = self.hidden_influence_dim*4 + self.context_len
+        else:
+            self.edges_update_input_dim = self.hidden_influence_dim*4 + 1 + self.context_len
         
         self.mlp_influence = nn.Sequential(
                              nn.Linear(self.node_feature_len*2 + 1, 20),
@@ -97,7 +104,7 @@ class GraphTranslatorModule(LightningModule):
 
         ## edge update layers
         self.mlp_update_edges = nn.Sequential(
-                               nn.Linear(self.hidden_influence_dim*4 + 1 + self.context_len, 20),
+                               nn.Linear(self.edges_update_input_dim, 20),
                                nn.ReLU(),
                                nn.Linear(20, 1)
                                )
@@ -156,7 +163,7 @@ class GraphTranslatorModule(LightningModule):
         xe = self.message_collection_edges(x, edges.unsqueeze(-1), context)
         xe = xe.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.hidden_influence_dim*4 + 1 + self.context_len])
+                  self.edges_update_input_dim])
         xe = self.mlp_update_edges(xe).view(size=[batch_size, 
                                           self.num_nodes, 
                                           self.num_nodes])
@@ -247,23 +254,33 @@ class GraphTranslatorModule(LightningModule):
         # context = batch_size x context_length
         # edge_influence : batch_size x from_nodes x to_nodes x hidden_influence_dim
 
+        edges_as_attention = True
+
+        if edges_as_attention:
+            masked_edge_influence = edge_influence
+        else:
+            masked_edge_influence = torch.mul(edge_influence,edges)
+
         # batch_size x nodes x 1 x hidden_influence_dim
-        from_from_influence = edge_influence.sum(dim=2).unsqueeze(2).repeat([1,1,self.num_nodes,1])
-        from_to_influence = edge_influence.sum(dim=1).unsqueeze(2).repeat([1,1,self.num_nodes,1])
+        from_from_influence = masked_edge_influence.sum(dim=2).unsqueeze(2).repeat([1,1,self.num_nodes,1])
+        from_to_influence = masked_edge_influence.sum(dim=1).unsqueeze(2).repeat([1,1,self.num_nodes,1])
         # batch_size x 1 x nodes x hidden_influence_dim
-        to_to_influence = edge_influence.sum(dim=1).unsqueeze(1).repeat([1,self.num_nodes,1,1])
-        to_from_influence = edge_influence.sum(dim=2).unsqueeze(1).repeat([1,self.num_nodes,1,1])
+        to_to_influence = masked_edge_influence.sum(dim=1).unsqueeze(1).repeat([1,self.num_nodes,1,1])
+        to_from_influence = masked_edge_influence.sum(dim=2).unsqueeze(1).repeat([1,self.num_nodes,1,1])
         
         # all_influences : batch_size x from_nodes x to_nodes x hidden_influence_dim
         all_influences = torch.cat([from_from_influence, from_to_influence, to_to_influence, to_from_influence],dim=-1)
         context_repeated = context.unsqueeze(1).unsqueeze(1).repeat([1,self.num_nodes,self.num_nodes,1])
 
-        # batch_size x from_nodes x to_nodes x (hidden_influence_dim*4 + edge_feature_len + context_length)
-        message_to_edge = torch.cat([all_influences,edges,context_repeated],dim=-1)
+        # batch_size x from_nodes x to_nodes x self.edges_update_input_dim
+        if edges_as_attention:
+            message_to_edge = torch.cat([all_influences,context_repeated],dim=-1)
+        else:
+            message_to_edge = torch.cat([all_influences,edges,context_repeated],dim=-1)
         assert(len(message_to_edge.size())==4)
         assert(message_to_edge.size()[1]==self.num_nodes)
         assert(message_to_edge.size()[2]==self.num_nodes)
-        assert(message_to_edge.size()[3]==self.hidden_influence_dim*4+1+self.context_len)
+        assert(message_to_edge.size()[3]==self.edges_update_input_dim)
         return message_to_edge
 
     def message_collection_nodes(self, edge_influence, nodes, context):
