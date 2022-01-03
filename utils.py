@@ -58,9 +58,50 @@ def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, 
 
 
 def visualize_datapoint(model, dataloader, node_classes, node_categories = [], use_output_nodes = False):
-    data_list = list(dataloader)
-    inp = input('Do you want to visualize any output? (y/n)')
+    inp = input('Do you want to visualize an unconditional output? (y/n)')
 
+    data_list = list(dataloader)
+    while(inp == 'y' and len(data_list)>0):
+        data = data_list.pop()
+        data['edges'] = data['edges']*0 + (1/data['edges'].size()[-1])
+        eval, details = model.step(data)
+        
+        colors = [node_colors_by_active[act] for act in details['evaluate_node'].squeeze(0)]
+
+        fig, axs = plt.subplots(2,2)
+
+        ax = axs[0][0]
+        positions = _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['input']['location'].squeeze(0)), node_classes, ax = ax, node_categories=node_categories, node_color=colors)
+        ax.set_title('Graph at t')
+
+        ax = axs[1][0]
+        if use_output_nodes:
+            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        else:
+            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        ax.set_title('Predicted (probabilities)')
+            
+        ax = axs[1][1]
+        if use_output_nodes:
+            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        else:
+            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        ax.set_title('Predicted')
+        
+        ax = axs[0][1]
+        _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), F.one_hot(details['gt']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        ax.set_title('Graph at t+1')
+
+        fig.suptitle('Context : '+str(data['context'])+' Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy']))
+        
+        plt.show()
+        plt.savefig('temp.jpg')
+        inp = input('Do you want to visualize another output? (y/n)')
+
+
+    inp = input('Do you want to visualize conditioned outputs? (y/n)')
+
+    data_list = list(dataloader)
     while(inp == 'y' and len(data_list)>0):
         data = data_list.pop()
         eval, details = model.step(data)
