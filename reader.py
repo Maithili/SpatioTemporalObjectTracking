@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from utils import visualize_routine
 
-INTERACTIVE = False
+INTERACTIVE = True
 
 def _densify(edges):
     dense_edges = edges.copy()
@@ -164,12 +164,6 @@ class RoutinesDataset():
         self.active_edges[np.where(np.array(self.node_categories) == "Appliances"),:] = 0
         self.seen_edges = np.zeros_like(self.active_edges)
 
-        self.node_states = {}
-        for i,state_pairs in enumerate(classes['node_states']):
-            self.node_states[state_pairs[0]] = np.zeros(len(classes['node_states']))
-            self.node_states[state_pairs[0]][i] = -1
-            self.node_states[state_pairs[1]] = np.zeros(len(classes['node_states']))
-            self.node_states[state_pairs[1]][i] = 1
         self.edge_keys = classes['edges']
         if self.params['ignore_close_edges'] and "CLOSE" in self.edge_keys:
             self.edge_keys.remove("CLOSE")
@@ -179,10 +173,7 @@ class RoutinesDataset():
         self.static_nodes = [n['id'] for n in classes['nodes'] if static(n['category'])]
 
     def read_graphs(self, graphs):
-        self.params['n_class_len'] = len(self.node_ids)
-        self.params['n_state_len'] = int(round(len(self.node_states)/2))
-        node_feature_len = self.params['n_class_len'] + self.params['n_state_len']
-        node_features = np.zeros((len(graphs), len(self.node_ids), node_feature_len))
+        node_features = np.zeros((len(graphs), len(self.node_ids), len(self.node_ids)))
         edge_features = np.zeros((len(graphs), len(self.node_ids), len(self.node_ids)))
         for i,graph in enumerate(graphs):
             node_features[i,:,:len(self.node_ids)] = np.eye(len(self.node_ids))
@@ -214,11 +205,7 @@ class RoutinesDataset():
 
     def encode_node(self, node):
         node_class = np.array(self.node_ids) == node['id']
-        if node['states']:
-            node_state = sum([self.node_states[s] for s in node['states']])
-        else:
-            node_state = np.zeros_like(self.node_states["CLEAN"])
-        return np.concatenate((node_class,node_state))
+        return node_class
 
     def get_class_from_id(self, id):
         return self.node_ids.index(id)

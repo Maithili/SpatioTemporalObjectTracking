@@ -64,8 +64,6 @@ class GraphTranslatorModule(LightningModule):
     def __init__(self, 
                 num_nodes, 
                 node_feature_len,
-                node_class_len,
-                node_state_len,
                 context_len, 
                 use_spectral_loss=True, 
                 num_chebyshev_polys=2, 
@@ -78,9 +76,6 @@ class GraphTranslatorModule(LightningModule):
 
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
-        self.node_class_len = node_class_len
-        self.node_state_len = node_state_len
-        assert node_feature_len == node_class_len + node_state_len, f"Node class and state lengths should sum up to feature length, i.e. {node_class_len} + {node_state_len} == {node_feature_len}"
         self.context_len = context_len
         self.node_accuracy_weight = node_accuracy_weight
         self.edges_as_attention = edges_as_attention
@@ -119,12 +114,9 @@ class GraphTranslatorModule(LightningModule):
                                )
         if learn_nodes:
             self.class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.long())
-            self.state_loss = lambda xs,ys: ((nn.MSELoss(reduction='none')(torch.tanh(xs), ys)) * torch.abs(ys)).sum(-1) / (torch.abs(ys)).sum(-1)
         else:
             self.class_loss = lambda xc,yc: torch.zeros_like(xc.sum(-1))
-            self.state_loss = lambda xs,ys: torch.zeros_like(xs.sum(-1))
         self.inference_class = lambda xc: xc.argmax(-1)
-        self.inference_state = lambda xs: torch.round(torch.tanh(xs)).to(int)
 
         self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
@@ -192,24 +184,19 @@ class GraphTranslatorModule(LightningModule):
         edges_pred[dyn_edges == 0] = -float("inf")
         evaluate_node = dyn_edges.sum(-1) > 0
 
-        input = {'class':self.inference_class(nodes[:,:,:self.node_class_len]), 
-                 'state':nodes[:,:,self.node_class_len:], 
+        input = {'class':self.inference_class(nodes), 
                  'location':self.inference_location(edges)}
                  
-        output_probs = {'class':nodes_pred[:,:,:self.node_class_len], 
-                        'state':nodes_pred[:,:,self.node_class_len:], 
+        output_probs = {'class':nodes_pred, 
                         'location':edges_pred}
 
-        gt = {'class':self.inference_class(y_nodes[:,:,:self.node_class_len]), 
-              'state':y_nodes[:,:,self.node_class_len:], 
+        gt = {'class':self.inference_class(y_nodes), 
               'location':self.inference_location(y_edges)}
 
         losses = {'class':self.class_loss(output_probs['class'], gt['class']),
-                  'state':self.state_loss(output_probs['state'], gt['state']),
                   'location':self.location_loss(output_probs['location'], gt['location'])}
 
         output = {'class':self.inference_class(output_probs['class']),
-                  'state':self.inference_state(output_probs['state']),
                   'location':self.inference_location(output_probs['location'])}
         
         # for result, name in zip([input, gt, losses, output], ['input', 'gt', 'losses', 'output']):

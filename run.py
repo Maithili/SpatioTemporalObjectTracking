@@ -64,8 +64,6 @@ def run(cfg = {}, path = None):
 
     model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                               node_feature_len=data.params['n_len'],
-                              node_class_len=data.params['n_class_len'],
-                              node_state_len=data.params['n_state_len'],
                               context_len=data.params['c_len'],
                               use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
                               num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
