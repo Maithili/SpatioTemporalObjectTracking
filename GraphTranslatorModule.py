@@ -69,7 +69,8 @@ class GraphTranslatorModule(LightningModule):
                 num_chebyshev_polys=2, 
                 tree_formulation=False,
                 node_accuracy_weight=0.5,
-                learn_nodes=False):
+                learn_nodes=False,
+                edge_importance=True):
         
         super().__init__()
 
@@ -78,6 +79,7 @@ class GraphTranslatorModule(LightningModule):
         self.context_len = context_len
         self.node_accuracy_weight = node_accuracy_weight
         self.learn_nodes = learn_nodes
+        self.edge_importance = edge_importance
 
         self.use_spectral_loss = use_spectral_loss
         self.num_chebyshev_polys = num_chebyshev_polys
@@ -131,25 +133,28 @@ class GraphTranslatorModule(LightningModule):
                   self.num_nodes, 
                   self.hidden_influence_dim])
 
-        ## importance update
-        imp = self.message_collection_edges(x, edges.unsqueeze(-1), context)
-        imp = imp.view(
-            size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.edges_update_input_dim])
-        imp = self.mlp_update_importance(imp).view(size=[batch_size, 
-                                          self.num_nodes, 
-                                          self.num_nodes,
-                                          1])
+        if self.edge_importance:
+            ## importance update
+            imp = self.message_collection_edges(x, edges.unsqueeze(-1), context)
+            imp = imp.view(
+                size=[batch_size * self.num_nodes * self.num_nodes, 
+                    self.edges_update_input_dim])
+            imp = self.mlp_update_importance(imp).view(size=[batch_size, 
+                                            self.num_nodes, 
+                                            self.num_nodes,
+                                            1])
+        else:
+            imp = edges.unsqueeze(-1)
 
         ## edge update
         xe = self.message_collection_edges(x, imp, context)
         xe = xe.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.edges_update_input_dim])
+                self.edges_update_input_dim])
         xe = self.mlp_update_edges(xe).view(size=[batch_size, 
-                                          self.num_nodes, 
-                                          self.num_nodes,
-                                          1])
+                                        self.num_nodes, 
+                                        self.num_nodes,
+                                        1])
 
         ## node update
         if self.learn_nodes:
