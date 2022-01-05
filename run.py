@@ -68,8 +68,7 @@ def run(cfg = {}, path = None):
                               use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
                               num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
                               tree_formulation=cfg['TREE_FORMULATION'],
-                              learn_nodes=cfg['LEARN_NODES'],
-                              edges_as_attention=cfg['EDGES_AS_ATTENTION'])
+                              learn_nodes=cfg['LEARN_NODES'])
 
     trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
 
