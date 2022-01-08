@@ -9,7 +9,14 @@ from torch.utils.data import DataLoader
 
 from utils import visualize_routine
 
-INTERACTIVE = True
+INTERACTIVE = False
+
+def not_a_tree(original_edges, sparse_edges, nodes):
+    num_parents = sparse_edges.sum(axis=-1)
+    for i,num_p in enumerate(num_parents):
+        if num_p>1:
+            print(f'Node {nodes[i]} has parents : {nodes[(np.argwhere(sparse_edges[i,:] > 0)).squeeze()]}')
+            print(f'Node {nodes[i]} originally had parents : {nodes[(np.argwhere(original_edges[i,:] > 0)).squeeze()]}')
 
 def _densify(edges):
     dense_edges = edges.copy()
@@ -25,7 +32,6 @@ def _sparsify(edges):
     dense_edges = _densify(edges.copy())
     remove = np.matmul(dense_edges, dense_edges)
     sparse_edges = dense_edges * (remove==0).astype(int)
-    assert (sparse_edges.sum(axis=-1)).max() == 1, f"Matrix not really a tree \n{edges} \n{dense_edges} \n{sparse_edges}"
     return sparse_edges
 
 class CollateToDict():
@@ -156,6 +162,7 @@ class RoutinesDataset():
         self.node_ids = [n['id'] for n in classes['nodes']]
         self.node_classes = [n['class_name'] for n in classes['nodes']]
         self.node_categories = [n['category'] for n in classes['nodes']]
+        self.node_idx_from_id = {n['id']:i for i,n in enumerate(classes['nodes'])}
         # Diagonal nodes are always irrelevant
         self.active_edges = 1 - np.eye(len(classes['nodes']))
         # Rooms, furniture and appliances nodes don't move
@@ -177,15 +184,16 @@ class RoutinesDataset():
         edge_features = np.zeros((len(graphs), len(self.node_ids), len(self.node_ids)))
         for i,graph in enumerate(graphs):
             node_features[i,:,:len(self.node_ids)] = np.eye(len(self.node_ids))
-            for j,n1 in enumerate(self.node_ids):
-                graph_node_j = [node for node in graph['nodes'] if node['id'] == n1]
-                if graph_node_j:
-                    node_features[i,j,:] = self.encode_node(graph_node_j[0])
-                for k,n2 in enumerate(self.node_ids):
-                    edge_features[i,j,k]= self.encode_edge(self.get_edges(graph, n1, n2))
-            assert (node_features[i,:,:len(self.node_ids)] == np.eye(len(self.node_ids))).all(), "Nodes out-of-order!!"
+            for e in graph['edges']:
+                if e['relation_type'] in self.edge_keys:
+                    edge_features[i,self.node_idx_from_id[e['from_id']],self.node_idx_from_id[e['to_id']]] = 1
             if self.params['tree_formuation']:
+                original_edges = edge_features[i,:,:]
                 edge_features[i,:,:] = _sparsify(edge_features[i,:,:])
+                if (edge_features[i,:,:].sum(axis=-1)).max() != 1:
+                    print(f"Matrix {i} not really a tree \n{edge_features[i,:,:]}")
+                    not_a_tree(original_edges, edge_features[i,:,:], self.node_classes)
+                assert (edge_features[i,:,:].sum(axis=-1)).max() == 1, f"Matrix {i} not really a tree \n{edge_features[i,:,:]}"
             if self.params['only_seen_edges']:
                 self.seen_edges[:,:] += edge_features[i,:,:]
         return torch.Tensor(node_features), torch.Tensor(edge_features)
@@ -195,12 +203,8 @@ class RoutinesDataset():
         return edges
 
     def encode_edge(self, edges):
-        valid = lambda rel: rel in [e['relation_type'] for e in edges]
-        encoding = 0
-        for c in self.edge_keys:
-            if valid(c):
-                encoding = 1
-                break
+        valid = any([e['relation_type'] in self.edge_keys for e in edges])
+        encoding = 1 if valid else 0
         return encoding
 
     def encode_node(self, node):

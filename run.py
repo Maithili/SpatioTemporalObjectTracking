@@ -65,9 +65,7 @@ def run(cfg = {}, path = None):
     model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                               node_feature_len=data.params['n_len'],
                               context_len=data.params['c_len'],
-                              use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
                               num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
-                              tree_formulation=cfg['TREE_FORMULATION'],
                               learn_nodes=cfg['LEARN_NODES'],
                               edge_importance=cfg['EDGE_IMPORTANCE'])
 

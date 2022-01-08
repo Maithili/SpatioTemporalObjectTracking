@@ -65,9 +65,7 @@ class GraphTranslatorModule(LightningModule):
                 num_nodes, 
                 node_feature_len,
                 context_len, 
-                use_spectral_loss=True, 
                 num_chebyshev_polys=2, 
-                tree_formulation=False,
                 node_accuracy_weight=0.5,
                 learn_nodes=False,
                 edge_importance=True):
@@ -81,7 +79,6 @@ class GraphTranslatorModule(LightningModule):
         self.learn_nodes = learn_nodes
         self.edge_importance = edge_importance
 
-        self.use_spectral_loss = use_spectral_loss
         self.num_chebyshev_polys = num_chebyshev_polys
         self.map_spectral_loss = 0
 
