@@ -47,11 +47,15 @@ class CollateToDict():
         return data
 
 class DataSplit():
-    def __init__(self, routines, time_encoder, dt, active_edges):
+    def __init__(self, routines, time_encoder, dt, active_edges, whole_routines=False):
         self.time_encoder = time_encoder
         self.dt = dt
         self.active_edges = active_edges
-        self.data = self.make_pairwise(routines)
+        if whole_routines:
+            self.data = [self.make_pairwise([routine]) for routine in routines]
+        else:
+            self.data = self.make_pairwise(routines)
+            random.shuffle(self.data)
         self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask'])
     def __len__(self):
         return len(self.data)
@@ -61,12 +65,16 @@ class DataSplit():
         return None
     def make_pairwise(self, routines):
         pairwise_samples = []
+        self.time_min = torch.Tensor([float("Inf")])
+        self.time_max = -torch.Tensor([float("Inf")])
         for routine in routines:
             nodes, edges, times = routine
             assert times[0]==min(times), 'Times need to be monotonically increasing. First element should be min.'
             assert times[-1]==max(times), 'Times need to be monotonically increasing. Last element should be max.'
             time_min = floor(times[0])
             time_max = ceil(times[-1])
+            if time_min < self.time_min: self.time_min = time_min
+            if time_max > self.time_max: self.time_max = time_max
             times = torch.cat([times,torch.Tensor([float("Inf")])], dim=-1)
             data_idx = -1
             prev_edges = None
@@ -81,7 +89,6 @@ class DataSplit():
                     # assert not(((edges_mask-edges[data_idx])<0).any())
                 prev_edges = edges[data_idx]
                 prev_nodes = nodes[data_idx]
-        random.shuffle(pairwise_samples)
         return pairwise_samples
     
 
@@ -95,7 +102,6 @@ class RoutinesDataset():
                  sample_data = True,
                  batch_size = 1,
                  only_seen_edges = False,
-                 tree_formuation=False,
                  ignore_close_edges=True):
 
         self.data_path = data_path
@@ -107,7 +113,6 @@ class RoutinesDataset():
         self.params['sample_data'] = sample_data
         self.params['batch_size'] = batch_size
         self.params['only_seen_edges'] = only_seen_edges
-        self.params['tree_formuation'] = tree_formuation
         self.params['ignore_close_edges'] = ignore_close_edges
 
         # Read data
@@ -118,6 +123,7 @@ class RoutinesDataset():
         num_test = int(round(test_perc*len(self._alldata)))
         self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.active_edges)
         self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.active_edges)
+        self.all_routines = DataSplit(self._alldata, self.time_encoder, self.params['dt'], self.active_edges, whole_routines=True)
         print(len(self._alldata),' routines found in dataset.')
         print(len(self.train),' examples in train split.')
         print(len(self.test),' examples in test split.')
@@ -187,13 +193,12 @@ class RoutinesDataset():
             for e in graph['edges']:
                 if e['relation_type'] in self.edge_keys:
                     edge_features[i,self.node_idx_from_id[e['from_id']],self.node_idx_from_id[e['to_id']]] = 1
-            if self.params['tree_formuation']:
-                original_edges = edge_features[i,:,:]
-                edge_features[i,:,:] = _sparsify(edge_features[i,:,:])
-                if (edge_features[i,:,:].sum(axis=-1)).max() != 1:
-                    print(f"Matrix {i} not really a tree \n{edge_features[i,:,:]}")
-                    not_a_tree(original_edges, edge_features[i,:,:], self.node_classes)
-                assert (edge_features[i,:,:].sum(axis=-1)).max() == 1, f"Matrix {i} not really a tree \n{edge_features[i,:,:]}"
+            original_edges = edge_features[i,:,:]
+            edge_features[i,:,:] = _sparsify(edge_features[i,:,:])
+            if (edge_features[i,:,:].sum(axis=-1)).max() != 1:
+                print(f"Matrix {i} not really a tree \n{edge_features[i,:,:]}")
+                not_a_tree(original_edges, edge_features[i,:,:], self.node_classes)
+            assert (edge_features[i,:,:].sum(axis=-1)).max() == 1, f"Matrix {i} not really a tree \n{edge_features[i,:,:]}"
             if self.params['only_seen_edges']:
                 self.seen_edges[:,:] += edge_features[i,:,:]
         return torch.Tensor(node_features), torch.Tensor(edge_features)

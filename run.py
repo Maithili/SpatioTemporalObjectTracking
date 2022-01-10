@@ -13,7 +13,8 @@ from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE
 from encoders import TimeEncodingOptions
 from filters import OutputFilters
-from utils import visualize_datapoint
+from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
+from applications import multiple_steps, object_search
 
 DEFAULT_CONFIG = 'config/default.yaml'
 
@@ -43,7 +44,6 @@ def run(cfg = {}, path = None):
                            sample_data=cfg['SAMPLE_DATA'],
                            batch_size=cfg['BATCH_SIZE'],
                            only_seen_edges = cfg['ONLY_SEEN_EDGES'],
-                           tree_formuation = cfg['TREE_FORMULATION'],
                            ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])
 
     output_dir = os.path.join('logs',cfg['NAME'])
@@ -74,9 +74,15 @@ def run(cfg = {}, path = None):
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())
     
+    # hits, guesses = object_search(model, data.all_routines, cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
+
+    # print(hits)
+    # print(guesses)
+
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:
-        visualize_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+        visualize_unconditional_datapoint(model, data.all_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+        visualize_conditional_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
 
 
 
