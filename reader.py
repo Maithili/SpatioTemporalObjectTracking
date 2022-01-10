@@ -99,10 +99,8 @@ class RoutinesDataset():
                  time_encoder = time_sine_cosine, 
                  dt = 10,
                  edges_of_interest = None,
-                 sample_data = True,
                  batch_size = 1,
-                 only_seen_edges = False,
-                 ignore_close_edges=True):
+                 only_seen_edges = False):
 
         self.data_path = data_path
         self.classes_path = classes_path
@@ -110,10 +108,8 @@ class RoutinesDataset():
         self.params = {}
         self.params['dt'] = dt    # Overwritten if present in classes
         self.params['edges_of_interest'] = edges_of_interest if edges_of_interest is not None else []
-        self.params['sample_data'] = sample_data
         self.params['batch_size'] = batch_size
         self.params['only_seen_edges'] = only_seen_edges
-        self.params['ignore_close_edges'] = ignore_close_edges
 
         # Read data
         self._alldata = self.read_data()
@@ -178,8 +174,7 @@ class RoutinesDataset():
         self.seen_edges = np.zeros_like(self.active_edges)
 
         self.edge_keys = classes['edges']
-        if self.params['ignore_close_edges'] and "CLOSE" in self.edge_keys:
-            self.edge_keys.remove("CLOSE")
+        self.edge_keys.remove("CLOSE")
         if 'dt' in classes:
             self.params['dt'] = classes['dt']
         static = lambda category : category in ["Furniture", "Room"]

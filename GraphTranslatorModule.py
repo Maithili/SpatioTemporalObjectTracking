@@ -68,7 +68,6 @@ class GraphTranslatorModule(LightningModule):
                 num_nodes, 
                 node_feature_len,
                 context_len, 
-                num_chebyshev_polys=2, 
                 node_accuracy_weight=0.5,
                 learn_nodes=False,
                 edge_importance=True):
@@ -82,7 +81,6 @@ class GraphTranslatorModule(LightningModule):
         self.learn_nodes = learn_nodes
         self.edge_importance = edge_importance
 
-        self.num_chebyshev_polys = num_chebyshev_polys
         self.map_spectral_loss = 0
 
         self.hidden_influence_dim = 20
@@ -116,7 +114,7 @@ class GraphTranslatorModule(LightningModule):
         self.class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.long())
         self.inference_class = lambda xc: xc.argmax(-1)
 
-        self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
+        # self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
     def graph_step(self, edges, nodes, context):
 

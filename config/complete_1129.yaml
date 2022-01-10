@@ -2,8 +2,7 @@ DATA_PATH: 'data/complete1129/sample.json'
 CLASSES_PATH: 'data/complete1129/classes.json'
 DATA_INFO: 'data/complete1129/info.json'
 NAME: complete
-TIME_ENCODING: clock_time_with_weekend_bit
+TIME_ENCODING: external
 EPOCHS: 20
 TEST_SPLIT: 0.1
 BATCH_SIZE: 10
-USE_SPECTRAL_LOSS: False

@@ -41,10 +41,8 @@ def run(cfg = {}, path = None):
                            dt=cfg['DT'],
                            test_perc=cfg['TEST_SPLIT'], 
                            edges_of_interest=cfg['EDGES_OF_INTEREST'], 
-                           sample_data=cfg['SAMPLE_DATA'],
                            batch_size=cfg['BATCH_SIZE'],
-                           only_seen_edges = cfg['ONLY_SEEN_EDGES'],
-                           ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])
+                           only_seen_edges = cfg['ONLY_SEEN_EDGES'])
 
     output_dir = os.path.join('logs',cfg['NAME'])
     if os.path.exists(output_dir):
@@ -65,7 +63,6 @@ def run(cfg = {}, path = None):
     model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                               node_feature_len=data.params['n_len'],
                               context_len=data.params['c_len'],
-                              num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
                               learn_nodes=cfg['LEARN_NODES'],
                               edge_importance=cfg['EDGE_IMPORTANCE'])
 
