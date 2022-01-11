@@ -71,24 +71,25 @@ class DataSplit():
             nodes, edges, times = routine
             assert times[0]==min(times), 'Times need to be monotonically increasing. First element should be min.'
             assert times[-1]==max(times), 'Times need to be monotonically increasing. Last element should be max.'
-            time_min = floor(times[0])
-            time_max = ceil(times[-1])
+            time_min = floor(times[0]/self.dt)*self.dt
+            time_max = ceil(times[-1]) + self.dt
             if time_min < self.time_min: self.time_min = time_min
             if time_max > self.time_max: self.time_max = time_max
             times = torch.cat([times,torch.Tensor([float("Inf")])], dim=-1)
             data_idx = -1
             prev_edges = None
-            for t in range(time_min, time_max+1):
-                if t >= times[data_idx+1]:
+            for t in range(time_min, time_max, self.dt):
+                while t >= times[data_idx+1]:
                     data_idx += 1
                 if data_idx < 0:
                     continue
                 if prev_edges is not None:
                     edges_mask = self.active_edges
-                    pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder((t-1) * self.dt), edges[data_idx], nodes[data_idx], edges_mask))
+                    pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder(prev_t), edges[data_idx], nodes[data_idx], edges_mask))
                     # assert not(((edges_mask-edges[data_idx])<0).any())
                 prev_edges = edges[data_idx]
                 prev_nodes = nodes[data_idx]
+                prev_t = t
         return pairwise_samples
     
 
