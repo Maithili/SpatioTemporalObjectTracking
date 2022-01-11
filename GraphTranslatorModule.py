@@ -131,7 +131,7 @@ class GraphTranslatorModule(LightningModule):
                   self.num_nodes, 
                   self.hidden_influence_dim])
 
-        if self.edge_importance:
+        if self.edge_importance == 'predicted':
             ## importance update
             imp = self.message_collection_edges(x, edges.unsqueeze(-1), context)
             imp = imp.view(
@@ -141,8 +141,12 @@ class GraphTranslatorModule(LightningModule):
                                             self.num_nodes, 
                                             self.num_nodes,
                                             1])
-        else:
+        elif self.edge_importance == 'all':
+            imp = torch.ones_like(edges.unsqueeze(-1))
+        elif self.edge_importance == 'existing':
             imp = edges.unsqueeze(-1)
+        else:
+            raise KeyError(f'Edge Importance given as ({self.edge_importance}) is not among predicted, all or existing')
 
         ## edge update
         xe = self.message_collection_edges(x, imp, context)
