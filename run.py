@@ -87,13 +87,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
     parser.add_argument('--path', type=str, help='Path where the data lives. Must contain sample, info and classes json files.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
+    parser.add_argument('--name', type=str, help='Name of run.')
 
     args = parser.parse_args()
-    assert len(sys.argv) < 4, "The script can take only one argument specifying the config file name, e.g. 'sample'"
 
     with open(DEFAULT_CONFIG) as f:
         cfg = yaml.safe_load(f)
     if args.cfg is not None:
         with open(os.path.join('config',args.cfg)+'.yaml') as f:
             cfg.update(yaml.safe_load(f))
+    if args.name is not None:
+        cfg['NAME'] = args.name
     run(cfg=cfg, path=args.path)
