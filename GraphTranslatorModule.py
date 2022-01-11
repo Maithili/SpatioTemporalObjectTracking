@@ -1,3 +1,4 @@
+from random import random
 import torch
 from torch.nn import functional as F
 from torch import nn
@@ -70,7 +71,8 @@ class GraphTranslatorModule(LightningModule):
                 context_len, 
                 node_accuracy_weight=0.5,
                 learn_nodes=False,
-                edge_importance=True):
+                edge_importance=True,
+                edge_dropout_prob=0.1):
         
         super().__init__()
 
@@ -80,6 +82,7 @@ class GraphTranslatorModule(LightningModule):
         self.node_accuracy_weight = node_accuracy_weight
         self.learn_nodes = learn_nodes
         self.edge_importance = edge_importance
+        self.edge_dropout_prob = edge_dropout_prob
 
         self.map_spectral_loss = 0
 
@@ -240,6 +243,8 @@ class GraphTranslatorModule(LightningModule):
 
     def training_step(self, batch, batch_idx):
         eval,_ = self.step(batch)
+        if random() < self.edge_dropout_prob:
+            batch['edges'] = _erase_edges(batch['edges'])
         self.log('Train accuracy',eval['accuracy'])
         self.log('Train losses',eval['losses'])
         return eval['losses']['mean'] + self.map_spectral_loss

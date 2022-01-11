@@ -64,7 +64,8 @@ def run(cfg = {}, path = None):
                               node_feature_len=data.params['n_len'],
                               context_len=data.params['c_len'],
                               learn_nodes=cfg['LEARN_NODES'],
-                              edge_importance=cfg['EDGE_IMPORTANCE'])
+                              edge_importance=cfg['EDGE_IMPORTANCE'],
+                              edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'])
 
     trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
 
