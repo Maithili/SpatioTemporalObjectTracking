@@ -1,5 +1,0 @@
--> _Visualize dynamic edge loss
--> _Only dynamic edges : preprocess data, compare w/ difficult case on changed edges
--> _Weekend bit : compare difficult case
--> _Softmax edges : this changes the loss so can't compare with prior runs
--> Fix BCE
