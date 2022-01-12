@@ -6,6 +6,7 @@ import os
 import sys
 import shutil
 import argparse
+from copy import deepcopy
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
@@ -72,10 +73,12 @@ def run(cfg = {}, path = None):
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())
     
-    # hits, guesses = object_search(model, data.all_routines, cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
-
-    # print(hits)
-    # print(guesses)
+    evaluation = {}
+    hit_ratios, _ = object_search(model, deepcopy(data.all_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
+    evaluation['Search hits'] = tuple(hit_ratios)
+    evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.all_routines)))
+    evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.all_routines), unconditional=True))
+    print('Test Evaluation', evaluation)
 
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:
