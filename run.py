@@ -3,8 +3,6 @@
 import yaml
 import json
 import os
-import sys
-import shutil
 import argparse
 from copy import deepcopy
 from pytorch_lightning import Trainer
@@ -13,7 +11,6 @@ from pytorch_lightning.loggers import WandbLogger
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE
 from encoders import TimeEncodingOptions
-from filters import OutputFilters
 from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
 from applications import multiple_steps, object_search
 

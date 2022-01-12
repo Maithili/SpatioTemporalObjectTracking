@@ -1,5 +1,4 @@
 import numpy as np
-from reader import CollateToDict
 from GraphTranslatorModule import _erase_edges
 
 def multiple_steps(model, test_routines, unconditional=False):
