@@ -6,14 +6,16 @@ import os
 import sys
 import shutil
 import argparse
+from copy import deepcopy
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE
 from encoders import TimeEncodingOptions
-from filters import loss_filter_options
-from utils import visualize_datapoint
+from filters import OutputFilters
+from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
+from applications import multiple_steps, object_search
 
 DEFAULT_CONFIG = 'config/default.yaml'
 
@@ -40,13 +42,8 @@ def run(cfg = {}, path = None):
                            dt=cfg['DT'],
                            test_perc=cfg['TEST_SPLIT'], 
                            edges_of_interest=cfg['EDGES_OF_INTEREST'], 
-                           sample_data=cfg['SAMPLE_DATA'],
                            batch_size=cfg['BATCH_SIZE'],
-                           avg_samples_per_routine=cfg['AVG_SAMPLES_PER_ROUTINE'],
-                           sequential_prediction=cfg['SEQUENTIAL_PREDICTION'],
-                           only_dynamic_edges = cfg['ONLY_DYNAMIC_EDGES'],
-                           allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'],
-                           ignore_close_edges = cfg['IGNORE_CLOSE_EDGES'])
+                           only_seen_edges = cfg['ONLY_SEEN_EDGES'])
 
     output_dir = os.path.join('logs',cfg['NAME'])
     if os.path.exists(output_dir):
@@ -63,33 +60,30 @@ def run(cfg = {}, path = None):
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
-    losses = loss_filter_options(data)
-
-    assert cfg['LOSS'] in losses, 'Loss {} specified in config is invalid'.format(cfg['LOSS'])
-    train_loss = losses(cfg['LOSS'])
-    logging_loss_funcs = []
-    for logging_loss in cfg['LOSSES_LOG']:
-        assert logging_loss in losses, f'Loss {logging_loss} specified in config should be one of {losses.keys()}'
-        logging_loss_funcs.append(losses(logging_loss))
 
     model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                               node_feature_len=data.params['n_len'],
-                              edge_feature_len=data.params['e_len'],
                               context_len=data.params['c_len'],
-                              train_analyzer=train_loss, 
-                              logging_analyzers=logging_loss_funcs,
-                              use_spectral_loss=cfg['USE_SPECTRAL_LOSS'],
-                              num_chebyshev_polys=cfg['NUM_CHEBYSHEV_POLYS'],
-                              allow_multiple_edge_types=cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
+                              learn_nodes=cfg['LEARN_NODES'],
+                              edge_importance=cfg['EDGE_IMPORTANCE'],
+                              edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'])
 
     trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
 
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())
     
+    evaluation = {}
+    hit_ratios, _ = object_search(model, deepcopy(data.all_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
+    evaluation['Search hits'] = tuple(hit_ratios)
+    evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.all_routines)))
+    evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.all_routines), unconditional=True))
+    print('Test Evaluation', evaluation)
+
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:
-        visualize_datapoint(model, data.get_test_loader(), data.node_classes, data.edge_keys, softmax=not cfg['ALLOW_MULTIPLE_EDGE_TYPES'])
+        visualize_unconditional_datapoint(model, data.all_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+        visualize_conditional_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
 
 
 
@@ -97,13 +91,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
     parser.add_argument('--path', type=str, help='Path where the data lives. Must contain sample, info and classes json files.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
+    parser.add_argument('--name', type=str, help='Name of run.')
 
     args = parser.parse_args()
-    assert len(sys.argv) < 4, "The script can take only one argument specifying the config file name, e.g. 'sample'"
 
     with open(DEFAULT_CONFIG) as f:
         cfg = yaml.safe_load(f)
     if args.cfg is not None:
         with open(os.path.join('config',args.cfg)+'.yaml') as f:
             cfg.update(yaml.safe_load(f))
+    if args.name is not None:
+        cfg['NAME'] = args.name
     run(cfg=cfg, path=args.path)

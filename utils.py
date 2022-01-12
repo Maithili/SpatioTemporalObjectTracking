@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Colormap
 from torch.nn import functional as F
 
+from GraphTranslatorModule import _erase_edges
 from encoders import time_external
 
 EDGE_THRESH = 0.1
@@ -20,6 +21,8 @@ category_colors = {
     "placable_objects": "#C99DA3"
 }
 
+node_colors_by_active = ["#C99DA3", "#996888"]
+
 days = ["Monday", 'Tuesday', "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 def _get_node_info(graph_nodes, node_classes):
@@ -28,91 +31,125 @@ def _get_node_info(graph_nodes, node_classes):
         node_names.append(node_classes[node.argmax()])
     return node_names
 
-def _draw_graph(G, graphs_per_edge_class, edge_classes, axs=None, pos=None, colors = "#996888"):
-    if axs is None:
-        _, axs = plt.subplots(1,len(edge_classes))
+def _draw_graph(G, ax=None, pos=None, colors = "#996888"):
     if pos is None:
         pos = nx.spring_layout(G)
-    for ax,edge_cl in zip(axs, edge_classes):
-        if edge_cl == "CLOSE" and SINGLE_PLOT:
-            continue
-        weights = [graphs_per_edge_class[edge_cl][u][v]['weight'] for u,v in graphs_per_edge_class[edge_cl].edges()]
-        nx.draw_networkx(G, pos=pos, ax=ax, edge_cmap=plt.cm.Blues, edge_vmin = 0 ,edge_vmax = 1 , edgelist=graphs_per_edge_class[edge_cl].edges(), edge_color=weights, node_size=1000, node_color=colors)
-        nx.draw_networkx_edge_labels(G, pos=pos, ax=ax, edge_labels={k:edge_cl for k in graphs_per_edge_class[edge_cl].edges()})
-        ax.set_title(edge_cl)
+    weights = [G[u][v]['weight'] for u,v in G.edges()]
+    nx.draw_networkx(G, pos=pos, ax=ax, edge_cmap=plt.cm.Blues, edge_vmin = 0 ,edge_vmax = 1 , edgelist=G.edges(), edge_color=weights, node_size=1000, node_color=colors)
     return pos
 
 
-def _visualize_graph(graph_nodes, graph_edges, node_classes, edge_classes, axs=None, pos=None, node_categories=[]):
+def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, node_categories=[], node_color=None):
     G = nx.DiGraph()
     graph_node_names = _get_node_info(graph_nodes, node_classes)
     colors = "#996888"
-    if node_categories:
+    if node_color is not None:
+        colors = node_color
+    elif node_categories:
         categories = _get_node_info(graph_nodes, node_categories)
         colors = [category_colors[c] for c in categories]
     G.add_nodes_from(graph_node_names)
-    graphs_per_edge_class = {k:G.copy() for k in edge_classes}
     
-    nodes_from, nodes_to, edge_indices = np.argwhere(graph_edges > EDGE_THRESH)
+    nodes_from, nodes_to = np.argwhere(graph_edges > EDGE_THRESH)
 
-    for n_from, n_to, edg_idx in zip(list(nodes_from), list(nodes_to), list(edge_indices)):
-        G.add_edge(graph_node_names[n_from], graph_node_names[n_to])
-        graphs_per_edge_class[edge_classes[edg_idx]].add_edge(graph_node_names[n_from], graph_node_names[n_to], weight=float(graph_edges[n_from][n_to][edg_idx]))
+    for n_from, n_to in zip(list(nodes_from), list(nodes_to)):
+        G.add_edge(graph_node_names[n_from], graph_node_names[n_to], weight=float(graph_edges[n_from][n_to]))
     
-    return _draw_graph(G, graphs_per_edge_class, edge_classes, axs=axs, pos=pos, colors=colors)
+    return _draw_graph(G, ax=ax, pos=pos, colors=colors)
 
 
-def visualize_datapoint(model, dataloader, node_classes, edge_classes, node_categories = [], softmax=False):
+def visualize_unconditional_datapoint(model, routines, node_classes, node_categories = [], use_output_nodes = False):
+    inp = input('Do you want to visualize an unconditional output? (y/n)')
+
+    for routine in routines:
+        if inp != 'y':
+            break
+        while(inp == 'y' and len(routine)):
+            data = routines.collate_fn([routine.pop()])
+            data['edges'] = _erase_edges(data['edges'])
+            eval, details = model.step(data)
+            
+            colors = [node_colors_by_active[act] for act in details['evaluate_node'].squeeze(0)]
+
+            fig, axs = plt.subplots(2,2)
+            fig.set_size_inches(14, 8)
+            ax = axs[0][0]
+            positions = _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['input']['location'].squeeze(0)), node_classes, ax = ax, node_categories=node_categories, node_color=colors)
+            ax.set_title('Graph at t')
+
+            ax = axs[1][0]
+            if use_output_nodes:
+                _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+            else:
+                _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+            ax.set_title('Predicted (probabilities)')
+                
+            ax = axs[1][1]
+            if use_output_nodes:
+                _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+            else:
+                _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+            ax.set_title('Predicted')
+            
+            ax = axs[0][1]
+            _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), F.one_hot(details['gt']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+            ax.set_title('Graph at t+1')
+
+            fig.suptitle('Context : '+str(data['context'])+' Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy']))
+            
+            plt.show()
+            plt.savefig('temp.jpg')
+            inp = input('Do you want to visualize another output? (y/n)')
+            
+
+
+def visualize_conditional_datapoint(model, dataloader, node_classes, node_categories = [], use_output_nodes = False):
+
+    inp = input('Do you want to visualize conditioned outputs? (y/n)')
+
     data_list = list(dataloader)
-    inp = input('Do you want to visualize any output? (y/n)')
-
-
     while(inp == 'y' and len(data_list)>0):
         data = data_list.pop()
-        edges = data['edges']
-        nodes = data['nodes']
-        context = data['context']
-        y = data['y']
+        eval, details = model.step(data)
+        
+        colors = [node_colors_by_active[act] for act in details['evaluate_node'].squeeze(0)]
 
-        if softmax:
-            edges = F.one_hot(edges.squeeze(-1).long(), num_classes = len(edge_classes)+1)
+        fig, axs = plt.subplots(2,2)
+        fig.set_size_inches(14, 8)
         
-        x_hat = model.forward(edges, nodes, context)
-        loss = float(model.losses(x_hat, y, nodes).mean())
-        
-        if softmax:
-            x_hat = F.softmax(x_hat,dim=-1)
-            edges = edges[:,:,:,1:]
-            x_hat = x_hat[:,:,:,1:]
-            y = F.one_hot(y.squeeze(-1).long(), num_classes = len(edge_classes)+1)[:,:,:,1:]
-        
-        if SINGLE_PLOT:
-            fig, single_axs = plt.subplots(1,3)
-            axs = np.tile(single_axs.reshape(3,1),(1,len(edge_classes)))
+        ax = axs[0][0]
+        positions = _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['input']['location'].squeeze(0)), node_classes, ax = ax, node_categories=node_categories, node_color=colors)
+        ax.set_title('Input')
+
+        ax = axs[1][0]
+        if use_output_nodes:
+            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
         else:
-            fig, axs = plt.subplots(3,len(edge_classes))
-            axs = axs.reshape(3,len(edge_classes))
+            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        ax.set_title('Predicted (probabilities)')
+            
+        ax = axs[1][1]
+        if use_output_nodes:
+            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        else:
+            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        ax.set_title('Predicted')
+        
+        ax = axs[0][1]
+        _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), F.one_hot(details['gt']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        ax.set_title('Expected')
 
-        assert list(x_hat.size())==[1,len(node_classes), len(node_classes), len(edge_classes)], f"Wrong output size {x_hat.size()} vs {[1, len(node_classes), len(node_classes), len(edge_classes)]}"
-        assert list(y.size())==[1, len(node_classes), len(node_classes), len(edge_classes)], f"Wrong GT size {x_hat.size()} vs {[1, len(node_classes), len(node_classes), len(edge_classes)]}"
-        positions = _visualize_graph(nodes.squeeze(0), edges.squeeze(0), node_classes, edge_classes, axs = axs[0,:], node_categories=node_categories)
-        axs[0,0].set_ylabel('Input ')
-        _visualize_graph(nodes.squeeze(0), x_hat.squeeze(0), node_classes, edge_classes, axs = axs[1,:], pos=positions, node_categories=node_categories)
-        axs[1,0].set_ylabel('Predicted')
-        _visualize_graph(nodes.squeeze(0), y.squeeze(0), node_classes, edge_classes, axs = axs[2,:], pos=positions, node_categories=node_categories)
-        axs[2,0].set_ylabel('Actual')
-        fig.suptitle('Context : '+str(list(context))+'; Loss : '+str(loss))
+        fig.suptitle('Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy']))
         
         plt.show()
-        # plt.savefig('temp.jpg')
+        plt.savefig('temp.jpg')
         inp = input('Do you want to visualize another output? (y/n)')
 
 
 
-def visualize_routine(routine, dt=10, sparsify=True, remove_close = True):
+def visualize_routine(routine, dt=10, sparsify=False):
     graphs = routine['graphs']
     times = routine['times']
-    edge_classes = ["INSIDE", "ON", "CLOSE"]
     num_plots = len(graphs)
     num_x = int(floor(sqrt(num_plots)))
     num_y = int(ceil(num_plots/num_x))
@@ -125,13 +162,10 @@ def visualize_routine(routine, dt=10, sparsify=True, remove_close = True):
         node_colors = [category_colors[n['category']] for n in graph['nodes']]
         G = nx.DiGraph()
         G.add_nodes_from(node_ids)
-        edge_labels = {}
         for edge in graph['edges']:
-            if remove_close and edge['relation_type'] == "CLOSE":
-                continue
-            n1, n2 = edge['from_id'], edge['to_id']
-            G.add_edge(n1, n2, weight=1)
-            edge_labels[(n1,n2)] = edge['relation_type']
+            if edge['relation_type'] in ["INSIDE","ON"]:
+                n1, n2 = edge['from_id'], edge['to_id']
+                G.add_edge(n1, n2, weight=1)
         
         if sparsify:
             for nid in node_ids:
@@ -152,10 +186,10 @@ def visualize_routine(routine, dt=10, sparsify=True, remove_close = True):
             pos = nx.shell_layout(G, nlist=nlist)
             # pos = nx.spring_layout(G)
         nx.draw_networkx(G, pos=pos, ax=axs[i], edge_cmap=plt.cm.Blues, edge_vmin = 0 ,edge_vmax = 1, node_size=300, node_color=node_colors, labels = node_labels)
-        nx.draw_networkx_edge_labels(G, pos=pos, ax=axs[i], edge_labels=edge_labels)
         th = time_external(t*dt)
         axs[i].set_title(str(int(th[2]))+':'+str(int(th[3])))
     th = [int(t) for t in th]
     fig.suptitle("Week "+str(th[0])+" - "+days[th[1]])
     plt.show()
+    plt.savefig('temp.jpg')
     

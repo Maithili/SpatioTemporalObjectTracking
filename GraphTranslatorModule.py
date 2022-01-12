@@ -1,9 +1,12 @@
+from random import random
 import torch
 from torch.nn import functional as F
 from torch import nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
-from filters import MeanFilter
+
+def _erase_edges(edges):
+    return edges*0 + (1/edges.size()[-1])
 
 THRESH=0.5
 def chebyshev_polynomials(edges, k):
@@ -36,52 +39,142 @@ def chebyshev_polynomials(edges, k):
 
     return polynomials
 
+def _get_masks(gt_tensor, output_tensor):
+    masks = {}
+    masks['correct'] = gt_tensor == output_tensor
+    masks['wrong'] = gt_tensor != output_tensor
+    return masks
+
+def _classification_metrics(gt_tensor, output_tensor, loss_tensor):
+    masks = _get_masks(gt_tensor, output_tensor)
+    result = {'accuracy':None ,'losses':{}}
+    result['accuracy'] = (masks['correct'].sum())/torch.numel(gt_tensor)
+    result['losses']['mean'] = loss_tensor.mean()
+    result['losses']['correct'] = loss_tensor[masks['correct']].sum()/masks['correct'].sum()
+    result['losses']['wrong'] = loss_tensor[masks['wrong']].sum()/masks['wrong'].sum()
+    return result
+
+def _binary_metrics(gtt_tensor, output_tensor, loss_tensor):
+    return {}
+
+def evaluate(gt, losses, output, evaluate_node):
+    gt_tensor = gt['location'][evaluate_node]
+    output_tensor = output['location'][evaluate_node]
+    loss_tensor = losses['location'][evaluate_node]
+    location_results = _classification_metrics(gt_tensor, output_tensor, loss_tensor)
+    return {'location':location_results}
 
 class GraphTranslatorModule(LightningModule):
-    def __init__(self, num_nodes, node_feature_len, edge_feature_len, context_len, train_analyzer=MeanFilter(), logging_analyzers=[], use_spectral_loss=True, num_chebyshev_polys=2, allow_multiple_edge_types=False):
+    def __init__(self, 
+                num_nodes, 
+                node_feature_len,
+                context_len, 
+                node_accuracy_weight=0.5,
+                learn_nodes=False,
+                edge_importance=True,
+                edge_dropout_prob=0.1):
+        
         super().__init__()
 
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
-        self.edge_feature_len = edge_feature_len
         self.context_len = context_len
-        self.allow_multiple_edge_types = allow_multiple_edge_types
+        self.node_accuracy_weight = node_accuracy_weight
+        self.learn_nodes = learn_nodes
+        self.edge_importance = edge_importance
+        self.edge_dropout_prob = edge_dropout_prob
 
-        self.train_analyzer = train_analyzer
-        self.logging_analyzers = logging_analyzers
-        self.use_spectral_loss = use_spectral_loss
-        self.num_chebyshev_polys = num_chebyshev_polys
         self.map_spectral_loss = 0
 
         self.hidden_influence_dim = 20
-        
-        self.mlp_influence = nn.Sequential(
-                             nn.Linear(self.node_feature_len*2+self.edge_feature_len, 20),
-                             nn.ReLU(),
-                             nn.Linear(20, self.hidden_influence_dim),
-                             )
 
-        if allow_multiple_edge_types:
-            self.mlp_update = nn.Sequential(
-                               nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.context_len, 20),
-                               nn.ReLU(),
-                               nn.Linear(20, self.edge_feature_len),
-                               nn.Sigmoid()
-                               )
-            self.accuracy_loss = nn.BCELoss(reduction='none')
-            self.inference_accuracy = lambda x,y: ((x > 0.5).to(dtype=int) == y).to(dtype=float)
+        self.edges_update_input_dim = self.hidden_influence_dim*4 + 1 + self.context_len
         
+        self.mlp_influence    = {}     
+        self.mlp_update_edges = {}        
+        self.mlp_update_nodes = {}
+
+        self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, 20),
+                                                    nn.ReLU(),
+                                                    nn.Linear(20, self.hidden_influence_dim),
+                                                    )
+        self.mlp_update_importance = nn.Sequential(nn.Linear(self.edges_update_input_dim, 20),
+                                                    nn.ReLU(),
+                                                    nn.Linear(20, 1)
+                                                    )
+        self.mlp_update_edges = nn.Sequential(nn.Linear(self.edges_update_input_dim, 20),
+                                                    nn.ReLU(),
+                                                    nn.Linear(20, 1)
+                                                    )
+        self.mlp_update_nodes = nn.Sequential(nn.Linear(self.hidden_influence_dim*2+self.node_feature_len+self.context_len, 20),
+                                                    nn.ReLU(),
+                                                    nn.Linear(20, self.node_feature_len)
+                                                    )
+        
+        self.location_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.squeeze(-1).permute(0,2,1), y.squeeze(-1).long()))
+        self.inference_location = lambda x: x.squeeze(-1).argmax(-1)
+
+        self.class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.long())
+        self.inference_class = lambda xc: xc.argmax(-1)
+
+        # self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
+        
+    def graph_step(self, edges, nodes, context):
+
+        batch_size, num_nodes, node_feature_len = nodes.size()
+        
+        x = self.collate_edges(edges=edges.unsqueeze(-1), nodes=nodes)
+        x = x.view(
+            size=[batch_size * self.num_nodes * self.num_nodes, 
+                  2*self.node_feature_len+1])
+        x = self.mlp_influence(x)
+        x = x.view(
+            size=[batch_size, 
+                  self.num_nodes, 
+                  self.num_nodes, 
+                  self.hidden_influence_dim])
+
+        if self.edge_importance == 'predicted':
+            ## importance update
+            imp = self.message_collection_edges(x, edges.unsqueeze(-1), context)
+            imp = imp.view(
+                size=[batch_size * self.num_nodes * self.num_nodes, 
+                    self.edges_update_input_dim])
+            imp = self.mlp_update_importance(imp).view(size=[batch_size, 
+                                            self.num_nodes, 
+                                            self.num_nodes,
+                                            1])
+        elif self.edge_importance == 'all':
+            imp = torch.ones_like(edges.unsqueeze(-1))
+        elif self.edge_importance == 'existing':
+            imp = edges.unsqueeze(-1)
         else:
-            self.mlp_update = nn.Sequential(
-                               nn.Linear(self.hidden_influence_dim*4+self.edge_feature_len+self.context_len, 20),
-                               nn.ReLU(),
-                               nn.Linear(20, self.edge_feature_len),
-                               )
-            self.accuracy_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.permute(0,3,1,2), y.squeeze(-1).long())).unsqueeze(-1)
-            self.inference_accuracy = lambda x,y: (x.argmax(-1) == y.squeeze(-1)).to(dtype=float).unsqueeze(-1)
+            raise KeyError(f'Edge Importance given as ({self.edge_importance}) is not among predicted, all or existing')
 
-        self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
-        
+        ## edge update
+        xe = self.message_collection_edges(x, imp, context)
+        xe = xe.view(
+            size=[batch_size * self.num_nodes * self.num_nodes, 
+                self.edges_update_input_dim])
+        xe = self.mlp_update_edges(xe).view(size=[batch_size, 
+                                        self.num_nodes, 
+                                        self.num_nodes,
+                                        1])
+
+        ## node update
+        if self.learn_nodes:
+            xn = self.message_collection_nodes(torch.mul(x,imp), nodes, context)
+            xn = xn.view(
+                size=[batch_size * self.num_nodes, 
+                    self.hidden_influence_dim*2 + self.node_feature_len + self.context_len])
+            xn = self.mlp_update_nodes(xn).view(size=[batch_size, 
+                                            self.num_nodes, 
+                                            self.node_feature_len])
+        else:
+            xn = nodes        
+
+        return xe, xn
+
     def forward(self, edges, nodes, context):
         """
         Args:
@@ -93,90 +186,81 @@ class GraphTranslatorModule(LightningModule):
         """
 
         batch_size, num_nodes, node_feature_len = nodes.size()
-        batch_size_e, num_f_nodes, num_t_nodes, edge_feature_len = edges.size()
+        batch_size_e, num_f_nodes, num_t_nodes = edges.size()
         
         # Sanity check input dimensions
         assert batch_size == batch_size_e, "Different edge and node batch sizes"
-        assert self.edge_feature_len == edge_feature_len, (str(self.edge_feature_len) +'!='+ str(edge_feature_len))
         assert self.node_feature_len == node_feature_len, (str(self.node_feature_len) +'!='+ str(node_feature_len))
         assert self.num_nodes == num_nodes, (str(self.num_nodes) +'!='+ str(num_nodes))
         assert self.num_nodes == num_f_nodes, (str(self.num_nodes) +'!='+ str(num_f_nodes))
         assert self.num_nodes == num_t_nodes, (str(self.num_nodes) +'!='+ str(num_t_nodes))
 
-        x = self.collate_edges(edges=edges, nodes=nodes)
-        x = x.view(
-            size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.node_feature_len * 2 + self.edge_feature_len])
-        x = self.mlp_influence(x)
-        x = x.view(
-            size=[batch_size, 
-                  self.num_nodes, 
-                  self.num_nodes, 
-                  self.hidden_influence_dim])
-        x = self.message_collection(x, edges, context)
-        x = x.view(
-            size=[batch_size * self.num_nodes * self.num_nodes, 
-                  self.hidden_influence_dim*4 + self.edge_feature_len + self.context_len])
-        x = self.mlp_update(x).view(size=[batch_size, 
-                                          self.num_nodes, 
-                                          self.num_nodes, 
-                                          self.edge_feature_len])
-        return x
+        # for step in range(len(self.edge_feature_len)-1):
+        edges, nodes = self.graph_step(edges, nodes, context)
+
+        return edges.squeeze(-1), nodes
+
+    def step(self, batch):
+        edges = batch['edges']
+        nodes = batch['nodes']
+        context = batch['context']
+        y_edges = batch['y_edges']
+        y_nodes = batch['y_nodes']
+        dyn_edges = batch['dynamic_edges_mask']
+        
+        edges_pred, nodes_pred = self(edges, nodes, context)
+
+        assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
+        edges_pred[dyn_edges == 0] = -float("inf")
+        evaluate_node = dyn_edges.sum(-1) > 0
+
+        input = {'class':self.inference_class(nodes), 
+                 'location':self.inference_location(edges)}
+                 
+        output_probs = {'class':nodes_pred, 
+                        'location':edges_pred}
+
+        gt = {'class':self.inference_class(y_nodes), 
+              'location':self.inference_location(y_edges)}
+
+        losses = {'class':self.class_loss(output_probs['class'], gt['class']),
+                  'location':self.location_loss(output_probs['location'], gt['location'])}
+
+        output = {'class':self.inference_class(output_probs['class']),
+                  'location':self.inference_location(output_probs['location'])}
+        
+        # for result, name in zip([input, gt, losses, output], ['input', 'gt', 'losses', 'output']):
+        #     assert list(result['class'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())
+        #     assert list(result['location'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())
+
+        # assert list(output_probs['class'].size())[:-1] == list(nodes.size())[:-1], 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), nodes.size())
+        # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
+
+        eval = evaluate(gt, losses, output, evaluate_node)
+
+        return eval['location'], {'input':input, 'output_probs':output_probs, 'gt':gt, 'losses':losses, 'output':output, 'evaluate_node':evaluate_node}
+
 
     def training_step(self, batch, batch_idx):
-        """
-        Args:
-            batch: x,y (tuple) 
-                    x: adjacency,edges,nodes,context (tuple) : edges is nxnx_; nodes is nx_; context is any vector
-                    y: edge_existence,edge_category : existence is 0/1; type is integer in [0,len(edge_feat))
-        """
-        edges = batch['edges']
-        nodes = batch['nodes']
-        context = batch['context']
-        y = batch['y']
-        if not self.allow_multiple_edge_types:
-            edges_in = F.one_hot(edges.squeeze(-1).long(), num_classes = self.edge_feature_len)
-        else:
-            edges_in = edges
-        
-        x = self(edges_in, nodes, context)
-        losses = self.losses(x, y, nodes)
-        no_change_loss = self.losses(edges_in.to(float), y, nodes)
-        
-        for analyzer in self.logging_analyzers:
-            self.log('Train loss : '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes))
-            self.log('Train loss (w.r.t no change): '+analyzer.name(), analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes)/analyzer(no_change_loss, x_edges=edges, y_edges=y, nodes=nodes))
-        self.log('Spectral Loss: ',self.map_spectral_loss)
-
-        return self.train_analyzer(losses, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss
+        eval,_ = self.step(batch)
+        if random() < self.edge_dropout_prob:
+            batch['edges'] = _erase_edges(batch['edges'])
+        self.log('Train accuracy',eval['accuracy'])
+        self.log('Train losses',eval['losses'])
+        return eval['losses']['mean'] + self.map_spectral_loss
 
     def test_step(self, batch, batch_idx):
-        edges = batch['edges']
-        nodes = batch['nodes']
-        context = batch['context']
-        y = batch['y']
-        if not self.allow_multiple_edge_types:
-            edges_in = F.one_hot(edges.squeeze(-1).long(), num_classes = self.edge_feature_len)
-        else:
-            edges_in = edges
+        eval, details = self.step(batch)
+        self.log('Test accuracy',eval['accuracy'])
+        self.log('Test losses',eval['losses'])
+        
+        uncond_batch = batch
+        uncond_batch['edges'] = _erase_edges(uncond_batch['edges'])
+        eval, details = self.step(uncond_batch)
+        self.log('Test accuracy (Unconditional)',eval['accuracy'])
+        self.log('Test losses (Unconditional)',eval['losses'])
 
-        x = self(edges_in, nodes, context)
-        losses = self.losses(x, y, nodes)
-        accuracy = self.inference_accuracy(x,y)
-        no_change_accuracy = self.inference_accuracy(edges_in,y)
-
-        for analyzer in self.logging_analyzers:
-            self.log('Test accuracy : '+analyzer.name(), analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes))
-            self.log('No change Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(no_change_accuracy, x_edges=edges, y_edges=y, nodes=nodes))
-            self.log('Test accuracy (w.r.t no change): '+analyzer.name(), analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes)/analyzer(no_change_accuracy, x_edges=edges, y_edges=y, nodes=nodes))
-
-        return self.train_analyzer(accuracy, x_edges=edges, y_edges=y, nodes=nodes) + self.map_spectral_loss
-
-    def losses(self, x, y, nodes=None):
-        losses = self.accuracy_loss(x, y)
-        if self.use_spectral_loss:
-            self.map_spectral_loss = self.graph_regularized_spectral_loss(x, nodes)
-        return losses
+        return 
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=1e-3)
@@ -189,31 +273,43 @@ class GraphTranslatorModule(LightningModule):
         assert(len(concatenated.size())==4)
         assert(concatenated.size()[1]==self.num_nodes)
         assert(concatenated.size()[2]==self.num_nodes)
-        assert(concatenated.size()[3]==self.node_feature_len*2+self.edge_feature_len)
+        assert(concatenated.size()[3]==self.node_feature_len*2+1)
         return concatenated
 
-    def message_collection(self, edge_influence, edges, context):
+    def message_collection_edges(self, edge_influence, edges, context):
         # context = batch_size x context_length
         # edge_influence : batch_size x from_nodes x to_nodes x hidden_influence_dim
 
+        masked_edge_influence = torch.mul(edge_influence,edges)
+
         # batch_size x nodes x 1 x hidden_influence_dim
-        from_from_influence = edge_influence.sum(dim=2).unsqueeze(2).repeat([1,1,self.num_nodes,1])
-        from_to_influence = edge_influence.sum(dim=1).unsqueeze(2).repeat([1,1,self.num_nodes,1])
+        from_from_influence = masked_edge_influence.sum(dim=2).unsqueeze(2).repeat([1,1,self.num_nodes,1])
+        from_to_influence = masked_edge_influence.sum(dim=1).unsqueeze(2).repeat([1,1,self.num_nodes,1])
         # batch_size x 1 x nodes x hidden_influence_dim
-        to_to_influence = edge_influence.sum(dim=1).unsqueeze(1).repeat([1,self.num_nodes,1,1])
-        to_from_influence = edge_influence.sum(dim=2).unsqueeze(1).repeat([1,self.num_nodes,1,1])
+        to_to_influence = masked_edge_influence.sum(dim=1).unsqueeze(1).repeat([1,self.num_nodes,1,1])
+        to_from_influence = masked_edge_influence.sum(dim=2).unsqueeze(1).repeat([1,self.num_nodes,1,1])
         
         # all_influences : batch_size x from_nodes x to_nodes x hidden_influence_dim
         all_influences = torch.cat([from_from_influence, from_to_influence, to_to_influence, to_from_influence],dim=-1)
         context_repeated = context.unsqueeze(1).unsqueeze(1).repeat([1,self.num_nodes,self.num_nodes,1])
 
-        # batch_size x from_nodes x to_nodes x (hidden_influence_dim*4 + edge_feature_len + context_length)
+        # batch_size x from_nodes x to_nodes x self.edges_update_input_dim
         message_to_edge = torch.cat([all_influences,edges,context_repeated],dim=-1)
+        
         assert(len(message_to_edge.size())==4)
         assert(message_to_edge.size()[1]==self.num_nodes)
         assert(message_to_edge.size()[2]==self.num_nodes)
-        assert(message_to_edge.size()[3]==self.hidden_influence_dim*4+self.edge_feature_len+self.context_len)
         return message_to_edge
+
+    def message_collection_nodes(self, masked_edge_influence, nodes, context):
+        # context = batch_size x context_length
+        # edge_influence : batch_size x from_nodes x to_nodes x hidden_influence_dim
+
+        from_influence = masked_edge_influence.sum(dim=1)
+        to_influence = masked_edge_influence.sum(dim=2)
+        context_repeated = context.unsqueeze(1).repeat([1,self.num_nodes,1])
+        message_to_node = torch.cat([from_influence, to_influence, nodes, context_repeated],dim=-1)
+        return message_to_node
 
     def graph_regularized_spectral_loss(self, edges, nodes):
         # batch_size x k x N_nodes x N_nodes
