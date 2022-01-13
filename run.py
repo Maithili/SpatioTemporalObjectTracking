@@ -19,7 +19,11 @@ DEFAULT_CONFIG = 'config/default.yaml'
 def run(cfg = {}, path = None):
     
     if path is not None:
-        cfg['DATA_PATH'] = os.path.join(path, 'sample.json')
+        cfg['DATA_PATH'] = os.path.join(path, 'routines.json')
+        if not os.path.exists(cfg['DATA_PATH']):
+            cfg['DATA_PATH'] = (os.path.join(path, 'routines_train.json'), os.path.join(path, 'routines_test.json'))
+        if not (os.path.exists(cfg['DATA_PATH'][0]) and os.path.exists(cfg['DATA_PATH'][1])):
+            print('The data directory must contain a routines.json or else both of routines_train.json and routines_test.json')
         cfg['CLASSES_PATH'] = os.path.join(path, 'classes.json')
         cfg['DATA_INFO'] = os.path.join(path, 'info.json')
         if cfg['NAME'] is None:
@@ -87,7 +91,7 @@ def run(cfg = {}, path = None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, help='Path where the data lives. Must contain sample, info and classes json files.')
+    parser.add_argument('--path', type=str, help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--name', type=str, help='Name of run.')
 
