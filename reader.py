@@ -93,36 +93,39 @@ class DataSplit():
     
 
 class RoutinesDataset():
-    def __init__(self, data_path: str = 'data/example/sample.json', 
-                 classes_path: str = 'data/example/classes.json', 
+    def __init__(self, data_path, 
+                 classes_path, 
                  test_perc = 0.2, 
                  time_encoder = time_sine_cosine, 
                  dt = 10,
-                 edges_of_interest = None,
                  batch_size = 1,
                  only_seen_edges = False):
 
-        self.data_path = data_path
-        self.classes_path = classes_path
+        self.read_classes(classes_path)
         self.time_encoder = time_encoder
+        
         self.params = {}
-        self.params['dt'] = dt    # Overwritten if present in classes
-        self.params['edges_of_interest'] = edges_of_interest if edges_of_interest is not None else []
+        self.params['dt'] = dt    # Overwrites the one present in classes
         self.params['batch_size'] = batch_size
         self.params['only_seen_edges'] = only_seen_edges
 
         # Read data
-        self._alldata = self.read_data()
-
-        # Split the data into train and test
-        random.shuffle(self._alldata)
-        num_test = int(round(test_perc*len(self._alldata)))
-        self.test = DataSplit(self._alldata[:num_test], self.time_encoder, self.params['dt'], self.active_edges)
-        self.train = DataSplit(self._alldata[num_test:], self.time_encoder, self.params['dt'], self.active_edges)
-        self.all_routines = DataSplit(self._alldata, self.time_encoder, self.params['dt'], self.active_edges, whole_routines=True)
-        print(len(self._alldata),' routines found in dataset.')
-        print(len(self.train),' examples in train split.')
-        print(len(self.test),' examples in test split.')
+        if type(data_path) == tuple:
+            self._train_data = self.read_data(data_path[0])
+            self._test_data = self.read_data(data_path[1])
+        else:
+            self._all_data = self.read_data(data_path)
+            random.shuffle(self._all_data)
+            num_test = int(round(test_perc*len(self._all_data)))
+            self._train_data = self._all_data[num_test:]
+            self._test_data = self._all_data[:num_test]
+            
+        # Generate train and test loaders
+        self.train = DataSplit(self._train_data, self.time_encoder, self.params['dt'], self.active_edges)
+        self.test = DataSplit(self._test_data, self.time_encoder, self.params['dt'], self.active_edges)
+        self.test_routines = DataSplit(self._test_data, self.time_encoder, self.params['dt'], self.active_edges, whole_routines=True)
+        print(len(self._train_data),' routines and ',len(self.train),' examples in train split.')
+        print(len(self._test_data),' routines and ',len(self.test),' examples in test split.')
 
         # Infer parameters for the model
         model_data = self.test.collate_fn([self.test[0]])
@@ -130,13 +133,10 @@ class RoutinesDataset():
         self.params['n_len'] = model_data['nodes'].size()[-1]
         self.params['c_len'] = model_data['context'].size()[-1]
 
-    def read_data(self):
-        with open(self.classes_path, 'r') as f:
-            classes = json.load(f)
-        with open(self.data_path, 'r') as f:
+
+    def read_data(self, data_path):
+        with open(data_path, 'r') as f:
             data = json.load(f)
-        
-        self.read_classes(classes)
 
         if INTERACTIVE:
             inp = input(f'Do you want to visualize all {len(data)} routines?')
@@ -144,7 +144,7 @@ class RoutinesDataset():
             inp = 'n'
         viz = (inp == 'y')
 
-        training_data = []
+        parsed_data = []
         for routine in data:
             if viz:
                 visualize_routine(routine, dt=self.params['dt'])
@@ -152,19 +152,22 @@ class RoutinesDataset():
                 viz = (inp == 'y')
             nodes, edges = self.read_graphs(routine["graphs"])
             times = torch.Tensor(routine["times"])
-            training_data.append((nodes, edges, times))
+            parsed_data.append((nodes, edges, times))
 
         if self.params['only_seen_edges']:
             self.active_edges[self.seen_edges == 0] = 0
         self.active_edges = torch.Tensor(self.active_edges)
         
-        return training_data
+        return parsed_data
 
-    def read_classes(self, classes):
+    def read_classes(self, classes_path):
+        with open(classes_path, 'r') as f:
+            classes = json.load(f)
         self.node_ids = [n['id'] for n in classes['nodes']]
         self.node_classes = [n['class_name'] for n in classes['nodes']]
         self.node_categories = [n['category'] for n in classes['nodes']]
         self.node_idx_from_id = {n['id']:i for i,n in enumerate(classes['nodes'])}
+
         # Diagonal nodes are always irrelevant
         self.active_edges = 1 - np.eye(len(classes['nodes']))
         # Rooms, furniture and appliances nodes don't move
@@ -175,8 +178,6 @@ class RoutinesDataset():
 
         self.edge_keys = classes['edges']
         self.edge_keys.remove("CLOSE")
-        if 'dt' in classes:
-            self.params['dt'] = classes['dt']
         static = lambda category : category in ["Furniture", "Room"]
         self.static_nodes = [n['id'] for n in classes['nodes'] if static(n['category'])]
 
@@ -198,22 +199,6 @@ class RoutinesDataset():
                 self.seen_edges[:,:] += edge_features[i,:,:]
         return torch.Tensor(node_features), torch.Tensor(edge_features)
 
-    def get_edges(self, graph, n_id1, n_id2):
-        edges = [e for e in graph['edges'] if e['from_id']==n_id1 and e['to_id']==n_id2]
-        return edges
-
-    def encode_edge(self, edges):
-        valid = any([e['relation_type'] in self.edge_keys for e in edges])
-        encoding = 1 if valid else 0
-        return encoding
-
-    def encode_node(self, node):
-        node_class = np.array(self.node_ids) == node['id']
-        return node_class
-
-    def get_class_from_id(self, id):
-        return self.node_ids.index(id)
-
     def get_train_loader(self):
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
 
@@ -222,13 +207,3 @@ class RoutinesDataset():
 
     def get_single_example_test_loader(self):
         return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
-
-    def get_edges_of_interest(self):
-        edges = {}
-        for from_node, relation, to_node in self.params['edges_of_interest']:
-            from_feat = self.node_classes.index(from_node)
-            to_feat = self.node_classes.index(to_node)
-            rel_idx = self.edge_keys.index(relation)
-            name = ' '.join([from_node, relation, to_node])
-            edges[name] = (from_feat,to_feat,rel_idx)
-        return edges

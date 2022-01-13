@@ -33,12 +33,13 @@ def run(cfg = {}, path = None):
     time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
     time_encoding = time_options(cfg['TIME_ENCODING'])
 
+    if (cfg['DT'] != cfg['DATA_INFO']['dt']): print('Different dt found in config {} and data {}. The former will be used'.format(cfg['DT'], cfg['DATA_INFO']['dt']))
+
     data = RoutinesDataset(data_path=cfg['DATA_PATH'], 
                            classes_path=cfg['CLASSES_PATH'], 
                            time_encoder=time_encoding, 
                            dt=cfg['DT'],
                            test_perc=cfg['TEST_SPLIT'], 
-                           edges_of_interest=cfg['EDGES_OF_INTEREST'], 
                            batch_size=cfg['BATCH_SIZE'],
                            only_seen_edges = cfg['ONLY_SEEN_EDGES'])
 
@@ -71,15 +72,15 @@ def run(cfg = {}, path = None):
     trainer.test(model, data.get_test_loader())
     
     evaluation = {}
-    hit_ratios, _ = object_search(model, deepcopy(data.all_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
+    hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
     evaluation['Search hits'] = tuple(hit_ratios)
-    evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.all_routines)))
-    evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.all_routines), unconditional=True))
+    evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
+    evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
     print('Test Evaluation', evaluation)
 
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:
-        visualize_unconditional_datapoint(model, data.all_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+        visualize_unconditional_datapoint(model, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
         visualize_conditional_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
 
 
