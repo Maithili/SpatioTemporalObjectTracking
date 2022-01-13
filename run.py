@@ -76,7 +76,7 @@ def run(cfg = {}, path = None):
     trainer.test(model, data.get_test_loader())
     
     evaluation = {}
-    get_actions(model, deepcopy(data.test_routines), data.node_classes)
+    get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'))
     hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
     evaluation['Search hits'] = tuple(hit_ratios)
     evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))

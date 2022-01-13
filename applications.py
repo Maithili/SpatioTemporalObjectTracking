@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from copy import deepcopy
 from GraphTranslatorModule import _erase_edges
@@ -51,30 +52,34 @@ class ChangePlanner():
         mask = np.bitwise_and(target_loc != self.initial_locations, target_details['evaluate_node'])
         return np.argwhere(mask)[1,:], (target_loc[mask]).view(-1)
 
-def get_actions(model, test_routines, node_classes, lookahead_steps = 5):
+def get_actions(model, test_routines, node_classes, action_dir, lookahead_steps = 5):
+    os.makedirs(action_dir)
     for routine_num,routine in enumerate(test_routines):
-        for i in range(len(routine) - lookahead_steps):
-            initial_data = test_routines.collate_fn([routine[i]])
-            eval, details_initial = model.step(initial_data)
-            change_planner = ChangePlanner(details_initial)
+        with open(os.path.join(action_dir,'{:03d}.txt'.format(routine_num)), 'w') as f:
+            for i in range(len(routine) - lookahead_steps):
+                initial_data = test_routines.collate_fn([routine[i]])
+                eval, details_initial = model.step(initial_data)
+                change_planner = ChangePlanner(details_initial)
+                
+                f.write('\n## {}\n'.format(human_readable_from_external(initial_data['timestamp'])))
 
-            if i+lookahead_steps < len(routine):
-                prev_edges = initial_data['edges']
-                for j in range(lookahead_steps):
-                    data = test_routines.collate_fn([routine[i+j]])
-                    data['edges'] = prev_edges
-                    eval, details = model.step(data)
-                    prev_edges = details['output_probs']['location']
-                changes_obj, changes_loc = change_planner(details)
+                if i+lookahead_steps < len(routine):
+                    prev_edges = initial_data['edges']
+                    for j in range(lookahead_steps):
+                        data = test_routines.collate_fn([routine[i+j]])
+                        data['edges'] = prev_edges
+                        eval, details = model.step(data)
+                        prev_edges = details['output_probs']['location']
+                    changes_obj, changes_loc = change_planner(details)
+                    for co, cl in zip(changes_obj, changes_loc):
+                        f.write('(Proactive)   '+ node_classes[co]+' to '+node_classes[cl]+'\n')
+                
+                data_in = initial_data
+                data_in['edges'] = _erase_edges(data_in['edges'])
+                eval, details_unconditional = model.step(initial_data)
+                changes_obj, changes_loc = change_planner(details_unconditional)
                 for co, cl in zip(changes_obj, changes_loc):
-                    print('Routine',routine_num,': (Proactive)',human_readable_from_external(initial_data['timestamp']), node_classes[co],' to ',node_classes[cl])
-            
-            data_in = initial_data
-            data_in['edges'] = _erase_edges(data_in['edges'])
-            eval, details_unconditional = model.step(initial_data)
-            changes_obj, changes_loc = change_planner(details_unconditional)
-            for co, cl in zip(changes_obj, changes_loc):
-                print('Routine',routine_num,': (Restorative)',human_readable_from_external(initial_data['timestamp']), node_classes[co],' to ',node_classes[cl])
+                    f.write('(Restorative) '+ node_classes[co]+' to '+node_classes[cl]+'\n')
     return 
 
 def something(model, test_routines):
