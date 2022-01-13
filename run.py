@@ -81,7 +81,8 @@ def run(cfg = {}, path = None):
     evaluation['Search hits'] = tuple(hit_ratios)
     evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
     evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
-    print('Test Evaluation', evaluation)
+    with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
+        json.dump(evaluation,f)
 
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:

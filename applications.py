@@ -20,7 +20,7 @@ def multiple_steps(model, test_routines, unconditional=False):
             else:
                 accuracies.append([eval['accuracy']])
             n_step += 1
-    avg_accuracy_stepwise = [np.mean(a) for a in accuracies]
+    avg_accuracy_stepwise = [float(np.mean(a)) for a in accuracies]
     return avg_accuracy_stepwise
 
 def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from_id):
@@ -40,7 +40,7 @@ def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from
             total_guesses += 1
     def accumulate_hits(hit_count_in):
         hit_count_in.append(0)
-        return [sum(hit_count_in[:i+1])/total_guesses for i in range(num_hit_counts)]
+        return [float(sum(hit_count_in[:i+1])/total_guesses) for i in range(num_hit_counts)]
     cumulative_hit_ratio = [accumulate_hits(h) for h in hits]
     return cumulative_hit_ratio, total_guesses
 
