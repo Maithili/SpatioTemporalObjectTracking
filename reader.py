@@ -3,7 +3,7 @@ import numpy as np
 from math import ceil, floor
 import torch
 import random
-from encoders import time_sine_cosine
+from encoders import time_external
 from torch.utils.data import DataLoader
 
 from utils import visualize_routine
@@ -55,7 +55,7 @@ class DataSplit():
         else:
             self.data = self.make_pairwise(routines)
             random.shuffle(self.data)
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask'])
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'timestamp'])
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx: int):
@@ -84,7 +84,7 @@ class DataSplit():
                     continue
                 if prev_edges is not None:
                     edges_mask = self.active_edges
-                    pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder(prev_t), edges[data_idx], nodes[data_idx], edges_mask))
+                    pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder(prev_t), edges[data_idx], nodes[data_idx], edges_mask, time_external(prev_t)))
                     # assert not(((edges_mask-edges[data_idx])<0).any())
                 prev_edges = edges[data_idx]
                 prev_nodes = nodes[data_idx]
@@ -96,7 +96,7 @@ class RoutinesDataset():
     def __init__(self, data_path, 
                  classes_path, 
                  test_perc = 0.2, 
-                 time_encoder = time_sine_cosine, 
+                 time_encoder = time_external, 
                  dt = 10,
                  batch_size = 1,
                  only_seen_edges = False):
@@ -177,7 +177,6 @@ class RoutinesDataset():
         self.seen_edges = np.zeros_like(self.active_edges)
 
         self.edge_keys = classes['edges']
-        self.edge_keys.remove("CLOSE")
         static = lambda category : category in ["Furniture", "Room"]
         self.static_nodes = [n['id'] for n in classes['nodes'] if static(n['category'])]
 

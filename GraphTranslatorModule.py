@@ -237,8 +237,16 @@ class GraphTranslatorModule(LightningModule):
         # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
 
         eval = evaluate(gt, losses, output, evaluate_node)
+        
+        details = {'input':input, 
+                   'output_probs':output_probs, 
+                   'gt':gt, 
+                   'losses':losses, 
+                   'output':output, 
+                   'evaluate_node':evaluate_node, 
+                   'timestamp':batch['timestamp']}
 
-        return eval['location'], {'input':input, 'output_probs':output_probs, 'gt':gt, 'losses':losses, 'output':output, 'evaluate_node':evaluate_node}
+        return eval['location'], details
 
 
     def training_step(self, batch, batch_idx):

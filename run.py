@@ -12,7 +12,7 @@ from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE
 from encoders import TimeEncodingOptions
 from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
-from applications import multiple_steps, object_search
+from applications import multiple_steps, object_search, get_actions
 
 DEFAULT_CONFIG = 'config/default.yaml'
 
@@ -76,6 +76,7 @@ def run(cfg = {}, path = None):
     trainer.test(model, data.get_test_loader())
     
     evaluation = {}
+    get_actions(model, deepcopy(data.test_routines), data.node_classes)
     hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
     evaluation['Search hits'] = tuple(hit_ratios)
     evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))

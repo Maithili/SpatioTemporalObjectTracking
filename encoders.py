@@ -59,3 +59,14 @@ class TimeEncodingOptions():
             return lambda t : clock_time_with_weekend_bit(t, self.weekend_days)
         else:
             raise LookupError('Time encoding option is invalid!')
+
+
+def human_readable_from_external(t):
+    t=t.squeeze()
+    weeks, days, hrs, mins = int(t[0]), int(t[1]), int(t[2]), int(t[3])
+    t_h = '{:02d}:{:02d}'.format(hrs,mins)
+    if weeks > 0:
+        t_h = 'Week '+str(weeks)+', Day '+str(days)+', '+t_h
+    elif days > 0:
+        t_h = 'Day '+str(days)+', '+t_h
+    return t_h
