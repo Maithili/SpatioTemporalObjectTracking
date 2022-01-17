@@ -50,38 +50,73 @@ class ChangePlanner():
     def __call__(self, target_details):
         target_loc = target_details['output']['location']
         mask = np.bitwise_and(target_loc != self.initial_locations, target_details['evaluate_node'])
-        return np.argwhere(mask)[1,:], (target_loc[mask]).view(-1)
+        return np.argwhere(mask)[1,:], (target_loc[mask]).view(-1), (self.initial_locations[mask]).view(-1)
 
-def get_actions(model, test_routines, node_classes, action_dir, lookahead_steps = 5):
+def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_from_id, lookahead_steps = 5):
     os.makedirs(action_dir)
+    actions_with_eval = [{} for _  in test_routines]
+    summary_eval = {'good':0,'bad':0,'total':0}
     for routine_num,(routine, additional_info) in enumerate(test_routines):
-        with open(os.path.join(action_dir,'{:03d}.txt'.format(routine_num)), 'w') as f:
-            for i in range(len(routine) - lookahead_steps):
-                initial_data = test_routines.collate_fn([routine[i]])
-                eval, details_initial = model.step(initial_data)
-                change_planner = ChangePlanner(details_initial)
-                
-                f.write('\n## {}\n'.format(human_readable_from_external(additional_info[i]['timestamp'])))
-                f.write('\n## {}\n'.format(additional_info[i]['obj_id_in_use']))
+        for i in range(len(routine) - lookahead_steps):
+            initial_data = test_routines.collate_fn([routine[i]])
+            eval, details_initial = model.step(initial_data)
+            change_planner = ChangePlanner(details_initial)
 
-                if i+lookahead_steps < len(routine):
-                    prev_edges = initial_data['edges']
-                    for j in range(lookahead_steps):
-                        data = test_routines.collate_fn([routine[i+j]])
-                        data['edges'] = prev_edges
-                        eval, details = model.step(data)
-                        prev_edges = details['output_probs']['location']
-                    changes_obj, changes_loc = change_planner(details)
-                    for co, cl in zip(changes_obj, changes_loc):
-                        f.write('(Proactive)   '+ node_classes[co]+' to '+node_classes[cl]+'\n')
-                
-                data_in = initial_data
-                data_in['edges'] = _erase_edges(data_in['edges'])
-                eval, details_unconditional = model.step(initial_data)
-                changes_obj, changes_loc = change_planner(details_unconditional)
-                for co, cl in zip(changes_obj, changes_loc):
-                    f.write('(Restorative) '+ node_classes[co]+' to '+node_classes[cl]+'\n')
-    return 
+            for prev_step_action_lists in actions_with_eval[routine_num].values():
+                for prev_action in prev_step_action_lists['proactive'] + prev_step_action_lists['restorative']:
+                    if prev_action['eval'] is None:
+                        actual_location = details_initial['input']['location'][0,prev_action['object']]
+                        if prev_action['to'] == actual_location:
+                            prev_action['eval'] = 1
+                            summary_eval['good'] += 1
+                        elif prev_action['from'] != actual_location:
+                            prev_action['eval'] = 0
+            
+            obj_idx_in_use = [dict_node_idx_from_id[o['id']] for o in additional_info[i]['obj_in_use']]
+
+            if i+lookahead_steps < len(routine):
+                prev_edges = initial_data['edges']
+                for j in range(lookahead_steps):
+                    data = test_routines.collate_fn([routine[i+j]])
+                    data['edges'] = prev_edges
+                    eval, details = model.step(data)
+                    prev_edges = details['output_probs']['location']
+                changes_obj, changes_to, changes_from = change_planner(details)
+                proactive_actions = []
+                for obj, to, fr in zip(changes_obj, changes_to, changes_from):
+                    string_action = node_classes[obj]+' from '+node_classes[fr]+' to '+node_classes[to]
+                    eval = -1 if obj in obj_idx_in_use else None
+                    proactive_actions.append({'object':int(obj), 'from':int(fr), 'to':int(to), 'string':string_action, 'eval':eval})
+                    if eval == -1 : summary_eval['bad'] += 1
+                    summary_eval['total'] += 1
+            
+            data_in = initial_data
+            data_in['edges'] = _erase_edges(data_in['edges'])
+            eval, details_unconditional = model.step(initial_data)
+            changes_obj, changes_to, changes_from = change_planner(details_unconditional)
+            restorative_actions = []
+            for obj, to, fr in zip(changes_obj, changes_to, changes_from):
+                string_action = node_classes[obj]+' from '+node_classes[fr]+' to '+node_classes[to]
+                eval = -1 if obj in obj_idx_in_use else None
+                restorative_actions.append({'object':int(obj), 'from':int(fr), 'to':int(to), 'string':string_action, 'eval':eval})
+                if eval == -1 : summary_eval['bad'] += 1
+                summary_eval['total'] += 1
+        
+            actions_with_eval[routine_num][human_readable_from_external(additional_info[i]['timestamp'])] = {'proactive':proactive_actions, 'restorative':restorative_actions, 'obj_in_use':additional_info[i]['obj_in_use']}
+
+    for i,routine_actions in enumerate(actions_with_eval):
+        with open(os.path.join(action_dir,'{:03d}.txt'.format(i)), 'w') as f:
+            for timestamp, data in routine_actions.items():
+                f.write('\n## {}\n'.format(timestamp))
+                f.write('## {}\n'.format(data['obj_in_use']))
+                f.write('Proactive\n')
+                for act_pro in data['proactive']:
+                    f.write(' - ('+str(act_pro['eval'])+') '+act_pro['string']+'\n')
+                f.write('Restorative\n')
+                for act_res in data['restorative']:
+                    f.write(' - ('+str(act_res['eval'])+') '+act_res['string']+'\n')
+                        
+    return summary_eval
 
 def something(model, test_routines):
     for (routine, additional_info) in test_routines:

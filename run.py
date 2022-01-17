@@ -76,13 +76,23 @@ def run(cfg = {}, path = None):
     trainer.test(model, data.get_test_loader())
     
     evaluation = {}
-    get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'))
+    evaluation['Actions'] = get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'), data.node_idx_from_id)
     hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
     evaluation['Search hits'] = tuple(hit_ratios)
     evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
     evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
     with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
         json.dump(evaluation,f)
+
+    evaluation_summary = {'Test Evaluation':
+                            {'actions':{'good':evaluation['Actions']['good']/evaluation['Actions']['total'], 
+                                        'bad':evaluation['Actions']['bad']/evaluation['Actions']['total']},
+                            'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
+                                            '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
+                                            '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)}
+                            }
+                         }
+    wandb_logger.experiment.log(evaluation_summary)
 
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:

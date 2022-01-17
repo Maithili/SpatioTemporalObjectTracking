@@ -86,7 +86,7 @@ class DataSplit():
                 if prev_edges is not None:
                     edges_mask = self.active_edges
                     pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder(prev_t), edges[data_idx], nodes[data_idx], edges_mask))
-                    additional_data.append({'timestamp':time_external(prev_t), 'obj_id_in_use':obj_in_use[data_idx]})
+                    additional_data.append({'timestamp':time_external(prev_t), 'obj_in_use':obj_in_use[data_idx]})
                     # assert not(((edges_mask-edges[data_idx])<0).any())
                 prev_edges = edges[data_idx]
                 prev_nodes = nodes[data_idx]
