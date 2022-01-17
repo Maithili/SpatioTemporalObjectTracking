@@ -243,8 +243,7 @@ class GraphTranslatorModule(LightningModule):
                    'gt':gt, 
                    'losses':losses, 
                    'output':output, 
-                   'evaluate_node':evaluate_node, 
-                   'timestamp':batch['timestamp']}
+                   'evaluate_node':evaluate_node}
 
         return eval['location'], details
 

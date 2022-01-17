@@ -53,9 +53,9 @@ class DataSplit():
         if whole_routines:
             self.data = [self.make_pairwise([routine]) for routine in routines]
         else:
-            self.data = self.make_pairwise(routines)
+            self.data, _ = self.make_pairwise(routines)
             random.shuffle(self.data)
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'timestamp'])
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask'])
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx: int):
@@ -64,10 +64,11 @@ class DataSplit():
         return None
     def make_pairwise(self, routines):
         pairwise_samples = []
+        additional_data = []
         self.time_min = torch.Tensor([float("Inf")])
         self.time_max = -torch.Tensor([float("Inf")])
         for routine in routines:
-            nodes, edges, times = routine
+            nodes, edges, times, obj_in_use = routine
             assert times[0]==min(times), 'Times need to be monotonically increasing. First element should be min.'
             assert times[-1]==max(times), 'Times need to be monotonically increasing. Last element should be max.'
             time_min = floor(times[0]/self.dt)*self.dt
@@ -84,12 +85,13 @@ class DataSplit():
                     continue
                 if prev_edges is not None:
                     edges_mask = self.active_edges
-                    pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder(prev_t), edges[data_idx], nodes[data_idx], edges_mask, time_external(prev_t)))
+                    pairwise_samples.append((prev_edges, prev_nodes, self.time_encoder(prev_t), edges[data_idx], nodes[data_idx], edges_mask))
+                    additional_data.append({'timestamp':time_external(prev_t), 'obj_id_in_use':obj_in_use[data_idx]})
                     # assert not(((edges_mask-edges[data_idx])<0).any())
                 prev_edges = edges[data_idx]
                 prev_nodes = nodes[data_idx]
                 prev_t = t
-        return pairwise_samples
+        return pairwise_samples, additional_data
     
 
 class RoutinesDataset():
@@ -152,7 +154,8 @@ class RoutinesDataset():
                 viz = (inp == 'y')
             nodes, edges = self.read_graphs(routine["graphs"])
             times = torch.Tensor(routine["times"])
-            parsed_data.append((nodes, edges, times))
+            obj_in_use = routine["objects_in_use"]
+            parsed_data.append((nodes, edges, times, obj_in_use))
 
         if self.params['only_seen_edges']:
             self.active_edges[self.seen_edges == 0] = 0
@@ -173,6 +176,7 @@ class RoutinesDataset():
         # Rooms, furniture and appliances nodes don't move
         self.active_edges[np.where(np.array(self.node_categories) == "Rooms"),:] = 0
         self.active_edges[np.where(np.array(self.node_categories) == "Furniture"),:] = 0
+        self.active_edges[np.where(np.array(self.node_categories) == "Decor"),:] = 0
         self.active_edges[np.where(np.array(self.node_categories) == "Appliances"),:] = 0
         self.seen_edges = np.zeros_like(self.active_edges)
 

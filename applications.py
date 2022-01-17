@@ -6,7 +6,7 @@ from encoders import human_readable_from_external
 
 def multiple_steps(model, test_routines, unconditional=False):
     accuracies = []
-    for routine in list(test_routines):
+    for (routine, additional_info) in list(test_routines):
         n_step = 0
         while len(routine) > 0:
             data = test_routines.collate_fn([routine.pop()])
@@ -27,7 +27,7 @@ def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from
     total_guesses = 0
     hits = [[0,0,0] for _ in range(len(object_ids_to_search))]
     num_hit_counts = len(hits[0])
-    for routine in list(test_routines):
+    for (routine, additional_info) in list(test_routines):
         while len(routine) > 0:
             data = routine.pop()
             eval, details = model.step(test_routines.collate_fn([data]))
@@ -54,14 +54,15 @@ class ChangePlanner():
 
 def get_actions(model, test_routines, node_classes, action_dir, lookahead_steps = 5):
     os.makedirs(action_dir)
-    for routine_num,routine in enumerate(test_routines):
+    for routine_num,(routine, additional_info) in enumerate(test_routines):
         with open(os.path.join(action_dir,'{:03d}.txt'.format(routine_num)), 'w') as f:
             for i in range(len(routine) - lookahead_steps):
                 initial_data = test_routines.collate_fn([routine[i]])
                 eval, details_initial = model.step(initial_data)
                 change_planner = ChangePlanner(details_initial)
                 
-                f.write('\n## {}\n'.format(human_readable_from_external(initial_data['timestamp'])))
+                f.write('\n## {}\n'.format(human_readable_from_external(additional_info[i]['timestamp'])))
+                f.write('\n## {}\n'.format(additional_info[i]['obj_id_in_use']))
 
                 if i+lookahead_steps < len(routine):
                     prev_edges = initial_data['edges']
@@ -83,7 +84,7 @@ def get_actions(model, test_routines, node_classes, action_dir, lookahead_steps 
     return 
 
 def something(model, test_routines):
-    for routine in test_routines:
+    for (routine, additional_info) in test_routines:
         while len(routine) > 0:
             data = test_routines.collate_fn([routine.pop()])
             eval, details = model.step(data)
