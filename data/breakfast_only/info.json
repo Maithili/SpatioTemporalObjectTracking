@@ -1,0 +1,1 @@
+{"dt": 10, "num_train_routines": 20, "num_test_routines": 3, "weekend_days": [5, 6], "start_time": 360, "interleaving": true, "only_used_objects": true, "graphs_dt_apart": true, "num_nodes": 11, "search_object_ids": [1024, 1085, 1142, 1191], "search_object_names": ["bowl", "food_cereal", "milk", "spoon"]}

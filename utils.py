@@ -17,7 +17,8 @@ SINGLE_PLOT = False
 category_colors = {
     "Rooms": "#5E4955",
     "Furniture": "#996888",
-    "Appliances": "#3F273B",
+    "Decor": "#996888",
+    "Appliances": "#996888",
     "placable_objects": "#C99DA3"
 }
 

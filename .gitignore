@@ -129,8 +129,10 @@ dmypy.json
 .pyre/
 
 # Custom
-NEC-DGT/
+.vscode/
 lightning_logs/
 wandb/
 *.ckpt
 data/
+logs/
+screenlog*
