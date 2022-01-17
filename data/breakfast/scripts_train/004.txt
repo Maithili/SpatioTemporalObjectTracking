@@ -1,7 +1,7 @@
-Tuesday schedule generated from sourcedSchedules/weekday/example.json
+Sunday schedule generated from sourcedSchedules/weekend/example.json
 
 
-## breakfast from 07:02 to 07:04
+## breakfast from 10:08 to 10:10
 [WALK] <dining_room> (41)
 [WALK] <cupboard> (117)
 [OPEN] <cupboard> (117)
@@ -11,7 +11,7 @@ Tuesday schedule generated from sourcedSchedules/weekday/example.json
 [CLOSE] <cupboard> (117)
 [WALK] <table> (114)
 [PUTBACK] <bowl> (1024) <table> (114)
-## breakfast from 07:13 to 07:16
+## breakfast from 10:26 to 10:30
 [FIND] <food_cereal> (1085)
 [FIND] <cupboard> (117)
 [OPEN] <cupboard> (117)
@@ -21,7 +21,7 @@ Tuesday schedule generated from sourcedSchedules/weekday/example.json
 [FIND] <bowl> (1024)
 [POUR] <food_cereal> (1085) <bowl> (1024)
 [PUTBACK] <food_cereal> (1085) <table> (114)
-## breakfast from 07:41 to 07:46
+## breakfast from 10:46 to 10:50
 [WALK] <fridge> (1006)
 [OPEN] <fridge> (1006)
 [FIND] <milk> (1142)
@@ -31,7 +31,7 @@ Tuesday schedule generated from sourcedSchedules/weekday/example.json
 [FIND] <bowl> (1024)
 [POUR] <milk> (1142) <bowl> (1024)
 [PUTBACK] <milk> (1142) <table> (114)
-## breakfast from 08:06 to 08:09
+## breakfast from 11:10 to 11:14
 [WALK] <cupboard> (117)
 [OPEN] <cupboard> (117)
 [FIND] <spoon> (1191)
@@ -40,25 +40,25 @@ Tuesday schedule generated from sourcedSchedules/weekday/example.json
 [WALK] <table> (114)
 [FIND] <bowl> (1024)
 [PUTBACK] <spoon> (1191) <bowl> (1024)
-## breakfast from 08:17 to 08:27
+## breakfast from 11:30 to 11:39
 [WALK] <table> (114)
 [FIND] <food_cereal> (1085)
 [EAT] <food_cereal> (1085)
-## breakfast from 08:38 to 08:41
+## breakfast from 11:43 to 11:46
 [FIND] <food_cereal> (1085)
 [GRAB] <food_cereal> (1085)
 [WALK] <cupboard> (117)
 [OPEN] <cupboard> (117)
 [PUTBACK] <food_cereal> (1085) <cupboard> (117)
 [CLOSE] <cupboard> (117)
-## breakfast from 08:53 to 08:56
+## breakfast from 11:58 to 12:00
 [FIND] <milk> (1142)
 [GRAB] <milk> (1142)
 [WALK] <fridge> (1006)
 [OPEN] <fridge> (1006)
 [PUTBACK] <milk> (1142) <fridge> (1006)
 [CLOSE] <fridge> (1006)
-## breakfast from 09:04 to 09:09
+## breakfast from 12:14 to 12:19
 [WALK] <table> (114)
 [FIND] <bowl> (1024)
 [GRAB] <bowl> (1024)
@@ -67,7 +67,7 @@ Tuesday schedule generated from sourcedSchedules/weekday/example.json
 [WALK] <sink> (120)
 [PUTBACK] <bowl> (1024) <sink> (120)
 [PUTBACK] <spoon> (1191) <sink> (120)
-## breakfast from 09:28 to 09:38
+## breakfast from 12:31 to 12:43
 [WALK] <sink> (120)
 [FIND] <bowl> (1024)
 [GRAB] <bowl> (1024)

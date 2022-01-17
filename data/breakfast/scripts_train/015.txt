@@ -1,7 +1,7 @@
 Saturday schedule generated from sourcedSchedules/weekend/example.json
 
 
-## breakfast from 10:28 to 10:31
+## breakfast from 10:04 to 10:07
 [WALK] <dining_room> (41)
 [WALK] <cupboard> (117)
 [OPEN] <cupboard> (117)
@@ -11,7 +11,7 @@ Saturday schedule generated from sourcedSchedules/weekend/example.json
 [CLOSE] <cupboard> (117)
 [WALK] <table> (114)
 [PUTBACK] <bowl> (1024) <table> (114)
-## breakfast from 11:03 to 11:07
+## breakfast from 10:32 to 10:35
 [FIND] <food_cereal> (1085)
 [FIND] <cupboard> (117)
 [OPEN] <cupboard> (117)
@@ -21,7 +21,7 @@ Saturday schedule generated from sourcedSchedules/weekend/example.json
 [FIND] <bowl> (1024)
 [POUR] <food_cereal> (1085) <bowl> (1024)
 [PUTBACK] <food_cereal> (1085) <table> (114)
-## breakfast from 11:16 to 11:20
+## breakfast from 10:53 to 10:57
 [WALK] <fridge> (1006)
 [OPEN] <fridge> (1006)
 [FIND] <milk> (1142)
@@ -31,7 +31,7 @@ Saturday schedule generated from sourcedSchedules/weekend/example.json
 [FIND] <bowl> (1024)
 [POUR] <milk> (1142) <bowl> (1024)
 [PUTBACK] <milk> (1142) <table> (114)
-## breakfast from 11:34 to 11:39
+## breakfast from 11:21 to 11:24
 [WALK] <cupboard> (117)
 [OPEN] <cupboard> (117)
 [FIND] <spoon> (1191)
@@ -40,25 +40,25 @@ Saturday schedule generated from sourcedSchedules/weekend/example.json
 [WALK] <table> (114)
 [FIND] <bowl> (1024)
 [PUTBACK] <spoon> (1191) <bowl> (1024)
-## breakfast from 11:55 to 12:05
+## breakfast from 11:37 to 11:46
 [WALK] <table> (114)
 [FIND] <food_cereal> (1085)
 [EAT] <food_cereal> (1085)
-## breakfast from 12:22 to 12:25
+## breakfast from 11:57 to 12:00
 [FIND] <food_cereal> (1085)
 [GRAB] <food_cereal> (1085)
 [WALK] <cupboard> (117)
 [OPEN] <cupboard> (117)
 [PUTBACK] <food_cereal> (1085) <cupboard> (117)
 [CLOSE] <cupboard> (117)
-## breakfast from 12:34 to 12:36
+## breakfast from 12:12 to 12:14
 [FIND] <milk> (1142)
 [GRAB] <milk> (1142)
 [WALK] <fridge> (1006)
 [OPEN] <fridge> (1006)
 [PUTBACK] <milk> (1142) <fridge> (1006)
 [CLOSE] <fridge> (1006)
-## breakfast from 12:45 to 12:50
+## breakfast from 12:25 to 12:30
 [WALK] <table> (114)
 [FIND] <bowl> (1024)
 [GRAB] <bowl> (1024)
@@ -67,7 +67,7 @@ Saturday schedule generated from sourcedSchedules/weekend/example.json
 [WALK] <sink> (120)
 [PUTBACK] <bowl> (1024) <sink> (120)
 [PUTBACK] <spoon> (1191) <sink> (120)
-## breakfast from 12:57 to 13:07
+## breakfast from 12:50 to 13:01
 [WALK] <sink> (120)
 [FIND] <bowl> (1024)
 [GRAB] <bowl> (1024)
