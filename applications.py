@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import torch
 from copy import deepcopy
 from GraphTranslatorModule import _erase_edges
 from encoders import human_readable_from_external
@@ -45,11 +46,15 @@ def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from
     return cumulative_hit_ratio, total_guesses
 
 class ChangePlanner():
-    def __init__(self, initial_details):
+    def __init__(self, initial_details, threshold=0.1):
         self.initial_locations = deepcopy(initial_details['input']['location'])
+        self.threshold = threshold
     def __call__(self, target_details):
         target_loc = target_details['output']['location']
-        mask = np.bitwise_and(target_loc != self.initial_locations, target_details['evaluate_node'])
+        current_loc_probs = torch.gather(target_details['output_probs']['location'][0,:,:], 1, self.initial_locations.transpose(1,0)).transpose(0,1)
+        target_loc_probs = torch.gather(target_details['output_probs']['location'][0,:,:], 1, target_loc.transpose(1,0)).transpose(0,1)
+        # mask = np.bitwise_and(target_loc != self.initial_locations, target_details['evaluate_node'])
+        mask = np.bitwise_and(target_loc_probs - current_loc_probs > self.threshold, target_details['evaluate_node'])
         return np.argwhere(mask)[1,:], (target_loc[mask]).view(-1), (self.initial_locations[mask]).view(-1)
 
 def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_from_id, lookahead_steps = 5):
