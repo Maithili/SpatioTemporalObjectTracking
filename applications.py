@@ -24,14 +24,18 @@ def multiple_steps(model, test_routines, unconditional=False):
     avg_accuracy_stepwise = [float(np.mean(a)) for a in accuracies]
     return avg_accuracy_stepwise
 
-def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from_id):
+def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from_id, lookahead_steps):
     total_guesses = 0
     hits = [[0,0,0] for _ in range(len(object_ids_to_search))]
     num_hit_counts = len(hits[0])
     for (routine, additional_info) in list(test_routines):
-        while len(routine) > 0:
-            data = routine.pop()
-            eval, details = model.step(test_routines.collate_fn([data]))
+        for i in range(len(routine) - lookahead_steps):
+            prev_edges = test_routines.collate_fn([routine[i]])['edges']
+            for j in range(lookahead_steps):
+                data = test_routines.collate_fn([routine[i+j]])
+                data['edges'] = prev_edges
+                eval, details = model.step(data)
+                prev_edges = details['output_probs']['location']
             for i,obj_id in enumerate(object_ids_to_search):
                 obj_idx = dict_node_idx_from_id[obj_id]
                 actual = int(details['gt']['location'][0, obj_idx])
@@ -57,55 +61,57 @@ class ChangePlanner():
         mask = np.bitwise_and(target_loc_probs - current_loc_probs > self.threshold, target_details['evaluate_node'])
         return np.argwhere(mask)[1,:], (target_loc[mask]).view(-1), (self.initial_locations[mask]).view(-1)
 
-def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_from_id, lookahead_steps = 5):
+def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_from_id, lookahead_steps, action_probability_thresh):
     os.makedirs(action_dir)
     actions_with_eval = [{} for _  in test_routines]
-    summary_eval = {'good':0,'bad':0,'total':0}
+    action_types = ['proactive', 'restorative']
+    summary_eval = {act_typ:{'good':0,'bad':0,'total':0.0001} for act_typ in action_types}
     for routine_num,(routine, additional_info) in enumerate(test_routines):
-        for i in range(len(routine) - lookahead_steps):
+        for i in range(len(routine)):
             initial_data = test_routines.collate_fn([routine[i]])
             eval, details_initial = model.step(initial_data)
-            change_planner = ChangePlanner(details_initial)
+            proactive_change_planner = ChangePlanner(details_initial, threshold=action_probability_thresh[0])
+            reactive_change_planner = ChangePlanner(details_initial, threshold=action_probability_thresh[1])
 
             for prev_step_action_lists in actions_with_eval[routine_num].values():
-                for prev_action in prev_step_action_lists['proactive'] + prev_step_action_lists['restorative']:
-                    if prev_action['eval'] is None:
-                        actual_location = details_initial['input']['location'][0,prev_action['object']]
-                        if prev_action['to'] == actual_location:
-                            prev_action['eval'] = 1
-                            summary_eval['good'] += 1
-                        elif prev_action['from'] != actual_location:
-                            prev_action['eval'] = 0
+                for act_typ in action_types:
+                    for prev_action in prev_step_action_lists[act_typ]:
+                        if prev_action['eval'] is None:
+                            actual_location = details_initial['input']['location'][0,prev_action['object']]
+                            if prev_action['to'] == actual_location:
+                                prev_action['eval'] = 1
+                                summary_eval[act_typ]['good'] += 1
+                            elif prev_action['from'] != actual_location:
+                                prev_action['eval'] = 0
             
             obj_idx_in_use = [dict_node_idx_from_id[o['id']] for o in additional_info[i]['obj_in_use']]
 
-            if i+lookahead_steps < len(routine):
-                prev_edges = initial_data['edges']
-                for j in range(lookahead_steps):
-                    data = test_routines.collate_fn([routine[i+j]])
-                    data['edges'] = prev_edges
-                    eval, details = model.step(data)
-                    prev_edges = details['output_probs']['location']
-                changes_obj, changes_to, changes_from = change_planner(details)
-                proactive_actions = []
-                for obj, to, fr in zip(changes_obj, changes_to, changes_from):
-                    string_action = node_classes[obj]+' from '+node_classes[fr]+' to '+node_classes[to]
-                    eval = -1 if obj in obj_idx_in_use else None
-                    proactive_actions.append({'object':int(obj), 'from':int(fr), 'to':int(to), 'string':string_action, 'eval':eval})
-                    if eval == -1 : summary_eval['bad'] += 1
-                    summary_eval['total'] += 1
+            prev_edges = initial_data['edges']
+            for j in range(min(lookahead_steps, len(routine)-i)):
+                data = test_routines.collate_fn([routine[i+j]])
+                data['edges'] = prev_edges
+                eval, details = model.step(data)
+                prev_edges = details['output_probs']['location']
+            changes_obj, changes_to, changes_from = proactive_change_planner(details)
+            proactive_actions = []
+            for obj, to, fr in zip(changes_obj, changes_to, changes_from):
+                string_action = node_classes[obj]+' from '+node_classes[fr]+' to '+node_classes[to]
+                eval = -1 if obj in obj_idx_in_use else None
+                proactive_actions.append({'object':int(obj), 'from':int(fr), 'to':int(to), 'string':string_action, 'eval':eval})
+                if eval == -1 : summary_eval['proactive']['bad'] += 1
+                summary_eval['proactive']['total'] += 1
             
             data_in = initial_data
             data_in['edges'] = _erase_edges(data_in['edges'])
             eval, details_unconditional = model.step(initial_data)
-            changes_obj, changes_to, changes_from = change_planner(details_unconditional)
+            changes_obj, changes_to, changes_from = reactive_change_planner(details_unconditional)
             restorative_actions = []
             for obj, to, fr in zip(changes_obj, changes_to, changes_from):
                 string_action = node_classes[obj]+' from '+node_classes[fr]+' to '+node_classes[to]
                 eval = -1 if obj in obj_idx_in_use else None
                 restorative_actions.append({'object':int(obj), 'from':int(fr), 'to':int(to), 'string':string_action, 'eval':eval})
-                if eval == -1 : summary_eval['bad'] += 1
-                summary_eval['total'] += 1
+                if eval == -1 : summary_eval['restorative']['bad'] += 1
+                summary_eval['restorative']['total'] += 1
         
             actions_with_eval[routine_num][human_readable_from_external(additional_info[i]['timestamp'])] = {'proactive':proactive_actions, 'restorative':restorative_actions, 'obj_in_use':additional_info[i]['obj_in_use']}
 

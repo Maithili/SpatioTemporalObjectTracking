@@ -1,4 +1,5 @@
 import networkx as nx
+import torch
 from math import sqrt, floor, ceil
 from networkx.algorithms.components import connected
 from networkx.classes import graph
@@ -66,7 +67,7 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
         if inp != 'y':
             break
         while(inp == 'y' and len(routine)):
-            data = routines.collate_fn([routine.pop()])
+            data = routines.collate_fn([routine[0].pop()])
             data['edges'] = _erase_edges(data['edges'])
             eval, details = model.step(data)
             
@@ -136,8 +137,9 @@ def visualize_conditional_datapoint(model, dataloader, node_classes, node_catego
             _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
         ax.set_title('Predicted')
         
+        new_in_gt = torch.clamp(F.one_hot(details['gt']['location'].squeeze(0)) - 0.5 * F.one_hot(details['input']['location'].squeeze(0)), min=0, max=1)
         ax = axs[0][1]
-        _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), F.one_hot(details['gt']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), new_in_gt, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
         ax.set_title('Expected')
 
         fig.suptitle('Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy']))

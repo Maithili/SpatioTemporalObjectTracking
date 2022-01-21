@@ -7,6 +7,7 @@ import argparse
 from copy import deepcopy
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
+from wandb import Table, plot, plot_table
 
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE
@@ -76,8 +77,8 @@ def run(cfg = {}, path = None):
     trainer.test(model, data.get_test_loader())
     
     evaluation = {}
-    evaluation['Actions'] = get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'), data.node_idx_from_id)
-    hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id)
+    evaluation['Actions'] = get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'), data.node_idx_from_id, lookahead_steps=cfg['PROACTIVE_LOOKAHEAD_STEPS'], action_probability_thresh=cfg['ACTION_PROBABILITY_THRESHOLDS'])
+    hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id, lookahead_steps=cfg['SEARCH_LOOKAHEAD_STEPS'])
     evaluation['Search hits'] = tuple(hit_ratios)
     evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
     evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
@@ -85,8 +86,10 @@ def run(cfg = {}, path = None):
         json.dump(evaluation,f)
 
     evaluation_summary = {'Test Evaluation':
-                            {'actions':{'good':evaluation['Actions']['good']/evaluation['Actions']['total'], 
-                                        'bad':evaluation['Actions']['bad']/evaluation['Actions']['total']},
+                            {'proactive_actions':{'good':evaluation['Actions']['proactive']['good']/evaluation['Actions']['proactive']['total'], 
+                                                  'bad':evaluation['Actions']['proactive']['bad']/evaluation['Actions']['proactive']['total']},
+                            'restorative_actions':{'good':evaluation['Actions']['restorative']['good']/evaluation['Actions']['restorative']['total'], 
+                                                   'bad':evaluation['Actions']['restorative']['bad']/evaluation['Actions']['restorative']['total']},
                             'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
                                             '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
                                             '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)}
