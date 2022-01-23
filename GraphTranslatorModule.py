@@ -6,7 +6,7 @@ from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
 
 def _erase_edges(edges):
-    return edges*0 + (1/edges.size()[-1])
+    return torch.ones_like(edges)/edges.size()[-1]
 
 THRESH=0.5
 def chebyshev_polynomials(edges, k):
@@ -249,9 +249,9 @@ class GraphTranslatorModule(LightningModule):
 
 
     def training_step(self, batch, batch_idx):
-        eval,_ = self.step(batch)
         if random() < self.edge_dropout_prob:
             batch['edges'] = _erase_edges(batch['edges'])
+        eval,_ = self.step(batch)
         self.log('Train accuracy',eval['accuracy'])
         self.log('Train losses',eval['losses'])
         return eval['losses']['mean'] + self.map_spectral_loss
