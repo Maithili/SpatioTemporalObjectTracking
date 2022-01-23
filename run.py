@@ -5,9 +5,9 @@ import json
 import os
 import argparse
 from copy import deepcopy
+import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
-from wandb import Table, plot, plot_table
 
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE
@@ -71,14 +71,14 @@ def run(cfg = {}, path = None):
                               edge_importance=cfg['EDGE_IMPORTANCE'],
                               edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'])
 
-    trainer = Trainer(max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
+    trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
 
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())
     
     evaluation = {}
-    evaluation['Actions'] = get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'), data.node_idx_from_id, lookahead_steps=cfg['PROACTIVE_LOOKAHEAD_STEPS'], action_probability_thresh=cfg['ACTION_PROBABILITY_THRESHOLDS'])
-    hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id, lookahead_steps=cfg['SEARCH_LOOKAHEAD_STEPS'])
+    evaluation['Actions'] = get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'), data.node_idx_from_id, lookahead_steps=cfg['PROACTIVE_LOOKAHEAD_STEPS'], action_probability_thresh=cfg['ACTION_PROBABILITY_THRESHOLDS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
+    hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id, lookahead_steps=cfg['SEARCH_LOOKAHEAD_STEPS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
     evaluation['Search hits'] = tuple(hit_ratios)
     evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
     evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import torch
+from torch.nn.functional import one_hot
 from copy import deepcopy
 from GraphTranslatorModule import _erase_edges
 from encoders import human_readable_from_external
@@ -24,7 +25,7 @@ def multiple_steps(model, test_routines, unconditional=False):
     avg_accuracy_stepwise = [float(np.mean(a)) for a in accuracies]
     return avg_accuracy_stepwise
 
-def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from_id, lookahead_steps):
+def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from_id, lookahead_steps, deterministic_input_loop):
     total_guesses = 0
     hits = [[0,0,0] for _ in range(len(object_ids_to_search))]
     num_hit_counts = len(hits[0])
@@ -35,7 +36,10 @@ def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from
                 data = test_routines.collate_fn([routine[i+j]])
                 data['edges'] = prev_edges
                 eval, details = model.step(data)
-                prev_edges = details['output_probs']['location']
+                if deterministic_input_loop:
+                    prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1])
+                else:
+                    prev_edges = details['output_probs']['location']
             for i,obj_id in enumerate(object_ids_to_search):
                 obj_idx = dict_node_idx_from_id[obj_id]
                 actual = int(details['gt']['location'][0, obj_idx])
@@ -61,7 +65,7 @@ class ChangePlanner():
         mask = np.bitwise_and(target_loc_probs - current_loc_probs > self.threshold, target_details['evaluate_node'])
         return np.argwhere(mask)[1,:], (target_loc[mask]).view(-1), (self.initial_locations[mask]).view(-1)
 
-def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_from_id, lookahead_steps, action_probability_thresh):
+def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_from_id, lookahead_steps, action_probability_thresh, deterministic_input_loop):
     os.makedirs(action_dir)
     actions_with_eval = [{} for _  in test_routines]
     action_types = ['proactive', 'restorative']
@@ -91,7 +95,10 @@ def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_fr
                 data = test_routines.collate_fn([routine[i+j]])
                 data['edges'] = prev_edges
                 eval, details = model.step(data)
-                prev_edges = details['output_probs']['location']
+                if deterministic_input_loop:
+                    prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1])
+                else:
+                    prev_edges = details['output_probs']['location']
             changes_obj, changes_to, changes_from = proactive_change_planner(details)
             proactive_actions = []
             for obj, to, fr in zip(changes_obj, changes_to, changes_from):
