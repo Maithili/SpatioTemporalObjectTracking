@@ -9,7 +9,7 @@ from matplotlib.colors import Colormap
 from torch.nn import functional as F
 
 from GraphTranslatorModule import _erase_edges
-from encoders import time_external
+from encoders import time_external, human_readable_from_external
 
 EDGE_THRESH = 0.1
 SEED = 456
@@ -17,9 +17,12 @@ SINGLE_PLOT = False
 
 category_colors = {
     "Rooms": "#5E4955",
+    # static
     "Furniture": "#996888",
     "Decor": "#996888",
     "Appliances": "#996888",
+    # dynamic
+    "Props": "#C99DA3",
     "placable_objects": "#C99DA3"
 }
 
@@ -62,47 +65,55 @@ def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, 
 
 def visualize_unconditional_datapoint(model, routines, node_classes, node_categories = [], use_output_nodes = False):
     inp = input('Do you want to visualize an unconditional output? (y/n)')
-
+    num_steps_per_fig = 5
+    positions = None
+    
     for routine in routines:
         if inp != 'y':
             break
-        while(inp == 'y' and len(routine)):
+        fig, axs = plt.subplots(3,num_steps_per_fig)
+        fig.set_size_inches(28, 16)
+        fig_step = 0
+        while(len(routine)):
+            if fig_step == num_steps_per_fig:
+                plt.show()
+                # plt.savefig('temp.jpg')
+                inp = input('Do you want to visualize another output? (y/n)')
+                if inp == 'n':
+                    break
+                fig, axs = plt.subplots(3,num_steps_per_fig)
+                fig.set_size_inches(28, 16)
+                fig_step = 0
+
             data = routines.collate_fn([routine[0].pop()])
             data['edges'] = _erase_edges(data['edges'])
             eval, details = model.step(data)
             
             colors = [node_colors_by_active[act] for act in details['evaluate_node'].squeeze(0)]
+            
+            info = 'Context : '+str(data['context'])+' \nLoss : '+str(eval['losses']['mean'])+' ; \nAccuracy : '+str(eval['accuracy'])
 
-            fig, axs = plt.subplots(2,2)
-            fig.set_size_inches(14, 8)
-            ax = axs[0][0]
-            positions = _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['input']['location'].squeeze(0)), node_classes, ax = ax, node_categories=node_categories, node_color=colors)
-            ax.set_title('Graph at t')
+            ax = axs[0][fig_step]
+            positions = _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), F.one_hot(details['gt']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+            ax.set_title(info)
 
-            ax = axs[1][0]
+            ax = axs[1][fig_step]
             if use_output_nodes:
                 _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
             else:
                 _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
             ax.set_title('Predicted (probabilities)')
                 
-            ax = axs[1][1]
+            ax = axs[2][fig_step]
+            output = F.one_hot(details['output']['location'].squeeze(0)) * details['evaluate_node'].squeeze(0).int().unsqueeze(1)
             if use_output_nodes:
-                _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+                _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), output, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
             else:
-                _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+                _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), output, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
             ax.set_title('Predicted')
             
-            ax = axs[0][1]
-            _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), F.one_hot(details['gt']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
-            ax.set_title('Graph at t+1')
+            fig_step += 1
 
-            fig.suptitle('Context : '+str(data['context'])+' Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy']))
-            
-            plt.show()
-            plt.savefig('temp.jpg')
-            inp = input('Do you want to visualize another output? (y/n)')
-            
 
 
 def visualize_conditional_datapoint(model, dataloader, node_classes, node_categories = [], use_output_nodes = False):
@@ -117,7 +128,7 @@ def visualize_conditional_datapoint(model, dataloader, node_classes, node_catego
         colors = [node_colors_by_active[act] for act in details['evaluate_node'].squeeze(0)]
 
         fig, axs = plt.subplots(2,2)
-        fig.set_size_inches(14, 8)
+        fig.set_size_inches(28, 16)
         
         ax = axs[0][0]
         positions = _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['input']['location'].squeeze(0)), node_classes, ax = ax, node_categories=node_categories, node_color=colors)
@@ -131,32 +142,38 @@ def visualize_conditional_datapoint(model, dataloader, node_classes, node_catego
         ax.set_title('Predicted (probabilities)')
             
         ax = axs[1][1]
+        output = F.one_hot(details['output']['location'].squeeze(0), num_classes = details['output']['location'].size()[-1]) * details['evaluate_node'].squeeze(0).int().unsqueeze(1)
+        new_in_out = torch.clamp(output - 0.5 * F.one_hot(details['input']['location'].squeeze(0), num_classes = details['input']['location'].size()[-1]), min=0, max=1)
         if use_output_nodes:
-            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), new_in_out, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
         else:
-            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['output']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), new_in_out, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
         ax.set_title('Predicted')
         
-        new_in_gt = torch.clamp(F.one_hot(details['gt']['location'].squeeze(0)) - 0.5 * F.one_hot(details['input']['location'].squeeze(0)), min=0, max=1)
+        new_in_gt = torch.clamp(F.one_hot(details['gt']['location'].squeeze(0), num_classes = details['gt']['location'].size()[-1]) - 0.5 * F.one_hot(details['input']['location'].squeeze(0), num_classes = details['input']['location'].size()[-1]), min=0, max=1)
         ax = axs[0][1]
         _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), new_in_gt, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
         ax.set_title('Expected')
 
-        fig.suptitle('Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy']))
+        fig.suptitle('Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy'])+' ; Context '+human_readable_from_external(data['context'].squeeze(0)))
         
-        plt.show()
-        plt.savefig('temp.jpg')
-        inp = input('Do you want to visualize another output? (y/n)')
+        if eval['accuracy']<1 or new_in_gt.max() > 0.6 or new_in_out.max() > 0.6:
+            plt.show()
+            # plt.savefig('temp.jpg')
+            inp = input('Do you want to visualize another output? (y/n)')
+        else:
+            plt.close(fig)
 
 
 
-def visualize_routine(routine, dt=10, sparsify=False):
+def visualize_routine(routine, sparsify=False):
     graphs = routine['graphs']
     times = routine['times']
     num_plots = len(graphs)
     num_x = int(floor(sqrt(num_plots)))
     num_y = int(ceil(num_plots/num_x))
     fig, axs = plt.subplots(num_x,num_y)
+    fig.set_size_inches(28, 16)
     axs = axs.reshape(-1,)
     pos=None
     for i,(graph,t) in enumerate(zip(graphs,times)):
@@ -189,10 +206,8 @@ def visualize_routine(routine, dt=10, sparsify=False):
             pos = nx.shell_layout(G, nlist=nlist)
             # pos = nx.spring_layout(G)
         nx.draw_networkx(G, pos=pos, ax=axs[i], edge_cmap=plt.cm.Blues, edge_vmin = 0 ,edge_vmax = 1, node_size=300, node_color=node_colors, labels = node_labels)
-        th = time_external(t*dt)
-        axs[i].set_title(str(int(th[2]))+':'+str(int(th[3])))
-    th = [int(t) for t in th]
-    fig.suptitle("Week "+str(th[0])+" - "+days[th[1]])
+        time_h = human_readable_from_external(time_external(t))
+        axs[i].set_title(time_h)
     plt.show()
-    plt.savefig('temp.jpg')
+    # plt.savefig('temp.jpg')
     

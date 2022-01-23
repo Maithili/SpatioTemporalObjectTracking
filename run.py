@@ -86,7 +86,9 @@ def run(cfg = {}, path = None):
         json.dump(evaluation,f)
 
     evaluation_summary = {'Test Evaluation':
-                            {'proactive_actions':{'good':evaluation['Actions']['proactive']['good']/evaluation['Actions']['proactive']['total'], 
+                            {'all_actions':{'good':(evaluation['Actions']['proactive']['good']+evaluation['Actions']['restorative']['good'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total']), 
+                                            'bad':(evaluation['Actions']['proactive']['bad']+evaluation['Actions']['restorative']['bad'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'])},
+                            'proactive_actions':{'good':evaluation['Actions']['proactive']['good']/evaluation['Actions']['proactive']['total'], 
                                                   'bad':evaluation['Actions']['proactive']['bad']/evaluation['Actions']['proactive']['total']},
                             'restorative_actions':{'good':evaluation['Actions']['restorative']['good']/evaluation['Actions']['restorative']['total'], 
                                                    'bad':evaluation['Actions']['restorative']['bad']/evaluation['Actions']['restorative']['total']},
