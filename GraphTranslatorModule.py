@@ -62,17 +62,18 @@ def evaluate(gt, losses, output, evaluate_node):
     output_tensor = output['location'][evaluate_node]
     loss_tensor = losses['location'][evaluate_node]
     location_results = _classification_metrics(gt_tensor, output_tensor, loss_tensor)
-    return {'location':location_results}
+    return location_results
 
 class GraphTranslatorModule(LightningModule):
     def __init__(self, 
                 num_nodes, 
                 node_feature_len,
                 context_len, 
-                node_accuracy_weight=0.5,
-                learn_nodes=False,
-                edge_importance=True,
-                edge_dropout_prob=0.1):
+                node_accuracy_weight,
+                learn_nodes,
+                edge_importance,
+                edge_dropout_prob,
+                duplication_loss_weight):
         
         super().__init__()
 
@@ -83,28 +84,29 @@ class GraphTranslatorModule(LightningModule):
         self.learn_nodes = learn_nodes
         self.edge_importance = edge_importance
         self.edge_dropout_prob = edge_dropout_prob
-
-        self.map_spectral_loss = 0
+        self.duplication_loss_weight = duplication_loss_weight
 
         self.hidden_influence_dim = 20
 
         self.edges_update_input_dim = self.hidden_influence_dim*4 + 1 + self.context_len
         
-        self.mlp_influence    = {}     
-        self.mlp_update_edges = {}        
-        self.mlp_update_nodes = {}
 
-        self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, 20),
+        influence_hidden = 20
+        self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, influence_hidden),
                                                     nn.ReLU(),
-                                                    nn.Linear(20, self.hidden_influence_dim),
+                                                    nn.Linear(influence_hidden, self.hidden_influence_dim),
                                                     )
-        self.mlp_update_importance = nn.Sequential(nn.Linear(self.edges_update_input_dim, 20),
+
+        importance_hidden = 20
+        self.mlp_update_importance = nn.Sequential(nn.Linear(self.edges_update_input_dim, importance_hidden),
                                                     nn.ReLU(),
-                                                    nn.Linear(20, 1)
+                                                    nn.Linear(importance_hidden, 1)
                                                     )
-        self.mlp_update_edges = nn.Sequential(nn.Linear(self.edges_update_input_dim, 20),
+                                    
+        update_hidden = 20
+        self.mlp_update_edges = nn.Sequential(nn.Linear(self.edges_update_input_dim, update_hidden),
                                                     nn.ReLU(),
-                                                    nn.Linear(20, 1)
+                                                    nn.Linear(update_hidden, 1)
                                                     )
         self.mlp_update_nodes = nn.Sequential(nn.Linear(self.hidden_influence_dim*2+self.node_feature_len+self.context_len, 20),
                                                     nn.ReLU(),
@@ -224,7 +226,7 @@ class GraphTranslatorModule(LightningModule):
               'location':self.inference_location(y_edges)}
 
         losses = {'class':self.class_loss(output_probs['class'], gt['class']),
-                  'location':self.location_loss(output_probs['location'], gt['location'])}
+                  'location':self.location_loss(output_probs['location'], gt['location']) - self.duplication_loss_weight * self.location_loss(output_probs['location'], input['location'])}
 
         output = {'class':self.inference_class(output_probs['class']),
                   'location':self.inference_location(output_probs['location'])}
@@ -237,6 +239,9 @@ class GraphTranslatorModule(LightningModule):
         # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
 
         eval = evaluate(gt, losses, output, evaluate_node)
+
+        ## NOT USED
+        # eval['duplication_loss'] = (F.softmax(output_probs['location']) * edges)[evaluate_node].sum()
         
         details = {'input':input, 
                    'output_probs':output_probs, 
@@ -245,7 +250,7 @@ class GraphTranslatorModule(LightningModule):
                    'output':output, 
                    'evaluate_node':evaluate_node}
 
-        return eval['location'], details
+        return eval, details
 
 
     def training_step(self, batch, batch_idx):
@@ -254,7 +259,7 @@ class GraphTranslatorModule(LightningModule):
         eval,_ = self.step(batch)
         self.log('Train accuracy',eval['accuracy'])
         self.log('Train losses',eval['losses'])
-        return eval['losses']['mean'] + self.map_spectral_loss
+        return eval['losses']['mean']
 
     def test_step(self, batch, batch_idx):
         eval, details = self.step(batch)

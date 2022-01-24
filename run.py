@@ -58,7 +58,7 @@ def run(cfg = {}, path = None):
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir=output_dir, log_model=True)
+    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir=output_dir, log_model=True, group = os.path.basename(path))
     wandb_logger.experiment.config.update(cfg)
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
@@ -69,9 +69,11 @@ def run(cfg = {}, path = None):
                               context_len=data.params['c_len'],
                               learn_nodes=cfg['LEARN_NODES'],
                               edge_importance=cfg['EDGE_IMPORTANCE'],
-                              edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'])
+                              edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
+                              duplication_loss_weight=cfg['DUPLICATION_LOSS_WEIGHT'])
 
     trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
+    wandb_logger.watch(model, log='gradients', log_freq=20)
 
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())
@@ -92,6 +94,9 @@ def run(cfg = {}, path = None):
                                                   'bad':evaluation['Actions']['proactive']['bad']/evaluation['Actions']['proactive']['total']},
                             'restorative_actions':{'good':evaluation['Actions']['restorative']['good']/evaluation['Actions']['restorative']['total'], 
                                                    'bad':evaluation['Actions']['restorative']['bad']/evaluation['Actions']['restorative']['total']},
+                            'num_total_actions':evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'],
+                            'num_proactive_actions':evaluation['Actions']['proactive']['total'],
+                            'num_restorative_actions':evaluation['Actions']['restorative']['total'],
                             'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
                                             '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
                                             '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)}
