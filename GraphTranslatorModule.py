@@ -90,23 +90,21 @@ class GraphTranslatorModule(LightningModule):
 
         self.edges_update_input_dim = self.hidden_influence_dim*4 + 1 + self.context_len
         
+        mlp_hidden = int(round(num_nodes*0.7))
 
-        influence_hidden = 20
-        self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, influence_hidden),
+        self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, mlp_hidden),
                                                     nn.ReLU(),
-                                                    nn.Linear(influence_hidden, self.hidden_influence_dim),
+                                                    nn.Linear(mlp_hidden, self.hidden_influence_dim),
                                                     )
 
-        importance_hidden = 20
-        self.mlp_update_importance = nn.Sequential(nn.Linear(self.edges_update_input_dim, importance_hidden),
+        self.mlp_update_importance = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
                                                     nn.ReLU(),
-                                                    nn.Linear(importance_hidden, 1)
+                                                    nn.Linear(mlp_hidden, 1)
                                                     )
                                     
-        update_hidden = 20
-        self.mlp_update_edges = nn.Sequential(nn.Linear(self.edges_update_input_dim, update_hidden),
+        self.mlp_update_edges = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
                                                     nn.ReLU(),
-                                                    nn.Linear(update_hidden, 1)
+                                                    nn.Linear(mlp_hidden, 1)
                                                     )
         self.mlp_update_nodes = nn.Sequential(nn.Linear(self.hidden_influence_dim*2+self.node_feature_len+self.context_len, 20),
                                                     nn.ReLU(),
