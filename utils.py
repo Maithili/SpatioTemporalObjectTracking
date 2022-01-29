@@ -11,7 +11,6 @@ from torch.nn import functional as F
 from GraphTranslatorModule import _erase_edges
 from encoders import time_external, human_readable_from_external
 
-EDGE_THRESH = 0.1
 SEED = 456
 SINGLE_PLOT = False
 
@@ -33,7 +32,10 @@ days = ["Monday", 'Tuesday', "Wednesday", "Thursday", "Friday", "Saturday", "Sun
 def _get_node_info(graph_nodes, node_classes):
     node_names = []
     for node in list(graph_nodes):
-        node_names.append(node_classes[node.argmax()])
+        next_node = node_classes[node.argmax()]
+        while next_node in node_names:
+            next_node += '.'
+        node_names.append(next_node)
     return node_names
 
 def _draw_graph(G, ax=None, pos=None, colors = "#996888"):
@@ -44,7 +46,7 @@ def _draw_graph(G, ax=None, pos=None, colors = "#996888"):
     return pos
 
 
-def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, node_categories=[], node_color=None):
+def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, node_categories=[], node_color=None, edge_thresh=0.1):
     G = nx.DiGraph()
     graph_node_names = _get_node_info(graph_nodes, node_classes)
     colors = "#996888"
@@ -55,7 +57,7 @@ def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, 
         colors = [category_colors[c] for c in categories]
     G.add_nodes_from(graph_node_names)
     
-    nodes_from, nodes_to = np.argwhere(graph_edges > EDGE_THRESH)
+    nodes_from, nodes_to = np.argwhere(graph_edges > edge_thresh)
 
     for n_from, n_to in zip(list(nodes_from), list(nodes_to)):
         G.add_edge(graph_node_names[n_from], graph_node_names[n_to], weight=float(graph_edges[n_from][n_to]))
@@ -67,6 +69,7 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
     inp = input('Do you want to visualize an unconditional output? (y/n)')
     num_steps_per_fig = 5
     positions = None
+    prev_probs = None
     
     for routine in routines:
         if inp != 'y':
@@ -74,7 +77,7 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
         fig, axs = plt.subplots(3,num_steps_per_fig)
         fig.set_size_inches(28, 16)
         fig_step = 0
-        while(len(routine)):
+        while(len(routine[0])):
             if fig_step == num_steps_per_fig:
                 plt.show()
                 # plt.savefig('temp.jpg')
@@ -84,6 +87,7 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
                 fig, axs = plt.subplots(3,num_steps_per_fig)
                 fig.set_size_inches(28, 16)
                 fig_step = 0
+                prev_probs = None
 
             data = routines.collate_fn([routine[0].pop()])
             data['edges'] = _erase_edges(data['edges'])
@@ -97,11 +101,17 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
             positions = _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), F.one_hot(details['gt']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
             ax.set_title(info)
 
+            if prev_probs is None:
+                probs_diff = F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1)
+                prev_probs = F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1)
+            else:
+                probs_diff = F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1) - prev_probs
+                prev_probs = F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1)
             ax = axs[1][fig_step]
             if use_output_nodes:
-                _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+                _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), probs_diff, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors, edge_thresh=0)
             else:
-                _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+                _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), probs_diff, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors, edge_thresh=0)
             ax.set_title('Predicted (probabilities)')
                 
             ax = axs[2][fig_step]
@@ -113,6 +123,9 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
             ax.set_title('Predicted')
             
             fig_step += 1
+
+            if len(routine[0]) == 0:
+                plt.show()
 
 
 

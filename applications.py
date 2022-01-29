@@ -26,7 +26,7 @@ def multiple_steps(model, test_routines, unconditional=False):
     return avg_accuracy_stepwise
 
 def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from_id, lookahead_steps, deterministic_input_loop):
-    total_guesses = 0
+    total_guesses = 0.000001
     hits = [[0,0,0] for _ in range(len(object_ids_to_search))]
     num_hit_counts = len(hits[0])
     for (routine, additional_info) in list(test_routines):

@@ -69,28 +69,33 @@ class GraphTranslatorModule(LightningModule):
                 num_nodes, 
                 node_feature_len,
                 context_len, 
-                node_accuracy_weight,
                 learn_nodes,
                 edge_importance,
                 edge_dropout_prob,
-                duplication_loss_weight):
+                duplication_loss_weight,
+                learn_context):
         
         super().__init__()
 
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
         self.context_len = context_len
-        self.node_accuracy_weight = node_accuracy_weight
         self.learn_nodes = learn_nodes
         self.edge_importance = edge_importance
         self.edge_dropout_prob = edge_dropout_prob
         self.duplication_loss_weight = duplication_loss_weight
+        self.learn_context = learn_context
 
         self.hidden_influence_dim = 20
 
         self.edges_update_input_dim = self.hidden_influence_dim*4 + 1 + self.context_len
         
-        mlp_hidden = int(round(num_nodes*0.7))
+        mlp_hidden = int(round(num_nodes*0.2))
+
+        self.mlp_context = nn.Sequential(nn.Linear(self.context_len, mlp_hidden),
+                                                    nn.ReLU(),
+                                                    nn.Linear(mlp_hidden, self.context_len),
+                                                    )
 
         self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, mlp_hidden),
                                                     nn.ReLU(),
@@ -122,7 +127,10 @@ class GraphTranslatorModule(LightningModule):
     def graph_step(self, edges, nodes, context):
 
         batch_size, num_nodes, node_feature_len = nodes.size()
-        
+
+        if self.learn_context:
+            context = self.mlp_context(context)
+
         x = self.collate_edges(edges=edges.unsqueeze(-1), nodes=nodes)
         x = x.view(
             size=[batch_size * self.num_nodes * self.num_nodes, 

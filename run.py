@@ -70,7 +70,8 @@ def run(cfg = {}, path = None):
                               learn_nodes=cfg['LEARN_NODES'],
                               edge_importance=cfg['EDGE_IMPORTANCE'],
                               edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
-                              duplication_loss_weight=cfg['DUPLICATION_LOSS_WEIGHT'])
+                              duplication_loss_weight=cfg['DUPLICATION_LOSS_WEIGHT'],
+                              learn_context=cfg['LEARN_CONTEXT'])
 
     trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
     wandb_logger.watch(model, log='gradients', log_freq=20)
