@@ -37,8 +37,8 @@ node_dictionary['chocolate'] = {"id": 20, "class_name": "chocolate", "category":
 def edge(from_node, relation, to_node):
     return {'from_id':node_dictionary[from_node]['id'], 'relation_type':relation, 'to_id':node_dictionary[to_node]['id']}
 
-def time_internal(mins, hrs, days=0, weeks=0, dt=10):
-    return int(round(((((weeks*7+days)*24)+hrs)*60+mins)/dt))
+def time_mins(mins, hrs, days=0, weeks=0):
+    return int(round(((((weeks*7+days)*24)+hrs)*60+mins)))
 
 
 def get_edges(time_idx = 0, type_idx = 1):
@@ -187,20 +187,20 @@ def case1():
         shutil.rmtree(data_dir)
     os.makedirs(data_dir)
 
-    dt = 10
+    dt = 5
     num_routines = 100
     wrong_graph_prob = 0.25
     graph_sequence = get_graph_sequence()
 
     with open(os.path.join(data_dir,'classes.json'),'w') as f:
-        json.dump({"nodes":graph_sequence[0]['nodes'], "edges": ["INSIDE", "ON"], "dt": dt, "node_states": [["CLOSED","OPEN"],["OFF","ON"],["DIRTY","CLEAN"],["PLUGGED_OUT","PLUGGED_IN"]]}, f)
+        json.dump({"nodes":graph_sequence[0]['nodes'], "edges": ["INSIDE", "ON"], "node_states": [["CLOSED","OPEN"],["OFF","ON"],["DIRTY","CLEAN"],["PLUGGED_OUT","PLUGGED_IN"]]}, f)
 
     with open(os.path.join(data_dir,'info.json'),'w') as f:
-        json.dump({"num_routines":num_routines, "num_nodes":20, "num_movable_obj":14, "num_changing_nodes":6, "wrong_graph_prob":wrong_graph_prob}, f)
+        json.dump({"num_routines":num_routines, "num_nodes":20, "num_movable_obj":14, "num_changing_nodes":6, "wrong_graph_prob":wrong_graph_prob, "dt": dt, "search_object_ids":[]}, f)
 
-    start_time = time_internal(0,8,0,0)
-    end_time = time_internal(0,10,0,0)
-    change_time = [time_internal(30,8,0,0), time_internal(0,9,0,0), time_internal(30,9,0,0)]
+    start_time = time_mins(0,8,0,0)
+    end_time = time_mins(0,10,0,0)
+    change_time = [time_mins(30,8,0,0), time_mins(0,9,0,0), time_mins(30,9,0,0)]
 
     data = []
 
@@ -215,9 +215,9 @@ def case1():
                 state += 1
                 times.append(t)
         if len(times) == 4:
-            data.append({"times":times, "graphs":graph_sequence})
+            data.append({"times":times, "graphs":graph_sequence, "objects_in_use":[[]]*len(times)})
 
-    with open(os.path.join(data_dir,'sample.json'),'w') as f:
+    with open(os.path.join(data_dir,'routines.json'),'w') as f:
         json.dump(data, f)
 
     with open(DEFAULT_CONFIG) as f:

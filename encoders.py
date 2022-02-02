@@ -1,11 +1,19 @@
 import numpy as np
 import torch
 
-def time_sine_cosine(t):
+def time_sine_uninformed(t):
     T_freq = [10]
     n_days = 1
     while (T_freq[-1] < 60*24*7*n_days):
         T_freq.append(T_freq[-1] * 2)
+    omegas = [2*np.pi/t_freq for t_freq in T_freq]
+    enc = []
+    for om in omegas:
+        enc = enc + [np.sin(om*t), np.cos(om*t)]
+    return torch.Tensor(enc)
+
+def time_sine_informed(t):
+    T_freq = [10, 60, 60*24, 60*24*7]
     omegas = [2*np.pi/t_freq for t_freq in T_freq]
     enc = []
     for om in omegas:
@@ -48,8 +56,10 @@ class TimeEncodingOptions():
     def __init__(self, weekend_days):
         self.weekend_days = weekend_days
     def __call__(self, encoder_option):
-        if encoder_option == 'sine_cosine':
-            return time_sine_cosine
+        if encoder_option == 'sine_uninformed':
+            return time_sine_uninformed
+        if encoder_option == 'sine_informed':
+            return time_sine_informed
         elif encoder_option == 'external':
             return time_external
         elif encoder_option == 'external_normalized':

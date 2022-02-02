@@ -14,8 +14,8 @@ def not_a_tree(original_edges, sparse_edges, nodes):
     num_parents = sparse_edges.sum(axis=-1)
     for i,num_p in enumerate(num_parents):
         if num_p>1:
-            print(f'Node {nodes[i]} has parents : {nodes[(np.argwhere(sparse_edges[i,:] > 0)).squeeze()]}')
-            print(f'Node {nodes[i]} originally had parents : {nodes[(np.argwhere(original_edges[i,:] > 0)).squeeze()]}')
+            print(f'Node {nodes[i]} has parents : {list(np.array(nodes)[(np.argwhere(sparse_edges[i,:] > 0)).squeeze()])}')
+            print(f'Node {nodes[i]} originally had parents : {list(np.array(nodes)[(np.argwhere(original_edges[i,:] > 0)).squeeze()])}')
 
 def _densify(edges):
     dense_edges = edges.copy()

@@ -77,7 +77,9 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
         fig, axs = plt.subplots(3,num_steps_per_fig)
         fig.set_size_inches(28, 16)
         fig_step = 0
-        while(len(routine[0])):
+        routine_data = routine[0]
+        routine_data.reverse()
+        while(len(routine_data)):
             if fig_step == num_steps_per_fig:
                 plt.show()
                 # plt.savefig('temp.jpg')
@@ -89,7 +91,7 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
                 fig_step = 0
                 prev_probs = None
 
-            data = routines.collate_fn([routine[0].pop()])
+            data = routines.collate_fn([routine_data.pop()])
             data['edges'] = _erase_edges(data['edges'])
             eval, details = model.step(data)
             
@@ -126,6 +128,9 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
 
             if len(routine[0]) == 0:
                 plt.show()
+                inp = input('Do you want to visualize another output? (y/n)')
+                if inp == 'n':
+                    break
 
 
 
