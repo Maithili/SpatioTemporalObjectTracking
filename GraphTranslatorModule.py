@@ -4,6 +4,7 @@ from torch.nn import functional as F
 from torch import nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
+from evaluation import evaluate
 
 def _erase_edges(edges):
     return torch.ones_like(edges)/edges.size()[-1]
@@ -38,31 +39,6 @@ def chebyshev_polynomials(edges, k):
         polynomials=torch.cat([polynomials,next_poly.unsqueeze(1)], dim=1)
 
     return polynomials
-
-def _get_masks(gt_tensor, output_tensor):
-    masks = {}
-    masks['correct'] = gt_tensor == output_tensor
-    masks['wrong'] = gt_tensor != output_tensor
-    return masks
-
-def _classification_metrics(gt_tensor, output_tensor, loss_tensor):
-    masks = _get_masks(gt_tensor, output_tensor)
-    result = {'accuracy':None ,'losses':{}}
-    result['accuracy'] = (masks['correct'].sum())/torch.numel(gt_tensor)
-    result['losses']['mean'] = loss_tensor.mean()
-    result['losses']['correct'] = loss_tensor[masks['correct']].sum()/masks['correct'].sum()
-    result['losses']['wrong'] = loss_tensor[masks['wrong']].sum()/masks['wrong'].sum()
-    return result
-
-def _binary_metrics(gtt_tensor, output_tensor, loss_tensor):
-    return {}
-
-def evaluate(gt, losses, output, evaluate_node):
-    gt_tensor = gt['location'][evaluate_node]
-    output_tensor = output['location'][evaluate_node]
-    loss_tensor = losses['location'][evaluate_node]
-    location_results = _classification_metrics(gt_tensor, output_tensor, loss_tensor)
-    return location_results
 
 class GraphTranslatorModule(LightningModule):
     def __init__(self, 
@@ -244,7 +220,7 @@ class GraphTranslatorModule(LightningModule):
         # assert list(output_probs['class'].size())[:-1] == list(nodes.size())[:-1], 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), nodes.size())
         # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
 
-        eval = evaluate(gt, losses, output, evaluate_node)
+        eval = evaluate(gt['location'], losses['location'], output['location'], input['location'], evaluate_node)
 
         ## NOT USED
         # eval['duplication_loss'] = (F.softmax(output_probs['location']) * edges)[evaluate_node].sum()
@@ -260,17 +236,22 @@ class GraphTranslatorModule(LightningModule):
 
 
     def training_step(self, batch, batch_idx):
+        dropout = False
         if random() < self.edge_dropout_prob:
+            dropout = True
             batch['edges'] = _erase_edges(batch['edges'])
         eval,_ = self.step(batch)
         self.log('Train accuracy',eval['accuracy'])
         self.log('Train losses',eval['losses'])
+        if not dropout:
+            self.log('Train CM metrics',eval['CM'])
         return eval['losses']['mean']
 
     def test_step(self, batch, batch_idx):
         eval, details = self.step(batch)
         self.log('Test accuracy',eval['accuracy'])
         self.log('Test losses',eval['losses'])
+        self.log('Test CM metrics',eval['CM'])
         
         uncond_batch = batch
         uncond_batch['edges'] = _erase_edges(uncond_batch['edges'])
