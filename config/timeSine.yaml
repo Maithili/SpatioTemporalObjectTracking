@@ -1,1 +1,2 @@
-TIME_ENCODING: sine_cosine
+TIME_ENCODING: sine_uninformed
+RUN_BASELINES: False

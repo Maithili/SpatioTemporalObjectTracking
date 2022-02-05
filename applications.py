@@ -1,4 +1,5 @@
 import os
+import json
 import numpy as np
 import torch
 from torch.nn.functional import one_hot
@@ -35,7 +36,7 @@ def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from
             for j in range(lookahead_steps):
                 data = test_routines.collate_fn([routine[i+j]])
                 data['edges'] = prev_edges
-                eval, details = model.step(data)
+                _, details = model.step(data)
                 if deterministic_input_loop:
                     prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1])
                 else:
@@ -66,14 +67,15 @@ class ChangePlanner():
         return np.argwhere(mask)[1,:], (target_loc[mask]).view(-1), (self.initial_locations[mask]).view(-1)
 
 def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_from_id, lookahead_steps, action_probability_thresh, deterministic_input_loop):
-    os.makedirs(action_dir)
+    if not os.path.exists(action_dir):
+        os.makedirs(action_dir)
     actions_with_eval = [{} for _  in test_routines]
     action_types = ['proactive', 'restorative']
     summary_eval = {act_typ:{'good':0,'bad':0,'total':0.0001} for act_typ in action_types}
     for routine_num,(routine, additional_info) in enumerate(test_routines):
         for i in range(len(routine)):
             initial_data = test_routines.collate_fn([routine[i]])
-            eval, details_initial = model.step(initial_data)
+            _, details_initial = model.step(initial_data)
             proactive_change_planner = ChangePlanner(details_initial, threshold=action_probability_thresh[0])
             reactive_change_planner = ChangePlanner(details_initial, threshold=action_probability_thresh[1])
 
@@ -88,13 +90,14 @@ def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_fr
                             elif prev_action['from'] != actual_location:
                                 prev_action['eval'] = 0
             
-            obj_idx_in_use = [dict_node_idx_from_id[o['id']] for o in additional_info[i]['obj_in_use']]
+            # obj_idx_in_use = [dict_node_idx_from_id[o[0]] for o in additional_info[i]['obj_in_use']]
+            obj_idx_in_use = []
 
             prev_edges = initial_data['edges']
             for j in range(min(lookahead_steps, len(routine)-i)):
                 data = test_routines.collate_fn([routine[i+j]])
                 data['edges'] = prev_edges
-                eval, details = model.step(data)
+                _, details = model.step(data)
                 if deterministic_input_loop:
                     prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1])
                 else:
@@ -110,7 +113,7 @@ def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_fr
             
             data_in = initial_data
             data_in['edges'] = _erase_edges(data_in['edges'])
-            eval, details_unconditional = model.step(initial_data)
+            _, details_unconditional = model.step(initial_data)
             changes_obj, changes_to, changes_from = reactive_change_planner(details_unconditional)
             restorative_actions = []
             for obj, to, fr in zip(changes_obj, changes_to, changes_from):
@@ -142,3 +145,32 @@ def something(model, test_routines):
             data = test_routines.collate_fn([routine.pop()])
             eval, details = model.step(data)
     return 
+
+
+
+def evaluate_applications(model, data, cfg, output_dir):
+    evaluation = {}
+    evaluation['Actions'] = get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'), data.node_idx_from_id, lookahead_steps=cfg['PROACTIVE_LOOKAHEAD_STEPS'], action_probability_thresh=cfg['ACTION_PROBABILITY_THRESHOLDS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
+    hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id, lookahead_steps=cfg['SEARCH_LOOKAHEAD_STEPS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
+    evaluation['Search hits'] = tuple(hit_ratios)
+    evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
+    evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
+    with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
+        json.dump(evaluation,f)
+
+    evaluation_summary = {'Test Evaluation':
+                            {'all_actions':{'good':(evaluation['Actions']['proactive']['good']+evaluation['Actions']['restorative']['good'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total']), 
+                                            'bad':(evaluation['Actions']['proactive']['bad']+evaluation['Actions']['restorative']['bad'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'])},
+                            'proactive_actions':{'good':evaluation['Actions']['proactive']['good']/evaluation['Actions']['proactive']['total'], 
+                                                  'bad':evaluation['Actions']['proactive']['bad']/evaluation['Actions']['proactive']['total']},
+                            'restorative_actions':{'good':evaluation['Actions']['restorative']['good']/evaluation['Actions']['restorative']['total'], 
+                                                   'bad':evaluation['Actions']['restorative']['bad']/evaluation['Actions']['restorative']['total']},
+                            'num_total_actions':evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'],
+                            'num_proactive_actions':evaluation['Actions']['proactive']['total'],
+                            'num_restorative_actions':evaluation['Actions']['restorative']['total'],
+                            'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
+                                            '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
+                                            '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)}
+                            }
+                         }
+    return evaluation_summary

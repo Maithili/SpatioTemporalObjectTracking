@@ -8,14 +8,60 @@ from copy import deepcopy
 import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
+import wandb
 
 from GraphTranslatorModule import GraphTranslatorModule
-from reader import RoutinesDataset, INTERACTIVE
+from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency
 from encoders import TimeEncodingOptions
 from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
-from applications import multiple_steps, object_search, get_actions
+from applications import evaluate_applications
+from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, LastSeenButMostlyStaticSemantic, Slim
 
 DEFAULT_CONFIG = 'config/default.yaml'
+
+def run_model(data, group):
+    output_dir = os.path.join('logs',cfg['NAME'])
+    if os.path.exists(output_dir):
+        n = 1
+        new_dir = output_dir + "_"+str(n)
+        while os.path.exists(new_dir):
+            n += 1
+            new_dir = output_dir + "_"+str(n)
+        output_dir = new_dir
+    os.makedirs(output_dir)
+
+    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir=output_dir, log_model=True, group = group)
+    wandb_logger.experiment.config.update(cfg)
+
+    wandb_logger.experiment.config['DATA_PARAM'] = data.params
+    
+
+    model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
+                            node_feature_len=data.params['n_len'],
+                            context_len=data.params['c_len'],
+                            learn_nodes=cfg['LEARN_NODES'],
+                            edge_importance=cfg['EDGE_IMPORTANCE'],
+                            edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
+                            tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
+                            learn_context=cfg['LEARN_CONTEXT'])
+
+    trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
+    wandb_logger.watch(model, log='gradients', log_freq=20)
+
+    trainer.fit(model, data.get_train_loader())
+    trainer.test(model, data.get_test_loader())
+
+    evaluation_summary = evaluate_applications(model, data, cfg, output_dir)
+    wandb_logger.experiment.log(evaluation_summary)
+
+    print('Outputs saved at ',output_dir)
+    if INTERACTIVE:
+        visualize_unconditional_datapoint(model, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+        visualize_conditional_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+
+    wandb.finish()
+
+
 
 def run(cfg = {}, path = None):
     
@@ -47,74 +93,38 @@ def run(cfg = {}, path = None):
                            test_perc=cfg['TEST_SPLIT'], 
                            batch_size=cfg['BATCH_SIZE'],
                            only_seen_edges = cfg['ONLY_SEEN_EDGES'])
-
-    output_dir = os.path.join('logs',cfg['NAME'])
-    if os.path.exists(output_dir):
-        n = 1
-        new_dir = output_dir + "_"+str(n)
-        while os.path.exists(new_dir):
-            n += 1
-            new_dir = output_dir + "_"+str(n)
-        output_dir = new_dir
-    os.makedirs(output_dir)
-
-    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir=output_dir, log_model=True, group = os.path.basename(path))
-    wandb_logger.experiment.config.update(cfg)
-
-    wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
 
-    model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
-                              node_feature_len=data.params['n_len'],
-                              context_len=data.params['c_len'],
-                              learn_nodes=cfg['LEARN_NODES'],
-                              edge_importance=cfg['EDGE_IMPORTANCE'],
-                              edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
-                              duplication_loss_weight=cfg['DUPLICATION_LOSS_WEIGHT'],
-                              learn_context=cfg['LEARN_CONTEXT'])
+    if cfg['RUN_BASELINES']:
+        cf = get_cooccurence_frequency(data)
+        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf)]:
+            output_dir = os.path.join('logs','baselines',baseline.__class__.__name__)
+            wandb.init(name=baseline.__class__.__name__, dir=output_dir)
+            wandb.config['NAME'] = wandb.run.name
+            all_data = []
+            for routine,_ in data.test_routines:
+                all_data += routine
+            eval, details = baseline.step(data.test_routines.collate_fn(all_data))
+            wandb.log(baseline.log())
+            evaluation_summary = evaluate_applications(baseline, data, cfg, output_dir)
+            print(evaluation_summary)
+            wandb.log(evaluation_summary)
 
-    trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
-    wandb_logger.watch(model, log='gradients', log_freq=20)
+            print('Outputs saved at ',output_dir)
+            if INTERACTIVE:
+                visualize_unconditional_datapoint(baseline, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+                visualize_conditional_datapoint(baseline, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+            wandb.finish()
 
-    trainer.fit(model, data.get_train_loader())
-    trainer.test(model, data.get_test_loader())
-    
-    evaluation = {}
-    evaluation['Actions'] = get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'), data.node_idx_from_id, lookahead_steps=cfg['PROACTIVE_LOOKAHEAD_STEPS'], action_probability_thresh=cfg['ACTION_PROBABILITY_THRESHOLDS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
-    hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id, lookahead_steps=cfg['SEARCH_LOOKAHEAD_STEPS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
-    evaluation['Search hits'] = tuple(hit_ratios)
-    evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
-    evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
-    with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
-        json.dump(evaluation,f)
+    run_model(data, group = os.path.basename(path))
 
-    evaluation_summary = {'Test Evaluation':
-                            {'all_actions':{'good':(evaluation['Actions']['proactive']['good']+evaluation['Actions']['restorative']['good'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total']), 
-                                            'bad':(evaluation['Actions']['proactive']['bad']+evaluation['Actions']['restorative']['bad'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'])},
-                            'proactive_actions':{'good':evaluation['Actions']['proactive']['good']/evaluation['Actions']['proactive']['total'], 
-                                                  'bad':evaluation['Actions']['proactive']['bad']/evaluation['Actions']['proactive']['total']},
-                            'restorative_actions':{'good':evaluation['Actions']['restorative']['good']/evaluation['Actions']['restorative']['total'], 
-                                                   'bad':evaluation['Actions']['restorative']['bad']/evaluation['Actions']['restorative']['total']},
-                            'num_total_actions':evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'],
-                            'num_proactive_actions':evaluation['Actions']['proactive']['total'],
-                            'num_restorative_actions':evaluation['Actions']['restorative']['total'],
-                            'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
-                                            '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
-                                            '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)}
-                            }
-                         }
-    wandb_logger.experiment.log(evaluation_summary)
 
-    print('Outputs saved at ',output_dir)
-    if INTERACTIVE:
-        visualize_unconditional_datapoint(model, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
-        visualize_conditional_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
 
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/breakfast', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/differentBreakfasts0202', help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--name', type=str, help='Name of run.')
 

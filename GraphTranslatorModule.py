@@ -48,7 +48,7 @@ class GraphTranslatorModule(LightningModule):
                 learn_nodes,
                 edge_importance,
                 edge_dropout_prob,
-                duplication_loss_weight,
+                tn_loss_weight,
                 learn_context):
         
         super().__init__()
@@ -59,7 +59,7 @@ class GraphTranslatorModule(LightningModule):
         self.learn_nodes = learn_nodes
         self.edge_importance = edge_importance
         self.edge_dropout_prob = edge_dropout_prob
-        self.duplication_loss_weight = duplication_loss_weight
+        self.tn_loss_weight = tn_loss_weight
         self.learn_context = learn_context
 
         self.hidden_influence_dim = 20
@@ -208,7 +208,7 @@ class GraphTranslatorModule(LightningModule):
               'location':self.inference_location(y_edges)}
 
         losses = {'class':self.class_loss(output_probs['class'], gt['class']),
-                  'location':self.location_loss(output_probs['location'], gt['location']) - self.duplication_loss_weight * self.location_loss(output_probs['location'], input['location'])}
+                  'location':self.location_loss(output_probs['location'], gt['location'])}
 
         output = {'class':self.inference_class(output_probs['class']),
                   'location':self.inference_location(output_probs['location'])}
@@ -220,7 +220,7 @@ class GraphTranslatorModule(LightningModule):
         # assert list(output_probs['class'].size())[:-1] == list(nodes.size())[:-1], 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), nodes.size())
         # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
 
-        eval = evaluate(gt['location'], losses['location'], output['location'], input['location'], evaluate_node)
+        eval = evaluate(gt=gt['location'], output=output['location'], input=input['location'], evaluate_node=evaluate_node, losses=losses['location'], tn_loss_weight=self.tn_loss_weight)
 
         ## NOT USED
         # eval['duplication_loss'] = (F.softmax(output_probs['location']) * edges)[evaluate_node].sum()

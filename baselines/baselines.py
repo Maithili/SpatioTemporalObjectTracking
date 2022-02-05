@@ -2,66 +2,89 @@ from lib2to3.pytree import Base
 import random
 import numpy as np
 import torch
+import wandb
+
+from evaluation import evaluate as common_evaluation
 
 class Baseline():
     def __init__(self):
         pass
-    def step(self, batch):
-        pass
+
     def extract(self, batch):
         if 'dynamic_edges_mask' in batch.keys():
             dyn_edges = batch['dynamic_edges_mask']
             evaluate_node = dyn_edges.sum(-1) > 0
         self.evaluate_node = evaluate_node
         self.edges = batch['edges']
+        self.nodes = batch['nodes']
         self.context = batch['context']
+        self.gt = batch['y_edges']
+    
+    def step(self, batch):
+        self.extract(batch)
+        result = self.run()
+        details = {'input':{'class':self.nodes.argmax(-1), 'location':self.edges.squeeze(-1).argmax(-1)}, 
+            'output_probs':{'location': result}, 
+            'gt':{'class':self.nodes.argmax(-1), 'location': self.gt.squeeze(-1).argmax(-1)}, 
+            'losses':{'location': None}, 
+            'output':{'class':self.nodes.argmax(-1), 'location': result.squeeze(-1).argmax(-1)}, 
+            'evaluate_node':self.evaluate_node}
+        self.evaluate(result)
+        return self.eval, details
+
 
 
 class StateTimeConditionedBaseline(Baseline):
     def __init__(self):
-        pass
-    def step(self, batch):
-        pass
+        super().__init__()
+    def evaluate(self, output):
+        self.eval = common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node)
+    def log(self):
+        return {'Test accuracy':self.eval['accuracy'], 'Test CM metrics':self.eval['CM']}
 
 class TimeConditionedBaseline(Baseline):
     def __init__(self):
-        pass
-    def step(self, batch):
-        pass
+        super().__init__()
+    def evaluate(self, output):
+        self.eval = common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node)
+    def log(self):
+        return {'Test accuracy (Unconditional)':self.eval['accuracy']}
 
 
 class LastSeen(StateTimeConditionedBaseline):
-    def __init__(self) -> None:
-        pass
+    def __init__(self, cooccurence_freq) -> None:
+        super().__init__()
 
-    def step(self, batch):
-        self.extract(batch)
-        edges = batch['edges']
-        return edges
+    def run(self):
+        return self.edges
 
 class StaticSemantic(TimeConditionedBaseline):
     def __init__(self, cooccurence_freq) -> None:
+        super().__init__()
         self.cooccurence_freq = cooccurence_freq
 
-    def step(self, _):
-        return self.cooccurence_freq
+    def run(self):
+        return self.cooccurence_freq.unsqueeze(0).repeat(self.edges.size()[0],1,1)
 
 class LastSeenAndStaticSemantic(StateTimeConditionedBaseline):
     def __init__(self, cooccurence_freq, prob_change = 0.5) -> None:
+        super().__init__()
         self.cooccurence_freq = cooccurence_freq
         self.prob_change = prob_change
 
-    def step(self, batch):
-        self.extract(batch)
+    def run(self):
         next_edges = self.edges * (1-self.prob_change)
         next_edges += self.prob_change/next_edges.size()[-1]
         return self.cooccurence_freq * next_edges
 
-
+class LastSeenButMostlyStaticSemantic(LastSeenAndStaticSemantic):
+    def __init__(self, cooccurence_freq, prob_change=0.9) -> None:
+        super().__init__(cooccurence_freq, prob_change)
 
 
 class Slim(StateTimeConditionedBaseline):
     def __init__(self, cooccurence_freq, num_particles=10, noise=0.4) -> None:
+        super().__init__()
         self.num_particles = num_particles
         self.noise = noise
         self.cooccurence_freq = cooccurence_freq
@@ -91,8 +114,7 @@ class Slim(StateTimeConditionedBaseline):
         assert np.allclose(mean_aggregate.sum(-1), torch.ones_like(mean_aggregate.sum(-1))), mean_aggregate.sum(-1)
         return mean_aggregate
 
-    def step(self, batch):
-        self.extract(batch)
+    def run(self):
         particles = []
         weights = []
 

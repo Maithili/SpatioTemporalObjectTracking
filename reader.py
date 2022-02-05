@@ -206,7 +206,7 @@ class RoutinesDataset():
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
 
     def get_test_loader(self):
-        return DataLoader(self.test, num_workers=8, batch_size=min(len(self.test),5), sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
+        return DataLoader(self.test, num_workers=8, batch_size=self.params['batch_size'], sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
 
     def get_single_example_test_loader(self):
         return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
