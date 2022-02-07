@@ -11,7 +11,7 @@ from pytorch_lightning.loggers import WandbLogger
 import wandb
 
 from GraphTranslatorModule import GraphTranslatorModule
-from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency
+from readerFileBased import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency
 from encoders import TimeEncodingOptions
 from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
 from applications import evaluate_applications
@@ -63,43 +63,29 @@ def run_model(data, group):
 
 
 
-def run(cfg = {}, path = None):
+def run(data_dir, cfg = {}):
     
-    if path is not None:
-        cfg['DATA_PATH'] = os.path.join(path, 'routines.json')
-        if not os.path.exists(cfg['DATA_PATH']):
-            cfg['DATA_PATH'] = (os.path.join(path, 'routines_train.json'), os.path.join(path, 'routines_test.json'))
-        if not (os.path.exists(cfg['DATA_PATH'][0]) and os.path.exists(cfg['DATA_PATH'][1])):
-            print('The data directory must contain a routines.json or else both of routines_train.json and routines_test.json')
-        cfg['CLASSES_PATH'] = os.path.join(path, 'classes.json')
-        cfg['DATA_INFO'] = os.path.join(path, 'info.json')
-        if cfg['NAME'] is None:
-            cfg['NAME'] = os.path.basename(path)
-    else:
-        print('No path provided. Will read from config file...')
+    if cfg['NAME'] is None:
+        cfg['NAME'] = os.path.basename(data_dir)
 
-    with open(cfg['DATA_INFO']) as f:
-        cfg['DATA_INFO'] = json.load(f)
+    with open(os.path.join(data_dir, 'processed', 'common_data.json')) as f:
+        cfg['DATA_INFO'] = json.load(f)['info']
 
     time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
     time_encoding = time_options(cfg['TIME_ENCODING'])
 
-    if (cfg['DT'] != cfg['DATA_INFO']['dt']): print('Different dt found in config {} and data {}. The former will be used'.format(cfg['DT'], cfg['DATA_INFO']['dt']))
-
-    data = RoutinesDataset(data_path=cfg['DATA_PATH'], 
-                           classes_path=cfg['CLASSES_PATH'], 
+    data = RoutinesDataset(data_path=os.path.join(data_dir,'processed'), 
                            time_encoder=time_encoding, 
-                           dt=cfg['DT'],
-                           test_perc=cfg['TEST_SPLIT'], 
                            batch_size=cfg['BATCH_SIZE'],
                            only_seen_edges = cfg['ONLY_SEEN_EDGES'])
     
+    run_model(data, group = os.path.basename(data_dir))
 
     if cfg['RUN_BASELINES']:
         cf = get_cooccurence_frequency(data)
         for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf)]:
             output_dir = os.path.join('logs','baselines',baseline.__class__.__name__)
-            wandb.init(name=baseline.__class__.__name__, dir=output_dir)
+            wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = os.path.basename(data_dir))
             wandb.config['NAME'] = wandb.run.name
             all_data = []
             for routine,_ in data.test_routines:
@@ -116,7 +102,6 @@ def run(cfg = {}, path = None):
                 visualize_conditional_datapoint(baseline, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
             wandb.finish()
 
-    run_model(data, group = os.path.basename(path))
 
 
 
@@ -137,4 +122,4 @@ if __name__ == '__main__':
             cfg.update(yaml.safe_load(f))
     if args.name is not None:
         cfg['NAME'] = args.name
-    run(cfg=cfg, path=args.path)
+    run(data_dir=args.path, cfg=cfg)
