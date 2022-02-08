@@ -74,7 +74,9 @@ class DataSplit():
         files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(name)]
         files.sort()
         data_list = torch.load(os.path.join(self.routines_dir, files[idx])) #, map_location=lambda storage, loc: storage.cuda(1))
-        return [((sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges), {'timestamp':time_external(sample['time']), 'obj_in_use':sample['obj_in_use']}) for sample in data_list]
+        samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges) for sample in data_list]
+        additional_info = [{'timestamp':time_external(sample['time']), 'obj_in_use':sample['obj_in_use']} for sample in data_list]
+        return samples, additional_info
     def __getitem__(self, idx: int):
         return self.get_routine(idx) if self.whole_routines else self.get_sample(idx)
 
@@ -134,10 +136,13 @@ class RoutinesDataset():
 
     def get_single_example_test_loader(self):
         return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
-
+    
 
 def get_cooccurence_frequency(routines_dataset):
-    all_edges = torch.concat([routine[1] for routine in routines_dataset._train_data], dim=0).sum(dim=0)
+    all_edges = torch.zeros_like(routines_dataset.train[0][0])
+    for r in routines_dataset.train:
+        all_edges = all_edges + r[0]
+    # one-smoothing
     all_edges += 1
     prior = all_edges/(all_edges.sum(dim=0))
     return prior

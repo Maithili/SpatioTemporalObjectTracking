@@ -87,10 +87,8 @@ def run(data_dir, cfg = {}):
             output_dir = os.path.join('logs','baselines',baseline.__class__.__name__)
             wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = os.path.basename(data_dir))
             wandb.config['NAME'] = wandb.run.name
-            all_data = []
-            for routine,_ in data.test_routines:
-                all_data += routine
-            eval, details = baseline.step(data.test_routines.collate_fn(all_data))
+            for routine in data.test:
+                eval, details = baseline.step(data.test.collate_fn([routine]))
             wandb.log(baseline.log())
             evaluation_summary = evaluate_applications(baseline, data, cfg, output_dir)
             print(evaluation_summary)
