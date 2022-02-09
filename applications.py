@@ -6,6 +6,7 @@ from torch.nn.functional import one_hot
 from copy import deepcopy
 from GraphTranslatorModule import _erase_edges
 from encoders import human_readable_from_external
+from evaluation import _get_confusion_matrix_masks
 
 def multiple_steps(model, test_routines, unconditional=False):
     accuracies = []
@@ -139,6 +140,40 @@ def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_fr
                         
     return summary_eval
 
+
+def evaluate_precision_recall(model, test_routines):
+    result = {'true_positive' : 0.000001, 'num_actual_changes' : 0.000001, 'num_predicted_changes' : 0.000001, 'true_positive_correctly_predicted': 0.000001}
+    num_examples = 0
+    for (routine, additional_info) in test_routines:
+        while len(routine) > 0:
+            num_examples += 1
+            data = test_routines.collate_fn([routine.pop()])
+            eval, details = model.step(data)
+            gt_tensor, output_tensor, input_tensor = details['gt']['location'], details['output']['location'], details['input']['location']
+            masks = _get_confusion_matrix_masks(gt_tensor, output_tensor, input_tensor)
+            result = {}
+            tp = masks['tp'].sum()
+            num_correctly_predicted_tp = (np.bitwise_and(masks['tp'], (gt_tensor == output_tensor).cpu())).sum()
+            num_gt_positives = masks['gt_positives'].sum()
+            num_out_positives = masks['out_positives'].sum()
+            result['true_positive'] += tp
+            result['num_actual_changes'] += num_gt_positives
+            result['num_predicted_changes'] += num_out_positives
+            result['true_positive_correctly_predicted'] += num_correctly_predicted_tp
+
+    result['precision'] = result['true_positive']/result['num_actual_changes']
+    result['recall'] = result['true_positive']/result['num_predicted_changes']
+    result['accuracy_over_true_positive'] = result['true_positive_correctly_predicted']/result['true_positive']
+    result['accuracy_over_actual_changes'] = result['true_positive_correctly_predicted']/result['num_actual_changes']
+    result['accuracy_over_true_positive'] = result['true_positive_correctly_predicted']/result['num_predicted_changes']
+
+    result['true_positive'] = result['true_positive'] / num_examples
+    result['num_actual_changes'] = result['num_actual_changes'] / num_examples
+    result['num_predicted_changes'] = result['num_predicted_changes'] / num_examples
+    result['true_positive_correctly_predicted'] = result['true_positive_correctly_predicted'] / num_examples
+    return result
+
+
 def something(model, test_routines):
     for (routine, additional_info) in test_routines:
         while len(routine) > 0:
@@ -155,6 +190,7 @@ def evaluate_applications(model, data, cfg, output_dir):
     evaluation['Search hits'] = tuple(hit_ratios)
     evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
     evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
+    evaluation['Prediction accuracy'] = evaluate_precision_recall(model, deepcopy(data.test_routines))
     with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
         json.dump(evaluation,f)
 
@@ -170,7 +206,12 @@ def evaluate_applications(model, data, cfg, output_dir):
                             'num_restorative_actions':evaluation['Actions']['restorative']['total'],
                             'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
                                             '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
-                                            '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)}
+                                            '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)},
+                            'prediction_accuracy':{ 'precision':evaluation['Prediction accuracy']['precision'],
+                                                    'recall':evaluation['Prediction accuracy']['recall'],
+                                                    'accuracy_over_true_positive':evaluation['Prediction accuracy']['accuracy_over_true_positive'],
+                                                    'accuracy_over_actual_changes':evaluation['Prediction accuracy']['accuracy_over_actual_changes'],
+                                                    'accuracy_over_true_positive':evaluation['Prediction accuracy']['accuracy_over_true_positive'],}
                             }
                          }
     return evaluation_summary

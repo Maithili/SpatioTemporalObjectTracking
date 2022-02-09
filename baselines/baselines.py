@@ -39,18 +39,19 @@ class StateTimeConditionedBaseline(Baseline):
     def __init__(self):
         super().__init__()
     def evaluate(self, output):
-        self.eval.append(common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node))
-    def log(self):
-        combined_cm_metrics = {k:sum([e['CM'][k] for e in self.eval]) for k in self.eval[0]['CM'].keys()}
-        return {'Test accuracy':sum([e['accuracy'] for e in self.eval])/len(self.eval), 'Test CM metrics':combined_cm_metrics}
+        return common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node)
+    # def log(self):
+    #     combined_cm_metrics = {k:sum([e['CM'][k] for e in self.eval]) for k in self.eval[0]['CM'].keys()}
+    #     print(combined_cm_metrics)
+    #     return {'Test accuracy':sum([e['accuracy'] for e in self.eval])/len(self.eval), 'Test CM metrics':combined_cm_metrics}
 
 class TimeConditionedBaseline(Baseline):
     def __init__(self):
         super().__init__()
     def evaluate(self, output):
-        self.eval.append(common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node))
-    def log(self):
-        return {'Test accuracy (Unconditional)':sum([e['accuracy'] for e in self.eval])/len(self.eval)}
+        return common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node))
+    # def log(self):
+    #     return {'Test accuracy (Unconditional)':sum([e['accuracy'] for e in self.eval])/len(self.eval)}
 
 
 class LastSeen(StateTimeConditionedBaseline):

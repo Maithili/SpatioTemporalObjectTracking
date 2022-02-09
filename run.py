@@ -52,7 +52,7 @@ def run_model(data, group):
     trainer.test(model, data.get_test_loader())
 
     evaluation_summary = evaluate_applications(model, data, cfg, output_dir)
-    wandb_logger.experiment.log(evaluation_summary)
+    model.log(evaluation_summary)
 
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:
@@ -89,7 +89,7 @@ def run(data_dir, cfg = {}):
             wandb.config['NAME'] = wandb.run.name
             for routine in data.test:
                 eval, details = baseline.step(data.test.collate_fn([routine]))
-            wandb.log(baseline.log())
+            # wandb.log(baseline.log())
             evaluation_summary = evaluate_applications(baseline, data, cfg, output_dir)
             print(evaluation_summary)
             wandb.log(evaluation_summary)
@@ -107,7 +107,7 @@ def run(data_dir, cfg = {}):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/differentBreakfasts0202', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/mcsample0207', help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--name', type=str, help='Name of run.')
 

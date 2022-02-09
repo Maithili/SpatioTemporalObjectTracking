@@ -243,15 +243,15 @@ class GraphTranslatorModule(LightningModule):
         eval,_ = self.step(batch)
         self.log('Train accuracy',eval['accuracy'])
         self.log('Train losses',eval['losses'])
-        if not dropout:
-            self.log('Train CM metrics',eval['CM'])
+        # if not dropout:
+            # self.log('Train CM metrics',eval['CM'])
         return eval['losses']['mean']
 
     def test_step(self, batch, batch_idx):
         eval, details = self.step(batch)
         self.log('Test accuracy',eval['accuracy'])
         self.log('Test losses',eval['losses'])
-        self.log('Test CM metrics',eval['CM'])
+        # self.log('Test CM metrics',eval['CM'])
         
         uncond_batch = batch
         uncond_batch['edges'] = _erase_edges(uncond_batch['edges'])
