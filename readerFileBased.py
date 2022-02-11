@@ -57,11 +57,13 @@ class DataSplit():
         self.routines_dir = routines_dir
         self.whole_routines = whole_routines
         self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask'])
+        self.files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(os.path.join(self.routines_dir, name))]
+        self.files.sort()
 
     def num_samples(self):
         return len(self.idx_map)
     def num_routines(self):
-        return len([name for name in os.listdir(self.routines_dir) if os.path.isfile(name)])
+        return len(self.files)
     def __len__(self):
         return self.num_routines() if self.whole_routines else self.num_samples()
 
@@ -71,9 +73,7 @@ class DataSplit():
         sample = data_list[sample_idx]
         return sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges
     def get_routine(self, idx: int):
-        files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(name)]
-        files.sort()
-        data_list = torch.load(os.path.join(self.routines_dir, files[idx])) #, map_location=lambda storage, loc: storage.cuda(1))
+        data_list = torch.load(os.path.join(self.routines_dir, self.files[idx])) #, map_location=lambda storage, loc: storage.cuda(1))
         samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges) for sample in data_list]
         additional_info = [{'timestamp':time_external(sample['time']), 'obj_in_use':sample['obj_in_use']} for sample in data_list]
         return samples, additional_info
@@ -110,7 +110,7 @@ class RoutinesDataset():
         self.node_ids = self.common_data['node_ids']
         self.node_classes = self.common_data['node_classes']
         self.node_categories = self.common_data['node_categories']
-        self.node_idx_from_id = self.common_data['node_idx_from_id']
+        self.node_idx_from_id = {int(k):v for k,v in self.common_data['node_idx_from_id'].items()}
         self.edge_keys = self.common_data['edge_keys']
         self.static_nodes = self.common_data['static_nodes']
         
@@ -190,7 +190,7 @@ class ProcessDataset():
         self.common_data['node_ids'] = [n['id'] for n in classes['nodes']]
         self.common_data['node_classes'] = [n['class_name'] for n in classes['nodes']]
         self.common_data['node_categories'] = [n['category'] for n in classes['nodes']]
-        self.common_data['node_idx_from_id'] = {n['id']:i for i,n in enumerate(classes['nodes'])}
+        self.common_data['node_idx_from_id'] = {int(n['id']):i for i,n in enumerate(classes['nodes'])}
 
         # Diagonal nodes are always irrelevant
         self.nonstatic_edges = 1 - np.eye(len(classes['nodes']))

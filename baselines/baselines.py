@@ -8,7 +8,7 @@ from evaluation import evaluate as common_evaluation
 
 class Baseline():
     def __init__(self):
-        self.eval = []
+        pass
 
     def extract(self, batch):
         if 'dynamic_edges_mask' in batch.keys():
@@ -30,8 +30,8 @@ class Baseline():
             'losses':{'location': None}, 
             'output':{'class':self.nodes.argmax(-1), 'location': result.squeeze(-1).argmax(-1)}, 
             'evaluate_node':self.evaluate_node}
-        self.evaluate(result)
-        return self.eval, details
+        eval = self.evaluate(result)
+        return eval, details
 
 
 
@@ -49,7 +49,7 @@ class TimeConditionedBaseline(Baseline):
     def __init__(self):
         super().__init__()
     def evaluate(self, output):
-        return common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node))
+        return common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node)
     # def log(self):
     #     return {'Test accuracy (Unconditional)':sum([e['accuracy'] for e in self.eval])/len(self.eval)}
 

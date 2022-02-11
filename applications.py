@@ -142,16 +142,15 @@ def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_fr
 
 
 def evaluate_precision_recall(model, test_routines):
-    result = {'true_positive' : 0.000001, 'num_actual_changes' : 0.000001, 'num_predicted_changes' : 0.000001, 'true_positive_correctly_predicted': 0.000001}
+    result = {'true_positive' : 0.0, 'num_actual_changes' : 0.0, 'num_predicted_changes' : 0.0, 'true_positive_correctly_predicted': 0.0}
     num_examples = 0
     for (routine, additional_info) in test_routines:
         while len(routine) > 0:
             num_examples += 1
             data = test_routines.collate_fn([routine.pop()])
             eval, details = model.step(data)
-            gt_tensor, output_tensor, input_tensor = details['gt']['location'], details['output']['location'], details['input']['location']
+            gt_tensor, output_tensor, input_tensor = details['gt']['location'][details['evaluate_node']], details['output']['location'][details['evaluate_node']], details['input']['location'][details['evaluate_node']]
             masks = _get_confusion_matrix_masks(gt_tensor, output_tensor, input_tensor)
-            result = {}
             tp = masks['tp'].sum()
             num_correctly_predicted_tp = (np.bitwise_and(masks['tp'], (gt_tensor == output_tensor).cpu())).sum()
             num_gt_positives = masks['gt_positives'].sum()
@@ -161,16 +160,16 @@ def evaluate_precision_recall(model, test_routines):
             result['num_predicted_changes'] += num_out_positives
             result['true_positive_correctly_predicted'] += num_correctly_predicted_tp
 
-    result['precision'] = result['true_positive']/result['num_actual_changes']
-    result['recall'] = result['true_positive']/result['num_predicted_changes']
-    result['accuracy_over_true_positive'] = result['true_positive_correctly_predicted']/result['true_positive']
-    result['accuracy_over_actual_changes'] = result['true_positive_correctly_predicted']/result['num_actual_changes']
-    result['accuracy_over_true_positive'] = result['true_positive_correctly_predicted']/result['num_predicted_changes']
+    result['precision'] = float(result['true_positive']/result['num_actual_changes'])
+    result['recall'] = float(result['true_positive']/result['num_predicted_changes'])
+    result['accuracy_over_true_positive'] = float(result['true_positive_correctly_predicted']/result['true_positive'])
+    result['accuracy_over_actual_changes'] = float(result['true_positive_correctly_predicted']/result['num_actual_changes'])
+    result['accuracy_over_predicted_changes'] = float(result['true_positive_correctly_predicted']/result['num_predicted_changes'])
 
-    result['true_positive'] = result['true_positive'] / num_examples
-    result['num_actual_changes'] = result['num_actual_changes'] / num_examples
-    result['num_predicted_changes'] = result['num_predicted_changes'] / num_examples
-    result['true_positive_correctly_predicted'] = result['true_positive_correctly_predicted'] / num_examples
+    result['true_positive'] = float(result['true_positive'] / num_examples)
+    result['num_actual_changes'] = float(result['num_actual_changes'] / num_examples)
+    result['num_predicted_changes'] = float(result['num_predicted_changes'] / num_examples)
+    result['true_positive_correctly_predicted'] = float(result['true_positive_correctly_predicted'] / num_examples)
     return result
 
 
@@ -207,11 +206,7 @@ def evaluate_applications(model, data, cfg, output_dir):
                             'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
                                             '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
                                             '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)},
-                            'prediction_accuracy':{ 'precision':evaluation['Prediction accuracy']['precision'],
-                                                    'recall':evaluation['Prediction accuracy']['recall'],
-                                                    'accuracy_over_true_positive':evaluation['Prediction accuracy']['accuracy_over_true_positive'],
-                                                    'accuracy_over_actual_changes':evaluation['Prediction accuracy']['accuracy_over_actual_changes'],
-                                                    'accuracy_over_true_positive':evaluation['Prediction accuracy']['accuracy_over_true_positive'],}
+                            'prediction_accuracy':evaluation['Prediction accuracy']
                             }
                          }
     return evaluation_summary

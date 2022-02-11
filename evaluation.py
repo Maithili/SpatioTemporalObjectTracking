@@ -14,10 +14,10 @@ def _get_confusion_matrix_masks(gt_tensor, output_tensor, input_tensor):
     masks['gt_positives'] = (gt_tensor != input_tensor).cpu()
     masks['out_negatives'] = (output_tensor == input_tensor).cpu()
     masks['out_positives'] = (output_tensor != input_tensor).cpu()
-    masks['tp'] = np.bitwise_and(masks['out_positives'], masks['gt_positives'])
-    masks['fp'] = np.bitwise_and(masks['out_positives'], masks['gt_negatives'])
-    masks['tn'] = np.bitwise_and(masks['out_negatives'], masks['gt_negatives'])
-    masks['fn'] = np.bitwise_and(masks['out_negatives'], masks['gt_positives'])
+    masks['tp'] = np.bitwise_and(masks['out_positives'], masks['gt_positives']).to(bool)
+    masks['fp'] = np.bitwise_and(masks['out_positives'], masks['gt_negatives']).to(bool)
+    masks['tn'] = np.bitwise_and(masks['out_negatives'], masks['gt_negatives']).to(bool)
+    masks['fn'] = np.bitwise_and(masks['out_negatives'], masks['gt_positives']).to(bool)
     return masks
 
 
@@ -29,7 +29,7 @@ def evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor, tn_lo
         result['losses'] = {}
         if tn_loss_weight is not None:
             cm_masks = _get_confusion_matrix_masks(gt_tensor, output_tensor, input_tensor)
-            not_tn = np.bitwise_not(cm_masks['tn'])
+            not_tn = np.bitwise_not(cm_masks['tn']).to(bool)
             important_losses = loss_tensor[not_tn]
             unimportant_losses = loss_tensor[cm_masks['tn']]
             result['losses']['mean'] = important_losses.mean() + tn_loss_weight * unimportant_losses.mean()
