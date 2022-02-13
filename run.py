@@ -63,7 +63,7 @@ def run_model(data, group):
 
 
 
-def run(data_dir, cfg = {}):
+def run(data_dir, cfg = {}, baselines=False):
     
     if cfg['NAME'] is None:
         cfg['NAME'] = os.path.basename(data_dir)
@@ -79,9 +79,7 @@ def run(data_dir, cfg = {}):
                            batch_size=cfg['BATCH_SIZE'],
                            only_seen_edges = cfg['ONLY_SEEN_EDGES'])
     
-    run_model(data, group = os.path.basename(data_dir))
-
-    if cfg['RUN_BASELINES']:
+    if baselines:
         cf = get_cooccurence_frequency(data)
         for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf)]:
             output_dir = os.path.join('logs','baselines',baseline.__class__.__name__)
@@ -99,6 +97,9 @@ def run(data_dir, cfg = {}):
                 visualize_unconditional_datapoint(baseline, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
                 visualize_conditional_datapoint(baseline, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
             wandb.finish()
+    else:
+        run_model(data, group = os.path.basename(data_dir))
+
 
 
 
@@ -110,6 +111,7 @@ if __name__ == '__main__':
     parser.add_argument('--path', type=str, default='data/personaExample0210', help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--name', type=str, help='Name of run.')
+    parser.add_argument('--baselines', action='store_true')
 
     args = parser.parse_args()
 
@@ -120,4 +122,4 @@ if __name__ == '__main__':
             cfg.update(yaml.safe_load(f))
     if args.name is not None:
         cfg['NAME'] = args.name
-    run(data_dir=args.path, cfg=cfg)
+    run(data_dir=args.path, cfg=cfg, baselines=args.baselines)
