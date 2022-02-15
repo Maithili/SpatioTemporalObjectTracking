@@ -13,7 +13,7 @@ def time_sine_uninformed(t):
     return torch.Tensor(enc)
 
 def time_sine_informed(t):
-    T_freq = [10, 60, 60*24, 60*24*7]
+    T_freq = [10, 60, 60*24]
     omegas = [2*np.pi/t_freq for t_freq in T_freq]
     enc = []
     for om in omegas:

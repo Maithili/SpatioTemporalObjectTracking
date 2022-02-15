@@ -11,18 +11,18 @@ class Baseline():
         pass
 
     def extract(self, batch):
-        if 'dynamic_edges_mask' in batch.keys():
-            dyn_edges = batch['dynamic_edges_mask']
-            evaluate_node = dyn_edges.sum(-1) > 0
-        self.evaluate_node = evaluate_node
+        self.dynamic_edges = batch['dynamic_edges_mask']
+        self.evaluate_node = self.dynamic_edges.sum(-1) > 0
         self.edges = batch['edges']
         self.nodes = batch['nodes']
         self.context = batch['context']
         self.gt = batch['y_edges']
+        self.time = batch['time']
     
     def step(self, batch):
         self.extract(batch)
         result = self.run()
+        result = result * self.dynamic_edges
         assert result.squeeze(-1).argmax(-1).size() == self.edges.squeeze(-1).argmax(-1).size(), f"{result.size()} == {self.edges.size()}"
         details = {'input':{'class':self.nodes.argmax(-1), 'location':self.edges.squeeze(-1).argmax(-1)}, 
             'output_probs':{'location': result}, 
@@ -83,6 +83,37 @@ class LastSeenAndStaticSemantic(StateTimeConditionedBaseline):
 class LastSeenButMostlyStaticSemantic(LastSeenAndStaticSemantic):
     def __init__(self, cooccurence_freq, prob_change=0.9) -> None:
         super().__init__(cooccurence_freq, prob_change)
+
+class Fremen(TimeConditionedBaseline):
+    def __init__(self, spectral_components):
+        super().__init__()
+        self.spectral_components = spectral_components
+    
+    def run(self):
+        prior = sum([2*spec['amplitude']*np.cos(2*np.pi*self.time/spec['period'] - spec['phase']) for spec in self.spectral_components])
+        return prior.unsqueeze(0).repeat(self.edges.size()[0],1,1)
+
+class FremenStateConditioned(StateTimeConditionedBaseline):
+    def __init__(self, spectral_components, dt, time_decay=60):
+        super().__init__()
+        self.spectral_components = spectral_components
+        self.decay_exponent = np.exp(-dt / time_decay)
+    
+    def run(self):
+        prior = sum([2*spec['amplitude']*np.cos(2*np.pi*self.time/spec['period'] - spec['phase']) for spec in self.spectral_components])
+        posterior = prior + (self.edges-prior) * self.decay_exponent
+        return posterior
+
+class FremenStateConditionedFastDecay(StateTimeConditionedBaseline):
+    def __init__(self, spectral_components, dt, time_decay=20):
+        super().__init__()
+        self.spectral_components = spectral_components
+        self.decay_exponent = np.exp(-dt / time_decay)
+    
+    def run(self):
+        prior = sum([2*spec['amplitude']*np.cos(2*np.pi*self.time/spec['period'] - spec['phase']) for spec in self.spectral_components])
+        posterior = prior + (self.edges-prior) * self.decay_exponent
+        return posterior
 
 
 class Slim(StateTimeConditionedBaseline):

@@ -6,7 +6,7 @@ from torch.nn.functional import one_hot
 from copy import deepcopy
 from GraphTranslatorModule import _erase_edges
 from encoders import human_readable_from_external
-from evaluation import _get_confusion_matrix_masks
+from evaluation import _get_masks
 
 def multiple_steps(model, test_routines, unconditional=False):
     accuracies = []
@@ -26,6 +26,17 @@ def multiple_steps(model, test_routines, unconditional=False):
             n_step += 1
     avg_accuracy_stepwise = [float(np.mean(a)) for a in accuracies]
     return avg_accuracy_stepwise
+
+def unconditional_accuracy(model, test_routines):
+    accuracies = []
+    for (routine, additional_info) in list(test_routines):
+        while len(routine) > 0:
+            data = test_routines.collate_fn([routine.pop()])
+            data['edges'] = _erase_edges(data['edges'])
+            eval, details = model.step(data)
+            accuracies.append(eval['accuracy'])
+    avg_accuracy = float(sum(accuracies)/len(accuracies))
+    return avg_accuracy
 
 def object_search(model, test_routines, object_ids_to_search, dict_node_idx_from_id, lookahead_steps, deterministic_input_loop):
     total_guesses = 0.000001
@@ -141,8 +152,70 @@ def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_fr
     return summary_eval
 
 
+def collect_n_steps(model, data_list, n, deterministic_input_loop):
+    collected = {}
+    prev_edges = data_list[0]['edges']
+    input_nodes = (data_list[0]['nodes']).argmax(-1)
+    input_edges = (data_list[0]['edges']).squeeze(-1).argmax(-1)
+    gt_changed = (input_edges*0).to(bool)
+    out_changed = (input_edges*0).to(bool)
+    collected['input'] = {'class':deepcopy(input_nodes),'location':deepcopy(input_edges)}
+    collected['output'] = {'class':deepcopy(input_nodes),'location':deepcopy(input_edges)}
+    collected['gt'] = {'class':deepcopy(input_nodes),'location':deepcopy(input_edges)}
+    for data in data_list:
+        data['edges'] = prev_edges
+        _, details = model.step(data)
+        gt_tensor, output_tensor, input_tensor = details['gt']['location'], details['output']['location'], details['input']['location']
+        masks = _get_masks(gt_tensor, output_tensor, input_tensor)
+
+        gt_mask = np.bitwise_and(masks['gt_positives'], np.bitwise_not(gt_changed).to(bool)).to(bool)
+        collected['gt']['location'][gt_mask] = deepcopy(gt_tensor[gt_mask])
+        gt_changed = np.bitwise_or(gt_changed, masks['gt_positives']).to(bool)
+        out_mask = np.bitwise_and(masks['out_positives'], np.bitwise_not(out_changed).to(bool)).to(bool)
+        collected['output']['location'][out_mask] = deepcopy(output_tensor[out_mask])
+        out_changed = np.bitwise_or(out_changed, masks['out_positives']).to(bool)
+
+        if deterministic_input_loop:
+            prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1])
+        else:
+            prev_edges = details['output_probs']['location']
+    
+    collected['evaluate_node'] = details['evaluate_node']
+    return collected
+
+
+def evaluate_precision_recall_loosely(model, test_routines, lookahead_steps=5, deterministic_input_loop=True):
+    metrics = {'prec_true_positive' : 0.0, 'recl_true_positive' : 0.0, 'num_actual_changes' : 0.0, 'num_predicted_changes' : 0.0, 'prec_true_positive_correctly_predicted': 0.0, 'recl_true_positive_correctly_predicted': 0.0}
+    num_examples = 0
+    for (routine, additional_info) in test_routines:
+        while len(routine) > 0:
+            num_examples += 1
+            data_list = [test_routines.collate_fn([routine[j]]) for j in range(min(lookahead_steps, len(routine)))]
+            eval, one_step_details = model.step(test_routines.collate_fn([routine.pop()]))
+            details = collect_n_steps(model, data_list, lookahead_steps, deterministic_input_loop)
+            input_tensor = details['input']['location'][details['evaluate_node']]
+            gt_tensor, output_tensor,  = details['gt']['location'][details['evaluate_node']], details['output']['location'][details['evaluate_node']]
+            one_step_gt_tensor, one_step_output_tensor,  = one_step_details['gt']['location'][one_step_details['evaluate_node']], one_step_details['output']['location'][one_step_details['evaluate_node']]
+            prec_masks = _get_masks(one_step_gt_tensor, output_tensor, input_tensor)
+            rec_masks = _get_masks(gt_tensor, one_step_output_tensor, input_tensor)
+            metrics['prec_true_positive'] += prec_masks['tp'].sum()
+            metrics['prec_true_positive_correctly_predicted'] += (np.bitwise_and(prec_masks['tp'], prec_masks['correct'])).sum()
+            metrics['num_actual_changes'] += prec_masks['gt_positives'].sum()
+            metrics['recl_true_positive'] += rec_masks['tp'].sum()
+            metrics['recl_true_positive_correctly_predicted'] += (np.bitwise_and(rec_masks['tp'], rec_masks['correct'])).sum()
+            metrics['num_predicted_changes'] += rec_masks['out_positives'].sum()
+            
+    results = {}
+    results['precision'] = float(metrics['prec_true_positive']/metrics['num_actual_changes'])
+    results['recall'] = float(metrics['recl_true_positive']/metrics['num_predicted_changes'])
+    results['accuracy_over_actual_changes'] = float(metrics['prec_true_positive_correctly_predicted']/metrics['num_actual_changes'])
+    results['accuracy_over_predicted_changes'] = float(metrics['recl_true_positive_correctly_predicted']/metrics['num_predicted_changes'])
+    
+    return results
+
+
 def evaluate_precision_recall(model, test_routines):
-    result = {'true_positive' : 0.0, 'num_actual_changes' : 0.0, 'num_predicted_changes' : 0.0, 'true_positive_correctly_predicted': 0.0}
+    result = {'true_positive' : 0.0, 'num_actual_changes' : 0.0, 'num_predicted_changes' : 0.0, 'true_positive_correctly_predicted': 0.0, 'accuracy':0.0}
     num_examples = 0
     for (routine, additional_info) in test_routines:
         while len(routine) > 0:
@@ -150,21 +223,24 @@ def evaluate_precision_recall(model, test_routines):
             data = test_routines.collate_fn([routine.pop()])
             eval, details = model.step(data)
             gt_tensor, output_tensor, input_tensor = details['gt']['location'][details['evaluate_node']], details['output']['location'][details['evaluate_node']], details['input']['location'][details['evaluate_node']]
-            masks = _get_confusion_matrix_masks(gt_tensor, output_tensor, input_tensor)
+            masks = _get_masks(gt_tensor, output_tensor, input_tensor)
             tp = masks['tp'].sum()
-            num_correctly_predicted_tp = (np.bitwise_and(masks['tp'], (gt_tensor == output_tensor).cpu())).sum()
+            num_correctly_predicted_tp = (np.bitwise_and(masks['tp'], masks['correct'])).sum()
             num_gt_positives = masks['gt_positives'].sum()
             num_out_positives = masks['out_positives'].sum()
             result['true_positive'] += tp
             result['num_actual_changes'] += num_gt_positives
             result['num_predicted_changes'] += num_out_positives
             result['true_positive_correctly_predicted'] += num_correctly_predicted_tp
+            result['accuracy'] += masks['correct'].sum()/output_tensor.size(-1)
 
     result['precision'] = float(result['true_positive']/result['num_actual_changes'])
     result['recall'] = float(result['true_positive']/result['num_predicted_changes'])
     result['accuracy_over_true_positive'] = float(result['true_positive_correctly_predicted']/result['true_positive'])
     result['accuracy_over_actual_changes'] = float(result['true_positive_correctly_predicted']/result['num_actual_changes'])
     result['accuracy_over_predicted_changes'] = float(result['true_positive_correctly_predicted']/result['num_predicted_changes'])
+    
+    result['accuracy'] = float(result['accuracy'])/num_examples
 
     result['true_positive'] = float(result['true_positive'] / num_examples)
     result['num_actual_changes'] = float(result['num_actual_changes'] / num_examples)
@@ -190,6 +266,9 @@ def evaluate_applications(model, data, cfg, output_dir):
     evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
     evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
     evaluation['Prediction accuracy'] = evaluate_precision_recall(model, deepcopy(data.test_routines))
+    evaluation['Prediction accuracy']['unconditional'] = unconditional_accuracy(model, deepcopy(data.test_routines))
+    evaluation['Prediction accuracy (loose)'] = evaluate_precision_recall_loosely(model, deepcopy(data.test_routines))
+    print(evaluation)
     with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
         json.dump(evaluation,f)
 
@@ -206,7 +285,8 @@ def evaluate_applications(model, data, cfg, output_dir):
                             'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
                                             '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
                                             '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)},
-                            'prediction_accuracy':evaluation['Prediction accuracy']
+                            'prediction_accuracy':evaluation['Prediction accuracy'],
+                            'prediction_accuracy (loose)':evaluation['Prediction accuracy (loose)']
                             }
                          }
     return evaluation_summary

@@ -1,4 +1,5 @@
 from random import random
+import numpy as np
 import torch
 from torch.nn import functional as F
 from torch import nn
@@ -45,33 +46,33 @@ class GraphTranslatorModule(LightningModule):
                 num_nodes, 
                 node_feature_len,
                 context_len, 
-                learn_nodes,
                 edge_importance,
                 edge_dropout_prob,
                 tn_loss_weight,
-                learn_context):
+                single_step,
+                learned_time_periods):
         
         super().__init__()
 
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
         self.context_len = context_len
-        self.learn_nodes = learn_nodes
         self.edge_importance = edge_importance
         self.edge_dropout_prob = edge_dropout_prob
         self.tn_loss_weight = tn_loss_weight
-        self.learn_context = learn_context
+        self.single_step = single_step
+        self.learned_time_periods = learned_time_periods
 
         self.hidden_influence_dim = 20
 
         self.edges_update_input_dim = self.hidden_influence_dim*4 + 1 + self.context_len
         
-        mlp_hidden = int(round(num_nodes*0.2))
-
-        self.mlp_context = nn.Sequential(nn.Linear(self.context_len, mlp_hidden),
-                                                    nn.ReLU(),
-                                                    nn.Linear(mlp_hidden, self.context_len),
-                                                    )
+        self.period_in_days = torch.nn.Parameter(torch.randn((1, 3)))
+        self.context_len = 2*3
+        omega_one_day = torch.Tensor([2*np.pi/60*24])
+        self.context_from_time = lambda t : torch.cat((torch.cos(omega_one_day * t / self.period_in_days),torch.sin(omega_one_day * t / self.period_in_days)), axis=1)
+ 
+        mlp_hidden = 15
 
         self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, mlp_hidden),
                                                     nn.ReLU(),
@@ -91,6 +92,22 @@ class GraphTranslatorModule(LightningModule):
                                                     nn.ReLU(),
                                                     nn.Linear(20, self.node_feature_len)
                                                     )
+
+        self.mlp_influence2 = nn.Sequential(nn.Linear(2*self.node_feature_len+1, mlp_hidden),
+                                                    nn.ReLU(),
+                                                    nn.Linear(mlp_hidden, self.hidden_influence_dim),
+                                                    )
+
+        self.mlp_update_importance2 = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
+                                                    nn.ReLU(),
+                                                    nn.Linear(mlp_hidden, 1)
+                                                    )
+                                    
+        self.mlp_update_edges2 = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
+                                                    nn.ReLU(),
+                                                    nn.Linear(mlp_hidden, 1)
+                                                    )
+
         
         self.location_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.squeeze(-1).permute(0,2,1), y.squeeze(-1).long()))
         self.inference_location = lambda x: x.squeeze(-1).argmax(-1)
@@ -104,8 +121,7 @@ class GraphTranslatorModule(LightningModule):
 
         batch_size, num_nodes, node_feature_len = nodes.size()
 
-        if self.learn_context:
-            context = self.mlp_context(context)
+        context = context.view(size=[batch_size, self.context_len])
 
         x = self.collate_edges(edges=edges.unsqueeze(-1), nodes=nodes)
         x = x.view(
@@ -146,17 +162,56 @@ class GraphTranslatorModule(LightningModule):
                                         1])
 
         ## node update
-        if self.learn_nodes:
-            xn = self.message_collection_nodes(torch.mul(x,imp), nodes, context)
-            xn = xn.view(
-                size=[batch_size * self.num_nodes, 
-                    self.hidden_influence_dim*2 + self.node_feature_len + self.context_len])
-            xn = self.mlp_update_nodes(xn).view(size=[batch_size, 
-                                            self.num_nodes, 
-                                            self.node_feature_len])
-        else:
-            xn = nodes        
+        xn = self.message_collection_nodes(torch.mul(x,imp), nodes, context)
+        xn = xn.view(
+            size=[batch_size * self.num_nodes, 
+                self.hidden_influence_dim*2 + self.node_feature_len + self.context_len])
+        xn = self.mlp_update_nodes(xn).view(size=[batch_size, 
+                                        self.num_nodes, 
+                                        self.node_feature_len])
 
+        if not self.single_step:
+
+            edges, nodes = xe, xn
+
+            x = self.collate_edges(edges=edges, nodes=nodes)
+            x = x.view(
+                size=[batch_size * self.num_nodes * self.num_nodes, 
+                    2*self.node_feature_len+1])
+            x = self.mlp_influence2(x)
+            x = x.view(
+                size=[batch_size, 
+                    self.num_nodes, 
+                    self.num_nodes, 
+                    self.hidden_influence_dim])
+
+            if self.edge_importance == 'predicted':
+                ## importance update
+                imp = self.message_collection_edges(x, edges, context)
+                imp = imp.view(
+                    size=[batch_size * self.num_nodes * self.num_nodes, 
+                        self.edges_update_input_dim])
+                imp = self.mlp_update_importance2(imp).view(size=[batch_size, 
+                                                self.num_nodes, 
+                                                self.num_nodes,
+                                                1])
+            elif self.edge_importance == 'all':
+                imp = torch.ones_like(edges)
+            elif self.edge_importance == 'existing':
+                imp = edges
+            else:
+                raise KeyError(f'Edge Importance given as ({self.edge_importance}) is not among predicted, all or existing')
+
+            ## edge update
+            xe = self.message_collection_edges(x, imp, context)
+            xe = xe.view(
+                size=[batch_size * self.num_nodes * self.num_nodes, 
+                    self.edges_update_input_dim])
+            xe = self.mlp_update_edges2(xe).view(size=[batch_size, 
+                                            self.num_nodes, 
+                                            self.num_nodes,
+                                            1])
+        
         return xe, xn
 
     def forward(self, edges, nodes, context):
@@ -187,11 +242,15 @@ class GraphTranslatorModule(LightningModule):
     def step(self, batch):
         edges = batch['edges']
         nodes = batch['nodes']
-        context = batch['context']
         y_edges = batch['y_edges']
         y_nodes = batch['y_nodes']
         dyn_edges = batch['dynamic_edges_mask']
         
+        if self.learned_time_periods:
+            time = batch['time'].unsqueeze(1)
+            context = self.context_from_time(time)
+        else:
+            context = batch['context']
         edges_pred, nodes_pred = self(edges, nodes, context)
 
         assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
@@ -249,15 +308,21 @@ class GraphTranslatorModule(LightningModule):
 
     def test_step(self, batch, batch_idx):
         eval, details = self.step(batch)
-        self.log('Test accuracy',eval['accuracy'])
+        # self.log('Test accuracy',eval['accuracy'])
         self.log('Test losses',eval['losses'])
         # self.log('Test CM metrics',eval['CM'])
         
         uncond_batch = batch
         uncond_batch['edges'] = _erase_edges(uncond_batch['edges'])
         eval, details = self.step(uncond_batch)
-        self.log('Test accuracy (Unconditional)',eval['accuracy'])
+        # self.log('Test accuracy (Unconditional)',eval['accuracy'])
         self.log('Test losses (Unconditional)',eval['losses'])
+
+        # omegas_learned, _ = torch.sort(self.period_in_days*24) 
+        # self.log('Time Period 1',omegas_learned[0], on_epoch=True)
+        # self.log('Time Period 2',omegas_learned[1], on_epoch=True)
+        # self.log('Time Period 3',omegas_learned[2], on_epoch=True)
+        # print('Time Periods learned ',self.period_in_days*24)
 
         return 
 

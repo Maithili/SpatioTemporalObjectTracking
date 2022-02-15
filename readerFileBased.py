@@ -56,7 +56,7 @@ class DataSplit():
         self.idx_map = idx_map
         self.routines_dir = routines_dir
         self.whole_routines = whole_routines
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask'])
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'time'])
         self.files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(os.path.join(self.routines_dir, name))]
         self.files.sort()
 
@@ -71,15 +71,20 @@ class DataSplit():
         filename, sample_idx = self.idx_map[idx]
         data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
         sample = data_list[sample_idx]
-        return sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges
+        return sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time'])
     def get_routine(self, idx: int):
         data_list = torch.load(os.path.join(self.routines_dir, self.files[idx])) #, map_location=lambda storage, loc: storage.cuda(1))
-        samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges) for sample in data_list]
+        samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time'])) for sample in data_list]
         additional_info = [{'timestamp':time_external(sample['time']), 'obj_in_use':sample['obj_in_use']} for sample in data_list]
         return samples, additional_info
     def __getitem__(self, idx: int):
         return self.get_routine(idx) if self.whole_routines else self.get_sample(idx)
 
+    def get_edges_and_time(self, idx:int):
+        filename, sample_idx = self.idx_map[idx]
+        data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
+        sample = data_list[sample_idx]
+        return sample['edges'], sample['time']
     
     def sampler(self):
         return None
@@ -147,6 +152,18 @@ def get_cooccurence_frequency(routines_dataset):
     prior = all_edges/(all_edges.sum(dim=0))
     return prior
 
+def get_spectral_components(routines_dataset, periods_mins):
+    reals = [torch.zeros_like(routines_dataset.train[0][0]) for _ in periods_mins]
+    imags = [torch.zeros_like(routines_dataset.train[0][0]) for _ in periods_mins]
+    for idx in range(len(routines_dataset.train)):
+        edges, time = routines_dataset.train.get_edges_and_time(idx)
+        for harmonic, period in enumerate(periods_mins):
+            reals[harmonic] += edges * np.cos(2*np.pi*time/period)
+            imags[harmonic] += edges * np.sin(2*np.pi*time/period)
+    components = []
+    for r,i,p in zip(reals, imags, periods_mins):
+        components.append({'amplitude': (np.sqrt(np.square(r)+np.square(i))/len(routines_dataset.train)), 'phase': (np.arctan2(i,r)), 'period': p})
+    return components
 
 
 
@@ -278,7 +295,7 @@ class ProcessDataset():
             if data_idx < 0:
                 continue
             if prev_edges is not None:
-                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': prev_t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'obj_in_use':obj_in_use[data_idx]})
+                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'obj_in_use':obj_in_use[data_idx]})
             prev_edges = edges[data_idx]
             prev_nodes = nodes[data_idx]
             prev_t = t

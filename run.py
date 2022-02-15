@@ -11,13 +11,11 @@ from pytorch_lightning.loggers import WandbLogger
 import wandb
 
 from GraphTranslatorModule import GraphTranslatorModule
-from readerFileBased import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency
+from readerFileBased import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
 from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
 from applications import evaluate_applications
-from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, LastSeenButMostlyStaticSemantic, Slim
-
-DEFAULT_CONFIG = 'config/default.yaml'
+from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, LastSeenButMostlyStaticSemantic, Fremen, FremenStateConditioned, FremenStateConditionedFastDecay, Slim
 
 def run_model(data, group):
     output_dir = os.path.join('logs',cfg['NAME'])
@@ -39,17 +37,19 @@ def run_model(data, group):
     model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                             node_feature_len=data.params['n_len'],
                             context_len=data.params['c_len'],
-                            learn_nodes=cfg['LEARN_NODES'],
                             edge_importance=cfg['EDGE_IMPORTANCE'],
                             edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
                             tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
-                            learn_context=cfg['LEARN_CONTEXT'])
+                            single_step=cfg['SINGLE_STEP'],
+                            learned_time_periods=cfg['LEARNED_TIME_PERIODS'])
 
     trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
     wandb_logger.watch(model, log='gradients', log_freq=20)
 
     trainer.fit(model, data.get_train_loader())
     trainer.test(model, data.get_test_loader())
+
+    if cfg['LEARNED_TIME_PERIODS'] : print('Time Periods learned (hrs)',model.period_in_days*24)
 
     evaluation_summary = evaluate_applications(model, data, cfg, output_dir)
     wandb_logger.experiment.log(evaluation_summary)
@@ -81,7 +81,8 @@ def run(data_dir, cfg = {}, baselines=False):
     
     if baselines:
         cf = get_cooccurence_frequency(data)
-        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf)]:
+        spec = get_spectral_components(data, periods_mins=[3600, 3600/2, 3600/3])
+        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt']), FremenStateConditionedFastDecay(spec, data.params['dt'])]:
             output_dir = os.path.join('logs','baselines',baseline.__class__.__name__)
             wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = os.path.basename(data_dir))
             wandb.config['NAME'] = wandb.run.name
@@ -108,15 +109,21 @@ def run(data_dir, cfg = {}, baselines=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/personaExample0210', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/persona0212/persona0212_hard_worker', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--name', type=str, help='Name of run.')
     parser.add_argument('--baselines', action='store_true')
 
     args = parser.parse_args()
 
-    with open(DEFAULT_CONFIG) as f:
+    with open('config/default.yaml') as f:
         cfg = yaml.safe_load(f)
+
+    if args.architecture_cfg is not None:
+        with open(os.path.join('config',args.architecture_cfg)+'.yaml') as f:
+            cfg.update(yaml.safe_load(f))
+
     if args.cfg is not None:
         with open(os.path.join('config',args.cfg)+'.yaml') as f:
             cfg.update(yaml.safe_load(f))
