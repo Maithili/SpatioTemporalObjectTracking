@@ -1,13 +1,16 @@
 #!./.venv/bin/python
 
+from gc import callbacks
 import yaml
 import json
 import os
+import glob
 import argparse
 from copy import deepcopy
 import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
 import wandb
 
 from GraphTranslatorModule import GraphTranslatorModule
@@ -17,7 +20,7 @@ from utils import visualize_unconditional_datapoint, visualize_conditional_datap
 from applications import evaluate_applications
 from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, LastSeenButMostlyStaticSemantic, Fremen, FremenStateConditioned, FremenStateConditionedFastDecay, Slim
 
-def run_model(data, group):
+def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False):
     output_dir = os.path.join('logs',cfg['NAME'])
     if os.path.exists(output_dir):
         n = 1
@@ -28,31 +31,52 @@ def run_model(data, group):
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir=output_dir, log_model=True, group = group)
+    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group)
     wandb_logger.experiment.config.update(cfg)
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
 
-    model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
-                            node_feature_len=data.params['n_len'],
-                            context_len=data.params['c_len'],
-                            edge_importance=cfg['EDGE_IMPORTANCE'],
-                            edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
-                            tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
-                            single_step=cfg['SINGLE_STEP'],
-                            learned_time_periods=cfg['LEARNED_TIME_PERIODS'])
+    if read_ckpt:
+        checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
+        model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
+                                                            num_nodes=data.params['n_nodes'],
+                                                            node_feature_len=data.params['n_len'],
+                                                            context_len=data.params['c_len'],
+                                                            edge_importance=cfg['EDGE_IMPORTANCE'],
+                                                            edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
+                                                            tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
+                                                            single_step=cfg['SINGLE_STEP'],
+                                                            learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
+                                                            hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
 
-    trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
-    wandb_logger.watch(model, log='gradients', log_freq=20)
+    else:
 
-    trainer.fit(model, data.get_train_loader())
-    trainer.test(model, data.get_test_loader())
+        model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
+                                node_feature_len=data.params['n_len'],
+                                context_len=data.params['c_len'],
+                                edge_importance=cfg['EDGE_IMPORTANCE'],
+                                edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
+                                tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
+                                single_step=cfg['SINGLE_STEP'],
+                                learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
+                                hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
+    
+        if write_ckpt:
+            ckpt_callback = ModelCheckpoint(dirpath=checkpoint_dir)
+            trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5, callbacks=[ckpt_callback])
+
+        else:
+            trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
+
+        wandb_logger.watch(model, log='gradients', log_freq=20)
+
+        trainer.fit(model, data.get_train_loader())
+        trainer.test(model, data.get_test_loader())
 
     if cfg['LEARNED_TIME_PERIODS'] : print('Time Periods learned (hrs)',model.period_in_days*24)
 
-    evaluation_summary = evaluate_applications(model, data, cfg, output_dir)
-    wandb_logger.experiment.log(evaluation_summary)
+    evaluation_summary = evaluate_applications(model, data, cfg, output_dir, logger=wandb_logger.experiment)
 
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:
@@ -63,7 +87,7 @@ def run_model(data, group):
 
 
 
-def run(data_dir, cfg = {}, baselines=False):
+def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False):
     
     if cfg['NAME'] is None:
         cfg['NAME'] = os.path.basename(data_dir)
@@ -85,13 +109,12 @@ def run(data_dir, cfg = {}, baselines=False):
         for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt']), FremenStateConditionedFastDecay(spec, data.params['dt'])]:
             output_dir = os.path.join('logs','baselines',baseline.__class__.__name__)
             wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = os.path.basename(data_dir))
+            wandb.config.update(cfg)
             wandb.config['NAME'] = wandb.run.name
             for routine in data.test:
                 eval, details = baseline.step(data.test.collate_fn([routine]))
             # wandb.log(baseline.log())
-            evaluation_summary = evaluate_applications(baseline, data, cfg, output_dir)
-            print(evaluation_summary)
-            wandb.log(evaluation_summary)
+            _ = evaluate_applications(baseline, data, cfg, output_dir)
 
             print('Outputs saved at ',output_dir)
             if INTERACTIVE:
@@ -99,7 +122,7 @@ def run(data_dir, cfg = {}, baselines=False):
                 visualize_conditional_datapoint(baseline, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
             wandb.finish()
     else:
-        run_model(data, group = os.path.basename(data_dir))
+        run_model(data, group = os.path.basename(data_dir), checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt)
 
 
 
@@ -114,6 +137,9 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--name', type=str, help='Name of run.')
     parser.add_argument('--baselines', action='store_true')
+    parser.add_argument('--ckpt_dir', type=str, help='Path to checkpoint file')
+    parser.add_argument('--read_ckpt', action='store_true')
+    parser.add_argument('--write_ckpt', action='store_true')
 
     args = parser.parse_args()
 
@@ -129,4 +155,5 @@ if __name__ == '__main__':
             cfg.update(yaml.safe_load(f))
     if args.name is not None:
         cfg['NAME'] = args.name
-    run(data_dir=args.path, cfg=cfg, baselines=args.baselines)
+
+    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt)

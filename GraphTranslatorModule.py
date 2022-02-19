@@ -50,7 +50,8 @@ class GraphTranslatorModule(LightningModule):
                 edge_dropout_prob,
                 tn_loss_weight,
                 single_step,
-                learned_time_periods):
+                learned_time_periods,
+                hidden_layer_size):
         
         super().__init__()
 
@@ -67,12 +68,13 @@ class GraphTranslatorModule(LightningModule):
 
         self.edges_update_input_dim = self.hidden_influence_dim*4 + 1 + self.context_len
         
-        self.period_in_days = torch.nn.Parameter(torch.randn((1, 3)))
-        self.context_len = 2*3
-        omega_one_day = torch.Tensor([2*np.pi/60*24])
-        self.context_from_time = lambda t : torch.cat((torch.cos(omega_one_day * t / self.period_in_days),torch.sin(omega_one_day * t / self.period_in_days)), axis=1)
+        if learned_time_periods:
+            self.period_in_days = torch.nn.Parameter(torch.randn((1, 3)))
+            self.context_len = 2*3
+            omega_one_day = torch.Tensor([2*np.pi/60*24])
+            self.context_from_time = lambda t : torch.cat((torch.cos(omega_one_day * t / self.period_in_days),torch.sin(omega_one_day * t / self.period_in_days)), axis=1)
  
-        mlp_hidden = 15
+        mlp_hidden = hidden_layer_size
 
         self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, mlp_hidden),
                                                     nn.ReLU(),
