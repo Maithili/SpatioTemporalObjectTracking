@@ -17,7 +17,8 @@ from GraphTranslatorModule import GraphTranslatorModule
 from readerFileBased import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
 from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
-from applications import evaluate_applications
+# from applications import evaluate_applications
+from breakdown_evaluations import evaluate as evaluate_applications
 from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, LastSeenButMostlyStaticSemantic, Fremen, FremenStateConditioned, Slim
 
 def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[]):
@@ -135,7 +136,7 @@ if __name__ == '__main__':
     parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--name', type=str, help='Name of run.')
-    parser.add_argument('--tags', default='', type=str, help='Tags for the run separated by a comma \',\'')
+    parser.add_argument('--tags', type=str, help='Tags for the run separated by a comma \',\'')
     parser.add_argument('--baselines', action='store_true')
     parser.add_argument('--ckpt_dir', type=str, help='Path to checkpoint file')
     parser.add_argument('--read_ckpt', action='store_true')
@@ -156,4 +157,6 @@ if __name__ == '__main__':
     if args.name is not None:
         cfg['NAME'] = args.name
 
-    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt, tags = args.tags.split(','))
+    tags = args.tags.split(',') if args.tags is not None else []
+
+    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt, tags = tags)
