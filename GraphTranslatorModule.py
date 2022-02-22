@@ -49,7 +49,6 @@ class GraphTranslatorModule(LightningModule):
                 edge_importance,
                 edge_dropout_prob,
                 tn_loss_weight,
-                single_step,
                 learned_time_periods,
                 hidden_layer_size):
         
@@ -61,7 +60,6 @@ class GraphTranslatorModule(LightningModule):
         self.edge_importance = edge_importance
         self.edge_dropout_prob = edge_dropout_prob
         self.tn_loss_weight = tn_loss_weight
-        self.single_step = single_step
         self.learned_time_periods = learned_time_periods
 
         self.hidden_influence_dim = 20
@@ -81,35 +79,15 @@ class GraphTranslatorModule(LightningModule):
                                                     nn.Linear(mlp_hidden, self.hidden_influence_dim),
                                                     )
 
-        self.mlp_update_importance = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
+        self.mlp_update_importance = nn.Sequential(nn.Linear(self.edges_update_input_dim, self.hidden_influence_dim),
                                                     nn.ReLU(),
-                                                    nn.Linear(mlp_hidden, 1)
+                                                    nn.Linear(self.hidden_influence_dim, 1)
                                                     )
                                     
-        self.mlp_update_edges = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
+        self.mlp_update_edges = nn.Sequential(nn.Linear(self.edges_update_input_dim, self.hidden_influence_dim),
                                                     nn.ReLU(),
-                                                    nn.Linear(mlp_hidden, 1)
+                                                    nn.Linear(self.hidden_influence_dim, 1)
                                                     )
-        self.mlp_update_nodes = nn.Sequential(nn.Linear(self.hidden_influence_dim*2+self.node_feature_len+self.context_len, 20),
-                                                    nn.ReLU(),
-                                                    nn.Linear(20, self.node_feature_len)
-                                                    )
-
-        self.mlp_influence2 = nn.Sequential(nn.Linear(2*self.node_feature_len+1, mlp_hidden),
-                                                    nn.ReLU(),
-                                                    nn.Linear(mlp_hidden, self.hidden_influence_dim),
-                                                    )
-
-        self.mlp_update_importance2 = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
-                                                    nn.ReLU(),
-                                                    nn.Linear(mlp_hidden, 1)
-                                                    )
-                                    
-        self.mlp_update_edges2 = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
-                                                    nn.ReLU(),
-                                                    nn.Linear(mlp_hidden, 1)
-                                                    )
-
         
         self.location_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.squeeze(-1).permute(0,2,1), y.squeeze(-1).long()))
         self.inference_location = lambda x: x.squeeze(-1).argmax(-1)
@@ -162,59 +140,8 @@ class GraphTranslatorModule(LightningModule):
                                         self.num_nodes, 
                                         self.num_nodes,
                                         1])
-
-        ## node update
-        xn = self.message_collection_nodes(torch.mul(x,imp), nodes, context)
-        xn = xn.view(
-            size=[batch_size * self.num_nodes, 
-                self.hidden_influence_dim*2 + self.node_feature_len + self.context_len])
-        xn = self.mlp_update_nodes(xn).view(size=[batch_size, 
-                                        self.num_nodes, 
-                                        self.node_feature_len])
-
-        if not self.single_step:
-
-            edges, nodes = xe, xn
-
-            x = self.collate_edges(edges=edges, nodes=nodes)
-            x = x.view(
-                size=[batch_size * self.num_nodes * self.num_nodes, 
-                    2*self.node_feature_len+1])
-            x = self.mlp_influence2(x)
-            x = x.view(
-                size=[batch_size, 
-                    self.num_nodes, 
-                    self.num_nodes, 
-                    self.hidden_influence_dim])
-
-            if self.edge_importance == 'predicted':
-                ## importance update
-                imp = self.message_collection_edges(x, edges, context)
-                imp = imp.view(
-                    size=[batch_size * self.num_nodes * self.num_nodes, 
-                        self.edges_update_input_dim])
-                imp = self.mlp_update_importance2(imp).view(size=[batch_size, 
-                                                self.num_nodes, 
-                                                self.num_nodes,
-                                                1])
-            elif self.edge_importance == 'all':
-                imp = torch.ones_like(edges)
-            elif self.edge_importance == 'existing':
-                imp = edges
-            else:
-                raise KeyError(f'Edge Importance given as ({self.edge_importance}) is not among predicted, all or existing')
-
-            ## edge update
-            xe = self.message_collection_edges(x, imp, context)
-            xe = xe.view(
-                size=[batch_size * self.num_nodes * self.num_nodes, 
-                    self.edges_update_input_dim])
-            xe = self.mlp_update_edges2(xe).view(size=[batch_size, 
-                                            self.num_nodes, 
-                                            self.num_nodes,
-                                            1])
         
-        return xe, xn
+        return xe, nodes
 
     def forward(self, edges, nodes, context):
         """

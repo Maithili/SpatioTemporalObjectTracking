@@ -1,3 +1,5 @@
+#!./.venv/bin/python
+
 import json
 import os
 import shutil
@@ -56,7 +58,7 @@ class DataSplit():
         self.idx_map = idx_map
         self.routines_dir = routines_dir
         self.whole_routines = whole_routines
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'time'])
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'time', 'change_type'])
         self.files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(os.path.join(self.routines_dir, name))]
         self.files.sort()
 
@@ -71,10 +73,14 @@ class DataSplit():
         filename, sample_idx = self.idx_map[idx]
         data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
         sample = data_list[sample_idx]
-        return sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time'])
+        return sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time']), (sample['change_type']).to(int)
     def get_routine(self, idx: int):
         data_list = torch.load(os.path.join(self.routines_dir, self.files[idx])) #, map_location=lambda storage, loc: storage.cuda(1))
-        samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time'])) for sample in data_list]
+        samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time']), (sample['change_type']).to(int)) for sample in data_list]
+        # moved_obj_mask = torch.zeros_like(data_list[0]['edges']).to(bool)
+        # for sample in data_list:
+        #     moved_obj_mask = np.bitwise_or(torch.Tensor(moved_obj_mask), (sample['edges'] != sample['prev_edges'])).to(bool)
+        # additional_info = {'moved_obj_mask':moved_obj_mask}
         additional_info = [{'timestamp':time_external(sample['time']), 'obj_in_use':sample['obj_in_use']} for sample in data_list]
         return samples, additional_info
     def __getitem__(self, idx: int):
@@ -112,6 +118,8 @@ class RoutinesDataset():
         else:
             self.active_edges = torch.load(os.path.join(data_path, 'nonstatic_edges.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
         
+        self.home_graph = torch.load(os.path.join(data_path, 'home_graph.pt'))
+
         self.node_ids = self.common_data['node_ids']
         self.node_classes = self.common_data['node_classes']
         self.node_categories = self.common_data['node_categories']
@@ -176,13 +184,13 @@ class ProcessDataset():
         output_train_path = os.path.join(output_path, 'train')
         output_test_path = os.path.join(output_path, 'test')
         if os.path.exists(output_train_path): 
-            overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
-            if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
+            # overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
+            # if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
             shutil.rmtree(output_path)
         os.makedirs(output_train_path)
         if os.path.exists(output_test_path): 
-            overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
-            if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
+            # overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
+            # if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
             shutil.rmtree(output_path)
         os.makedirs(output_test_path)
 
@@ -200,6 +208,7 @@ class ProcessDataset():
             json.dump(self.common_data, f)
         torch.save(self.seen_edges, os.path.join(output_path, 'seen_edges.pt'))
         torch.save(self.nonstatic_edges, os.path.join(output_path, 'nonstatic_edges.pt'))
+        torch.save(self.home_graph, os.path.join(output_path, 'home_graph.pt'))
 
     def read_classes(self, classes_path):
         with open(classes_path, 'r') as f:
@@ -217,6 +226,8 @@ class ProcessDataset():
         self.nonstatic_edges[np.where(np.array(self.common_data['node_categories']) == "Decor"),:] = 0
         self.nonstatic_edges[np.where(np.array(self.common_data['node_categories']) == "Appliances"),:] = 0
         self.seen_edges = np.zeros_like(self.nonstatic_edges)
+
+        self.home_graph = None
 
         self.common_data['edge_keys'] = classes['edges']
         static = lambda category : category in ["Furniture", "Room"]
@@ -240,6 +251,7 @@ class ProcessDataset():
                     inp = input(f'Do you want to visualize the next routine?')
                     viz = (inp == 'y')
                 nodes, edges = self.read_graphs(routine["graphs"])
+                self.home_graph = edges[0,:,:]
                 times = torch.Tensor(routine["times"])
                 obj_in_use = routine["objects_in_use"]
                 file_basename = os.path.splitext(f)[0]
@@ -294,8 +306,11 @@ class ProcessDataset():
                 data_idx += 1
             if data_idx < 0:
                 continue
+            # 3 = to home state; 1 = from home state; 2 = neither; 0 = no change
             if prev_edges is not None:
-                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'obj_in_use':obj_in_use[data_idx]})
+                change_type = (np.absolute(edges[data_idx] - prev_edges)).sum(-1).to(int)
+                change_type += (self.home_graph * (edges[data_idx] - prev_edges)).sum(-1).to(int)
+                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'obj_in_use':obj_in_use[data_idx], 'change_type':change_type})
             prev_edges = edges[data_idx]
             prev_nodes = nodes[data_idx]
             prev_t = t

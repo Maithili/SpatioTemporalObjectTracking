@@ -154,6 +154,49 @@ def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_fr
     return summary_eval
 
 
+
+def complete_metrics(result, num_examples):
+
+    result['precision'] = float(result['true_positive']/result['num_actual_changes'])
+    result['accuracy_over_true_positive'] = float(result['true_positive_correctly_predicted']/result['true_positive'])
+    result['accuracy_over_actual_changes'] = float(result['true_positive_correctly_predicted']/result['num_actual_changes'])
+
+    if 'num_predicted_changes' in result.keys():
+        result['recall'] = float(result['true_positive']/result['num_predicted_changes'])
+        result['F1-score'] = 2*result['precision']*result['recall']/(result['precision']+result['recall'])
+        result['accuracy_over_predicted_changes'] = float(result['true_positive_correctly_predicted']/result['num_predicted_changes'])
+        result['num_predicted_changes'] = float(result['num_predicted_changes'] / num_examples)
+
+    result['true_positive'] = float(result['true_positive'] / num_examples)
+    result['num_actual_changes'] = float(result['num_actual_changes'] / num_examples)
+    result['true_positive_correctly_predicted'] = float(result['true_positive_correctly_predicted'] / num_examples)
+
+    return result
+
+
+def complete_multistep_metrics(results):
+
+    out_results = {}
+
+    out_results['precision'] = float(results['prec_true_positive']/results['num_actual_changes'])
+    out_results['accuracy_over_actual_changes'] = float(results['prec_true_positive_correctly_predicted']/results['num_actual_changes'])
+    out_results['accuracy_over_true_positive'] = float(results['prec_true_positive_correctly_predicted']/results['prec_true_positive'])
+
+    if 'recl_true_positive' in results.keys():
+        out_results['recall'] = float(results['recl_true_positive']/results['num_predicted_changes'])
+        out_results['F1-score'] = 2*out_results['precision']*out_results['recall']/(out_results['precision']+out_results['recall'])
+        out_results['accuracy_over_predicted_changes'] = float(results['recl_true_positive_correctly_predicted']/results['num_predicted_changes'])
+
+    # results['prec_true_positive'] = float(results['prec_true_positive']/num_examples)
+    # results['prec_true_positive_correctly_predicted'] = float(results['prec_true_positive_correctly_predicted']/num_examples)
+    # results['num_actual_changes'] = float(results['num_actual_changes']/num_examples)
+    # results['recl_true_positive'] = float(results['recl_true_positive']/num_examples)
+    # results['recl_true_positive_correctly_predicted'] = float(results['recl_true_positive_correctly_predicted']/num_examples)
+    # results['num_predicted_changes'] = float(results['num_predicted_changes']/num_examples)
+
+    return out_results
+
+
 def collect_n_steps(model, data_list, n, deterministic_input_loop):
     collected = {}
     prev_edges = data_list[0]['edges']
@@ -164,6 +207,7 @@ def collect_n_steps(model, data_list, n, deterministic_input_loop):
     collected['input'] = {'class':deepcopy(input_nodes),'location':deepcopy(input_edges)}
     collected['output'] = {'class':deepcopy(input_nodes),'location':deepcopy(input_edges)}
     collected['gt'] = {'class':deepcopy(input_nodes),'location':deepcopy(input_edges)}
+    collected['change_type'] = (input_edges*0).to(int)
     for data in data_list:
         data['edges'] = prev_edges
         _, details = model.step(data)
@@ -172,6 +216,7 @@ def collect_n_steps(model, data_list, n, deterministic_input_loop):
 
         gt_mask = np.bitwise_and(masks['gt_positives'], np.bitwise_not(gt_changed).to(bool)).to(bool)
         collected['gt']['location'][gt_mask] = deepcopy(gt_tensor[gt_mask])
+        collected['change_type'][gt_mask] = deepcopy(data['change_type'][gt_mask].to(int))
         gt_changed = np.bitwise_or(gt_changed, masks['gt_positives']).to(bool)
         out_mask = np.bitwise_and(masks['out_positives'], np.bitwise_not(out_changed).to(bool)).to(bool)
         collected['output']['location'][out_mask] = deepcopy(output_tensor[out_mask])
@@ -185,9 +230,22 @@ def collect_n_steps(model, data_list, n, deterministic_input_loop):
     collected['evaluate_node'] = details['evaluate_node']
     return collected
 
-
 def evaluate_precision_recall_loosely(model, test_routines, lookahead_steps=5):
-    metrics = {'prec_true_positive_deterministic' : 0.0, 'prec_true_positive_stochastic' : 0.0, 'recl_true_positive' : 0.0, 'num_actual_changes' : 0.0, 'num_predicted_changes' : 0.0, 'prec_true_positive_correctly_predicted_deterministic': 0.0, 'prec_true_positive_correctly_predicted_stochastic': 0.0, 'recl_true_positive_correctly_predicted': 0.0}
+    metrics = {}
+
+    metrics['all'] = {}
+    metrics['all']['deterministic'] = {'prec_true_positive' : 0.0, 'prec_true_positive_correctly_predicted': 0.0}
+    metrics['all']['stochastic'] = {'prec_true_positive' : 0.0, 'prec_true_positive_correctly_predicted': 0.0}
+    metrics['all']['common'] = {'num_actual_changes' : 0.0, 'num_predicted_changes' : 0.0, 'recl_true_positive' : 0.0, 'recl_true_positive_correctly_predicted': 0.0}
+
+    metrics['take_out'] = {}
+    metrics['take_out']['deterministic'] = {'prec_true_positive' : 0.0, 'prec_true_positive_correctly_predicted': 0.0}
+    metrics['take_out']['stochastic'] = {'prec_true_positive' : 0.0, 'prec_true_positive_correctly_predicted': 0.0}
+    metrics['take_out']['common'] = {'num_actual_changes' : 0.0}
+    
+    metrics['put_away'] = deepcopy(metrics['take_out'])
+    metrics['other'] = deepcopy(metrics['take_out'])
+
     num_examples = 0
     for (routine, additional_info) in test_routines:
         while len(routine) > 0:
@@ -203,35 +261,50 @@ def evaluate_precision_recall_loosely(model, test_routines, lookahead_steps=5):
             output_tensor_stochastic = details_stochastic['output']['location'][details_stochastic['evaluate_node']]
             one_step_gt_tensor = one_step_details['gt']['location'][one_step_details['evaluate_node']]
             one_step_output_tensor = one_step_details['output']['location'][one_step_details['evaluate_node']]
+            change_types = details_deterministic['change_type']
+            change_type_masks = {}
+            change_type_masks['take_out'] = ((change_types == 1).to(bool))[one_step_details['evaluate_node']]
+            change_type_masks['other'] = ((change_types == 2).to(bool))[one_step_details['evaluate_node']]
+            change_type_masks['put_away'] = ((change_types == 3).to(bool))[one_step_details['evaluate_node']]
 
             prec_det_masks = _get_masks(one_step_gt_tensor, output_tensor_deterministic, input_tensor)
             prec_stoch_masks = _get_masks(one_step_gt_tensor, output_tensor_stochastic, input_tensor)
             rec_masks = _get_masks(gt_tensor, one_step_output_tensor, input_tensor)
-            metrics['prec_true_positive_deterministic'] += prec_det_masks['tp'].sum()
-            metrics['prec_true_positive_correctly_predicted_deterministic'] += (np.bitwise_and(prec_det_masks['tp'], prec_det_masks['correct'])).sum()
-            metrics['prec_true_positive_stochastic'] += prec_stoch_masks['tp'].sum()
-            metrics['prec_true_positive_correctly_predicted_stochastic'] += (np.bitwise_and(prec_stoch_masks['tp'], prec_stoch_masks['correct'])).sum()
-            
-            metrics['num_actual_changes'] += prec_det_masks['gt_positives'].sum()
-            metrics['recl_true_positive'] += rec_masks['tp'].sum()
-            metrics['recl_true_positive_correctly_predicted'] += (np.bitwise_and(rec_masks['tp'], rec_masks['correct'])).sum()
-            metrics['num_predicted_changes'] += rec_masks['out_positives'].sum()
-            
-    results = {}
-    results['precision_deterministic'] = float(metrics['prec_true_positive_deterministic']/metrics['num_actual_changes'])
-    results['precision_stochastic'] = float(metrics['prec_true_positive_stochastic']/metrics['num_actual_changes'])
-    results['recall'] = float(metrics['recl_true_positive']/metrics['num_predicted_changes'])
-    results['F1-score_deterministic'] = 2*results['precision_deterministic']*results['recall']/(results['precision_deterministic']+results['recall'])
-    results['F1-score_stochastic'] = 2*results['precision_stochastic']*results['recall']/(results['precision_stochastic']+results['recall'])
-    results['accuracy_over_actual_changes_deterministic'] = float(metrics['prec_true_positive_correctly_predicted_deterministic']/metrics['num_actual_changes'])
-    results['accuracy_over_actual_changes_stochastic'] = float(metrics['prec_true_positive_correctly_predicted_stochastic']/metrics['num_actual_changes'])
-    results['accuracy_over_predicted_changes'] = float(metrics['recl_true_positive_correctly_predicted']/metrics['num_predicted_changes'])
-    
-    return results
+            metrics['all']['deterministic']['prec_true_positive'] += prec_det_masks['tp'].sum()
+            metrics['all']['deterministic']['prec_true_positive_correctly_predicted'] += (np.bitwise_and(prec_det_masks['tp'], prec_det_masks['correct'])).sum()
+            metrics['all']['stochastic']['prec_true_positive'] += prec_stoch_masks['tp'].sum()
+            metrics['all']['stochastic']['prec_true_positive_correctly_predicted'] += (np.bitwise_and(prec_stoch_masks['tp'], prec_stoch_masks['correct'])).sum()
+            metrics['all']['common']['num_actual_changes'] += prec_det_masks['gt_positives'].sum()
+            metrics['all']['common']['recl_true_positive'] += rec_masks['tp'].sum()
+            metrics['all']['common']['recl_true_positive_correctly_predicted'] += (np.bitwise_and(rec_masks['tp'], rec_masks['correct'])).sum()
+            metrics['all']['common']['num_predicted_changes'] += rec_masks['out_positives'].sum()
+
+            for type in change_type_masks:
+                metrics[type]['deterministic']['prec_true_positive'] += prec_det_masks['tp'][change_type_masks[type]].sum()
+                metrics[type]['deterministic']['prec_true_positive_correctly_predicted'] += (np.bitwise_and(prec_det_masks['tp'], prec_det_masks['correct'])[change_type_masks[type]]).sum()
+                metrics[type]['stochastic']['prec_true_positive'] += prec_stoch_masks['tp'][change_type_masks[type]].sum()
+                metrics[type]['stochastic']['prec_true_positive_correctly_predicted'] += (np.bitwise_and(prec_stoch_masks['tp'], prec_stoch_masks['correct'])[change_type_masks[type]]).sum()
+                metrics[type]['common']['num_actual_changes'] += prec_det_masks['gt_positives'][change_type_masks[type]].sum()
+
+    result = {}
+
+    for type, type_metrics in metrics.items():
+        type_metrics['deterministic'].update(type_metrics['common'])
+        type_metrics['stochastic'].update(type_metrics['common'])    
+        result[type] = {}
+        result[type]['deterministic'] = complete_multistep_metrics(type_metrics['deterministic'])
+        result[type]['stochastic'] = complete_multistep_metrics(type_metrics['stochastic'])
+
+    return result
 
 
 def evaluate_precision_recall(model, test_routines):
-    result = {'true_positive' : 0.0, 'num_actual_changes' : 0.0, 'num_predicted_changes' : 0.0, 'true_positive_correctly_predicted': 0.0, 'accuracy':0.0}
+    result = {}
+    result['all'] = {'true_positive' : 0.0, 'num_actual_changes' : 0.0, 'num_predicted_changes' : 0.0, 'true_positive_correctly_predicted': 0.0}
+    result['accuracy'] = 0.0
+    result['take_out'] = {'true_positive' : 0.0, 'num_actual_changes' : 0.0, 'true_positive_correctly_predicted': 0.0}
+    result['put_away'] = {'true_positive' : 0.0, 'num_actual_changes' : 0.0, 'true_positive_correctly_predicted': 0.0}
+    result['other'] = {'true_positive' : 0.0, 'num_actual_changes' : 0.0, 'true_positive_correctly_predicted': 0.0}
     num_examples = 0
     for (routine, additional_info) in test_routines:
         while len(routine) > 0:
@@ -240,33 +313,48 @@ def evaluate_precision_recall(model, test_routines):
             eval, details = model.step(data)
             gt_tensor, output_tensor, input_tensor = details['gt']['location'][details['evaluate_node']], details['output']['location'][details['evaluate_node']], details['input']['location'][details['evaluate_node']]
             masks = _get_masks(gt_tensor, output_tensor, input_tensor)
-            tp = masks['tp'].sum()
-            num_correctly_predicted_tp = (np.bitwise_and(masks['tp'], masks['correct'])).sum()
-            num_gt_positives = masks['gt_positives'].sum()
-            num_out_positives = masks['out_positives'].sum()
-            result['true_positive'] += tp
-            result['num_actual_changes'] += num_gt_positives
-            result['num_predicted_changes'] += num_out_positives
-            result['true_positive_correctly_predicted'] += num_correctly_predicted_tp
+            mask_moving_back = ((data['change_type'] == 3).to(bool))[details['evaluate_node']]
+            mask_moving_out = ((data['change_type'] == 1).to(bool))[details['evaluate_node']]
+            mask_moving_other = ((data['change_type'] == 2).to(bool))[details['evaluate_node']]
+            
+            all_moving_masks = np.bitwise_or(np.bitwise_or(mask_moving_back, mask_moving_out), mask_moving_other).to(bool)
+            assert all(np.equal(all_moving_masks, masks['gt_positives']))
+
+            tp = masks['tp']
+            correctly_predicted_tp = (np.bitwise_and(masks['tp'], masks['correct']))
+            gt_positives = masks['gt_positives']
+            out_positives = masks['out_positives']
+
+            result['all']['true_positive'] += tp.sum()
+            result['all']['num_actual_changes'] += gt_positives.sum()
+            result['all']['num_predicted_changes'] += out_positives.sum()
+            result['all']['true_positive_correctly_predicted'] += correctly_predicted_tp.sum()
             result['accuracy'] += masks['correct'].sum()/output_tensor.size(-1)
 
-    result['precision'] = float(result['true_positive']/result['num_actual_changes'])
-    result['recall'] = float(result['true_positive']/result['num_predicted_changes'])
-    result['F1-score'] = 2*result['precision']*result['recall']/(result['precision']+result['recall'])
-    result['accuracy_over_true_positive'] = float(result['true_positive_correctly_predicted']/result['true_positive'])
-    result['accuracy_over_actual_changes'] = float(result['true_positive_correctly_predicted']/result['num_actual_changes'])
-    result['accuracy_over_predicted_changes'] = float(result['true_positive_correctly_predicted']/result['num_predicted_changes'])
-    
+            result['take_out']['true_positive'] += tp[mask_moving_out].sum()
+            result['take_out']['num_actual_changes'] += gt_positives[mask_moving_out].sum()
+            result['take_out']['true_positive_correctly_predicted'] += correctly_predicted_tp[mask_moving_out].sum()
+
+            result['put_away']['true_positive'] += tp[mask_moving_back].sum()
+            result['put_away']['num_actual_changes'] += gt_positives[mask_moving_back].sum()
+            result['put_away']['true_positive_correctly_predicted'] += correctly_predicted_tp[mask_moving_back].sum()
+
+            result['other']['true_positive'] += tp[mask_moving_other].sum()
+            result['other']['num_actual_changes'] += gt_positives[mask_moving_other].sum()
+            result['other']['true_positive_correctly_predicted'] += correctly_predicted_tp[mask_moving_other].sum()
+
     result['accuracy'] = float(result['accuracy'])/num_examples
 
-    result['true_positive'] = float(result['true_positive'] / num_examples)
-    result['num_actual_changes'] = float(result['num_actual_changes'] / num_examples)
-    result['num_predicted_changes'] = float(result['num_predicted_changes'] / num_examples)
-    result['true_positive_correctly_predicted'] = float(result['true_positive_correctly_predicted'] / num_examples)
+    result['all'] = complete_metrics(result['all'], num_examples)
+    result['take_out'] = complete_metrics(result['take_out'], num_examples)
+    result['put_away'] = complete_metrics(result['put_away'], num_examples)
+    result['other'] = complete_metrics(result['other'], num_examples)
+    
     return result
 
 def pointwise_precision_recall(model, test_routines):
     result = []
+    result_typed = {'take_out': [], 'put_away': [], 'other' : []}
     times = []
     for (routine, additional_info) in test_routines:
         while len(routine) > 0:
@@ -274,31 +362,54 @@ def pointwise_precision_recall(model, test_routines):
             eval, details = model.step(data)
             gt_tensor, output_tensor, input_tensor = details['gt']['location'][details['evaluate_node']], details['output']['location'][details['evaluate_node']], details['input']['location'][details['evaluate_node']]
             masks = _get_masks(gt_tensor, output_tensor, input_tensor)
-            tp = masks['tp'].sum()
-            num_correctly_predicted_tp = (np.bitwise_and(masks['tp'], masks['correct'])).sum()
-            num_gt_positives = masks['gt_positives'].sum() + 0.00000000001
-            num_out_positives = masks['out_positives'].sum() + 0.00000000001
+            tp = masks['tp']
+            num_correctly_predicted_tp = (np.bitwise_and(masks['tp'], masks['correct']))
+            num_gt_positives = masks['gt_positives']
+            num_out_positives = masks['out_positives']
+            ep = 0.000000001
+
             t = float(data['time'])
-            result.append([t, float(tp/num_gt_positives), float(tp/num_out_positives), 2*float(tp)/(float(num_gt_positives + num_out_positives)), float(num_correctly_predicted_tp/num_gt_positives), float(num_correctly_predicted_tp/num_out_positives), float(masks['correct'].sum()/gt_tensor.size()[-1])])
+            result.append([t, float(tp.sum()/(num_gt_positives.sum() + ep)), 
+                              float(tp.sum()/(num_out_positives.sum() + ep)), 
+                              2*float(tp.sum())/(float(num_gt_positives.sum() + ep + num_out_positives.sum())), 
+                              float(num_correctly_predicted_tp.sum()/(num_gt_positives.sum() + ep)), 
+                              float(num_correctly_predicted_tp.sum()/(num_out_positives.sum() + ep)), 
+                              float(masks['correct'].sum()/gt_tensor.size()[-1])])
+
+            change_type_masks = {}
+            change_type_masks['take_out'] = ((data['change_type'] == 1).to(bool))[details['evaluate_node']]
+            change_type_masks['other'] = ((data['change_type'] == 2).to(bool))[details['evaluate_node']]
+            change_type_masks['put_away'] = ((data['change_type'] == 3).to(bool))[details['evaluate_node']]
+
+            for type in result_typed:
+                m = change_type_masks[type]
+                result_typed[type].append([t, float(tp[m].sum()/(num_gt_positives[m].sum() + ep)), 
+                              float(tp[m].sum()/(num_out_positives[m].sum() + ep)), 
+                              2*float(tp[m].sum())/(float(num_gt_positives[m].sum() + num_out_positives[m].sum() + ep)), 
+                              float(num_correctly_predicted_tp[m].sum()/(num_gt_positives[m].sum() + ep)), 
+                              float(num_correctly_predicted_tp[m].sum()/(num_out_positives[m].sum() + ep))])
             times.append(t)
 
     plots = {}
-    cols = ['time', 'precision', 'recall', 'F-1 score', 'accuracy_moved_objects', 'accuracy_predicted_moved_objects', 'accuracy']
+    cols = ['time', 'precision', 'recall', 'F-1 score', 'accuracy_moved_objects', 'accuracy_predicted_moved_objects']
     times = list(set(times))
     times.sort()
-    avg_result = {}
+    avg_result = [[t, np.mean([datapt[-1] for datapt in result if datapt[0] == t and ~isnan(datapt[-1])])] for t in times]
+    plots['line_accuracy'] = wandb.plot.line(wandb.Table(data=avg_result, columns = ["time", "accuracy"]), "time", ['time','accuracy'], title='average_accuracy')
     for i,col in enumerate(cols):
         avg_result = [[t, np.mean([datapt[i] for datapt in result if datapt[0] == t and ~isnan(datapt[i])])] for t in times]
-        plots['line_'+col] = wandb.plot.line(wandb.Table(data=avg_result, columns = ["time", col]), "time", col, title='average_'+col)
+        plots['line_'+col] = wandb.plot.line(wandb.Table(data=avg_result, columns = ["time", col]), "time", cols+['accuracy'], title='average_'+col)
+        for type,res in result_typed.items():
+            avg_result = [[t, np.mean([datapt[i] for datapt in res if datapt[0] == t and ~isnan(datapt[i])])] for t in times]
+            plots['line_'+type+'_'+col] = wandb.plot.line(wandb.Table(data=avg_result, columns = ["time", col]), "time", cols+['accuracy'], title='average_'+type+'_'+col)
 
-
-    plots['scatter_precision'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "precision", title='scatter_precision')
-    plots['scatter_recall'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "recall", title='scatter_recall')
-    plots['scatter_F1-score'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "F-1 score", title='scatter_F1-score')
-    plots['scatter_accuracy_moved_objects'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "accuracy_moved_objects", title='scatter_accuracy_moved_objects')
-    plots['scatter_accuracy_predicted_moved_objects'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "accuracy_predicted_moved_objects", title='scatter_accuracy_predicted_moved_objects')
-    plots['accuracy'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "accuracy", title='scatter_accuracy')
-    plots['precision-recall'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "precision", "recall", title='scatter_precision-recall')
+    # plots['scatter_precision'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "precision", title='scatter_precision')
+    # plots['scatter_recall'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "recall", title='scatter_recall')
+    # plots['scatter_F1-score'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "F-1 score", title='scatter_F1-score')
+    # plots['scatter_accuracy_moved_objects'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "accuracy_moved_objects", title='scatter_accuracy_moved_objects')
+    # plots['scatter_accuracy_predicted_moved_objects'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "accuracy_predicted_moved_objects", title='scatter_accuracy_predicted_moved_objects')
+    # plots['accuracy'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "time", "accuracy", title='scatter_accuracy')
+    # plots['precision-recall'] = wandb.plot.scatter(wandb.Table(data=result, columns = cols), "precision", "recall", title='scatter_precision-recall')
 
     return plots
 
@@ -315,16 +426,17 @@ def evaluate_applications(model, data, cfg, output_dir, logger=None):
     evaluation = {}
     print('ACTIONS')
     evaluation['Actions'] = get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'), data.node_idx_from_id, lookahead_steps=cfg['PROACTIVE_LOOKAHEAD_STEPS'], action_probability_thresh=cfg['ACTION_PROBABILITY_THRESHOLDS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
-    # hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id, lookahead_steps=cfg['SEARCH_LOOKAHEAD_STEPS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
-    # evaluation['Search hits'] = tuple(hit_ratios)
-    # evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
-    # evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
+    hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id, lookahead_steps=cfg['SEARCH_LOOKAHEAD_STEPS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
+    evaluation['Search hits'] = tuple(hit_ratios)
+    evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
+    evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
     print('PREC REC')
-    evaluation['Prediction accuracy'] = evaluate_precision_recall(model, deepcopy(data.test_routines))
+    evaluation['1step'] = evaluate_precision_recall(model, deepcopy(data.test_routines))
     print('PREC REC UNCON')
-    evaluation['Prediction accuracy']['unconditional'] = unconditional_accuracy(model, deepcopy(data.test_routines))
+    evaluation['unconditional_graph_accuracy'] = unconditional_accuracy(model, deepcopy(data.test_routines))
     print('PREC REC LOOSE')
-    evaluation['Prediction accuracy (loose)'] = evaluate_precision_recall_loosely(model, deepcopy(data.test_routines))
+    evaluation['5step'] = evaluate_precision_recall_loosely(model, deepcopy(data.test_routines))
+    evaluation['3step'] = evaluate_precision_recall_loosely(model, deepcopy(data.test_routines), lookahead_steps=3)
     print('POINTWISE')
     pointwise_scatter_plots = pointwise_precision_recall(model, deepcopy(data.test_routines))
     # print(evaluation)
@@ -332,38 +444,45 @@ def evaluate_applications(model, data, cfg, output_dir, logger=None):
     with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
         json.dump(evaluation,f)
 
-    evaluation_summary = {'Test Evaluation':
-                            {'all_actions':{'good':(evaluation['Actions']['proactive']['good']+evaluation['Actions']['restorative']['good'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total']), 
-                                            'bad':(evaluation['Actions']['proactive']['bad']+evaluation['Actions']['restorative']['bad'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'])},
-                            'proactive_actions':{'good':evaluation['Actions']['proactive']['good']/evaluation['Actions']['proactive']['total'], 
-                                                  'bad':evaluation['Actions']['proactive']['bad']/evaluation['Actions']['proactive']['total']},
-                            'restorative_actions':{'good':evaluation['Actions']['restorative']['good']/evaluation['Actions']['restorative']['total'], 
-                                                   'bad':evaluation['Actions']['restorative']['bad']/evaluation['Actions']['restorative']['total']},
-                            'num_total_actions':evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'],
-                            'num_proactive_actions':evaluation['Actions']['proactive']['total'],
-                            'num_restorative_actions':evaluation['Actions']['restorative']['total'],
-                            # 'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
-                            #                 '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
-                            #                 '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)},
-                            'prediction_accuracy':evaluation['Prediction accuracy'],
-                            'prediction_accuracy (loose)':evaluation['Prediction accuracy (loose)']
+    evaluation_summary = {'Eval':
+                         {
+                            'actions':
+                                {'all':{'good':(evaluation['Actions']['proactive']['good']+evaluation['Actions']['restorative']['good'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total']), 
+                                        'bad':(evaluation['Actions']['proactive']['bad']+evaluation['Actions']['restorative']['bad'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total']),
+                                        'good num':(evaluation['Actions']['proactive']['good']+evaluation['Actions']['restorative']['good']), 
+                                        'bad num':(evaluation['Actions']['proactive']['bad']+evaluation['Actions']['restorative']['bad']),
+                                        'num total':evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total']},
+                                'proactive %':{'good %':evaluation['Actions']['proactive']['good']/evaluation['Actions']['proactive']['total'], 
+                                                'bad %':evaluation['Actions']['proactive']['bad']/evaluation['Actions']['proactive']['total'],
+                                                'good num':evaluation['Actions']['proactive']['good'], 
+                                                'bad num':evaluation['Actions']['proactive']['bad'],
+                                                'num total':evaluation['Actions']['proactive']['total']},
+                                'restorative':{'good %':evaluation['Actions']['restorative']['good']/evaluation['Actions']['restorative']['total'], 
+                                                'bad %':evaluation['Actions']['restorative']['bad']/evaluation['Actions']['restorative']['total'],
+                                                'good num':evaluation['Actions']['restorative']['good'], 
+                                                'bad num':evaluation['Actions']['restorative']['bad'],
+                                                'num total':evaluation['Actions']['restorative']['total']}
+                                },
+                            'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
+                                            '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
+                                            '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)},
+                            'graph_pred_1step':evaluation['1step'],
+                            'graph_pred_5step':evaluation['5step'],
+                            'graph_pred_3step':evaluation['3step']
                             }
                          }
 
-    if logger is not None:
-        logger.log(evaluation_summary)
-        for name, scatterplot in pointwise_scatter_plots.items():
-            logger.log({'pointwise_'+name : scatterplot})
-            logger.log({'precision recall' : wandb.plot.scatter(wandb.Table(data=[[evaluation['Prediction accuracy']['precision'], evaluation['Prediction accuracy']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall")})
-            logger.log({'precision recall (loose) (deterministic)' : wandb.plot.scatter(wandb.Table(data=[[evaluation['Prediction accuracy (loose)']['precision_deterministic'], evaluation['Prediction accuracy (loose)']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall (loose) (deterministic)")})
-            logger.log({'precision recall (loose) (stochastic)' : wandb.plot.scatter(wandb.Table(data=[[evaluation['Prediction accuracy (loose)']['precision_stochastic'], evaluation['Prediction accuracy (loose)']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall (loose) (stochastic)")})
-    else:
-        wandb.log(evaluation_summary)
-        for name, scatterplot in pointwise_scatter_plots.items():
-            wandb.log({'pointwise_'+name : scatterplot})
-            wandb.log({'precision recall' : wandb.plot.scatter(wandb.Table(data=[[evaluation['Prediction accuracy']['precision'], evaluation['Prediction accuracy']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall")})
-            wandb.log({'precision recall (loose) (deterministic)' : wandb.plot.scatter(wandb.Table(data=[[evaluation['Prediction accuracy (loose)']['precision_deterministic'], evaluation['Prediction accuracy (loose)']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall (loose) (deterministic)")})
-            wandb.log({'precision recall (loose) (stochastic)' : wandb.plot.scatter(wandb.Table(data=[[evaluation['Prediction accuracy (loose)']['precision_stochastic'], evaluation['Prediction accuracy (loose)']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall (loose) (stochastic)")})
+    if logger is None:
+        logger = wandb
 
+    logger.log(evaluation_summary)
+    for name, scatterplot in pointwise_scatter_plots.items():
+        logger.log({'pointwise_'+name : scatterplot})
+
+    logger.log({'precision-recall' : wandb.plot.scatter(wandb.Table(data=[[evaluation['1step']['all']['precision'], evaluation['1step']['all']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall-1step")})
+    # logger.log({'precision-recall-5step-deterministic' : wandb.plot.scatter(wandb.Table(data=[[evaluation['5step']['all']['deterministic']['precision'], evaluation['5step']['all']['deterministic']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall-5step-deterministic")})
+    # logger.log({'precision-recall-5step-stochastic' : wandb.plot.scatter(wandb.Table(data=[[evaluation['5step']['all']['stochastic']['precision'], evaluation['5step']['stochastic']['all']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall-5step-stochastic")})
+    # logger.log({'precision-recall-3step-deterministic' : wandb.plot.scatter(wandb.Table(data=[[evaluation['3step']['all']['deterministic']['precision'], evaluation['3step']['all']['deterministic']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall-3step-deterministic")})
+    # logger.log({'precision-recall-3step-stochastic' : wandb.plot.scatter(wandb.Table(data=[[evaluation['3step']['all']['stochastic']['precision'], evaluation['3step']['stochastic']['all']['recall']]], columns = ["precision", "recall"]), "precision", "recall", title="precision-recall-3step-stochastic")})
 
     return evaluation_summary

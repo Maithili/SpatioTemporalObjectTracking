@@ -18,9 +18,9 @@ from readerFileBased import RoutinesDataset, INTERACTIVE, get_cooccurence_freque
 from encoders import TimeEncodingOptions
 from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
 from applications import evaluate_applications
-from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, LastSeenButMostlyStaticSemantic, Fremen, FremenStateConditioned, FremenStateConditionedFastDecay, Slim
+from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, LastSeenButMostlyStaticSemantic, Fremen, FremenStateConditioned, Slim
 
-def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False):
+def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[]):
     output_dir = os.path.join('logs',cfg['NAME'])
     if os.path.exists(output_dir):
         n = 1
@@ -31,7 +31,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group)
+    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags)
     wandb_logger.experiment.config.update(cfg)
 
     wandb_logger.experiment.config['DATA_PARAM'] = data.params
@@ -46,7 +46,6 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                                             edge_importance=cfg['EDGE_IMPORTANCE'],
                                                             edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
                                                             tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
-                                                            single_step=cfg['SINGLE_STEP'],
                                                             learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                                             hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
 
@@ -58,7 +57,6 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                 edge_importance=cfg['EDGE_IMPORTANCE'],
                                 edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
                                 tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
-                                single_step=cfg['SINGLE_STEP'],
                                 learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                 hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
     
@@ -87,10 +85,10 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
 
 
 
-def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False):
+def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False, tags=[]):
     
     if cfg['NAME'] is None:
-        cfg['NAME'] = os.path.basename(data_dir)
+        cfg['NAME'] = os.path.basename(data_dir)+'_trial'
 
     with open(os.path.join(data_dir, 'processed', 'common_data.json')) as f:
         cfg['DATA_INFO'] = json.load(f)['info']
@@ -105,12 +103,13 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     
     if baselines:
         cf = get_cooccurence_frequency(data)
-        spec = get_spectral_components(data, periods_mins=[3600, 3600/2, 3600/3])
-        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt']), FremenStateConditionedFastDecay(spec, data.params['dt'])]:
+        spec = get_spectral_components(data, periods_mins=[float('inf'), 60*24, 60*24/2])
+        # for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt']), FremenStateConditionedFastDecay(spec, data.params['dt'])]:
+        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
             output_dir = os.path.join('logs','baselines',baseline.__class__.__name__)
-            wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = os.path.basename(data_dir))
+            wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = os.path.basename(data_dir), tags=tags)
+            cfg['NAME'] = wandb.run.name
             wandb.config.update(cfg)
-            wandb.config['NAME'] = wandb.run.name
             for routine in data.test:
                 eval, details = baseline.step(data.test.collate_fn([routine]))
             # wandb.log(baseline.log())
@@ -122,7 +121,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
                 visualize_conditional_datapoint(baseline, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
             wandb.finish()
     else:
-        run_model(data, group = os.path.basename(data_dir), checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt)
+        run_model(data, group = os.path.basename(data_dir), checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags)
 
 
 
@@ -132,10 +131,11 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/persona0212/persona0212_hard_worker', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/Persona0219/hard_worker', help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--name', type=str, help='Name of run.')
+    parser.add_argument('--tags', default='', type=str, help='Tags for the run separated by a comma \',\'')
     parser.add_argument('--baselines', action='store_true')
     parser.add_argument('--ckpt_dir', type=str, help='Path to checkpoint file')
     parser.add_argument('--read_ckpt', action='store_true')
@@ -156,4 +156,4 @@ if __name__ == '__main__':
     if args.name is not None:
         cfg['NAME'] = args.name
 
-    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt)
+    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt, tags = args.tags.split(','))
