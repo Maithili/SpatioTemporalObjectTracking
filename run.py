@@ -1,6 +1,5 @@
 #!./.venv/bin/python
 
-from gc import callbacks
 import yaml
 import json
 import os
@@ -21,8 +20,13 @@ from utils import visualize_unconditional_datapoint, visualize_conditional_datap
 from breakdown_evaluations import evaluate as evaluate_applications
 from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, LastSeenButMostlyStaticSemantic, Fremen, FremenStateConditioned, Slim
 
+import random
+random.seed(23435)
+from numpy import random as nrandom
+nrandom.seed(23435)
+
 def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[]):
-    output_dir = os.path.join('logs',cfg['NAME'])
+    output_dir = os.path.join('logs', group,cfg['NAME'])
     if os.path.exists(output_dir):
         n = 1
         new_dir = output_dir + "_"+str(n)
@@ -102,13 +106,24 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
                            batch_size=cfg['BATCH_SIZE'],
                            only_seen_edges = cfg['ONLY_SEEN_EDGES'])
     
+    group = os.path.basename(data_dir)
+
     if baselines:
         cf = get_cooccurence_frequency(data)
         spec = get_spectral_components(data, periods_mins=[float('inf'), 60*24, 60*24/2])
         # for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt']), FremenStateConditionedFastDecay(spec, data.params['dt'])]:
         for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
-            output_dir = os.path.join('logs','baselines',baseline.__class__.__name__)
-            wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = os.path.basename(data_dir), tags=tags)
+            output_dir = os.path.join('logs', group,baseline.__class__.__name__)
+            if os.path.exists(output_dir):
+                n = 1
+                new_dir = output_dir + "_"+str(n)
+                while os.path.exists(new_dir):
+                    n += 1
+                    new_dir = output_dir + "_"+str(n)
+                output_dir = new_dir
+            os.makedirs(output_dir)
+
+            wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = group, tags=tags)
             cfg['NAME'] = wandb.run.name
             wandb.config.update(cfg)
             for routine in data.test:
@@ -122,7 +137,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
                 visualize_conditional_datapoint(baseline, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
             wandb.finish()
     else:
-        run_model(data, group = os.path.basename(data_dir), checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags)
+        run_model(data, group=group, checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags)
 
 
 

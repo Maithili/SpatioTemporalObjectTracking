@@ -104,7 +104,7 @@ def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_fr
                             elif prev_action['from'] != actual_location:
                                 prev_action['eval'] = 0
             
-            # obj_idx_in_use = [dict_node_idx_from_id[o[0]] for o in additional_info[i]['obj_in_use']]
+            # obj_idx_in_use = [dict_node_idx_from_id[o[0]] for o in routine['obj_in_use']]
             obj_idx_in_use = []
 
             prev_edges = initial_data['edges']
@@ -137,7 +137,7 @@ def get_actions(model, test_routines, node_classes, action_dir, dict_node_idx_fr
                 if eval == -1 : summary_eval['restorative']['bad'] += 1
                 summary_eval['restorative']['total'] += 1
         
-            actions_with_eval[routine_num][human_readable_from_external(additional_info[i]['timestamp'])] = {'proactive':proactive_actions, 'restorative':restorative_actions, 'obj_in_use':additional_info[i]['obj_in_use']}
+            actions_with_eval[routine_num][human_readable_from_external(additional_info['timestamp'][i])] = {'proactive':proactive_actions, 'restorative':restorative_actions, 'obj_in_use':additional_info['obj_in_use'][i]}
 
     for i,routine_actions in enumerate(actions_with_eval):
         with open(os.path.join(action_dir,'{:03d}.txt'.format(i)), 'w') as f:

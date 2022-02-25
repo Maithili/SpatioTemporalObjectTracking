@@ -1,8 +1,7 @@
-from lib2to3.pytree import Base
 import random
 import numpy as np
 import torch
-import wandb
+from torch.nn import functional as F
 
 from evaluation import evaluate as common_evaluation
 
@@ -13,6 +12,7 @@ class Baseline():
     def extract(self, batch):
         self.dynamic_edges = batch['dynamic_edges_mask']
         self.evaluate_node = self.dynamic_edges.sum(-1) > 0
+        self.static_nodes_mask = (torch.unsqueeze(self.dynamic_edges.sum(-1) == 0, dim=-1)).expand(-1,-1,self.evaluate_node.size(1))
         self.edges = batch['edges']
         self.nodes = batch['nodes']
         self.context = batch['context']
@@ -22,10 +22,12 @@ class Baseline():
     def step(self, batch):
         self.extract(batch)
         result = self.run()
-        result = result * self.dynamic_edges
+        result[self.dynamic_edges == 0] = -float('inf')
+        result = F.softmax(result, dim=-1)
+        result[self.dynamic_edges == 0] = self.edges[self.dynamic_edges == 0]
         assert result.squeeze(-1).argmax(-1).size() == self.edges.squeeze(-1).argmax(-1).size(), f"{result.size()} == {self.edges.size()}"
         details = {'input':{'class':self.nodes.argmax(-1), 'location':self.edges.squeeze(-1).argmax(-1)}, 
-            'output_probs':{'location': result}, 
+            'output_probs':{'location': F.softmax(result, dim=-1)}, 
             'gt':{'class':self.nodes.argmax(-1), 'location': self.gt.squeeze(-1).argmax(-1)}, 
             'losses':{'location': None}, 
             'output':{'class':self.nodes.argmax(-1), 'location': result.squeeze(-1).argmax(-1)}, 

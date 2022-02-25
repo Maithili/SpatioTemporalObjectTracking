@@ -1,6 +1,9 @@
 import os
 import json
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from math import isnan
 import torch
 from torch.nn.functional import one_hot
@@ -10,94 +13,162 @@ from GraphTranslatorModule import _erase_edges
 from encoders import human_readable_from_external
 from evaluation import _get_masks
 
-def evaluate_all_breakdowns(model, test_routines, additional_steps=5, deterministic_input_loop=False):
-    metrics = {'recall_tp':{0:0}, 'precision_tp':{0:0}, 'typewise':{0:0}}
-    metrics['recall_tp'].update({i+1:0 for i in range(additional_steps+1)})
-    metrics['recall_tp'].update({-i-1:0 for i in range(additional_steps+1)})
-    metrics['precision_tp'].update({i+1:0 for i in range(additional_steps+1)})
-    metrics['precision_tp'].update({-i-1:0 for i in range(additional_steps+1)})
-    metrics['typewise'].update({'take_out':{'correct':0,'wrong':0}, 'put_away':{'correct':0,'wrong':0}, 'other':{'correct':0,'wrong':0}})
+viridis = cm.get_cmap('viridis', 256)
+newcolors = viridis(np.linspace(0, 1, 256))
+white = np.array([1, 1, 1, 1])
+newcolors[:25, :] = white
+newcmp = ListedColormap(['white', 'tab:blue', 'tab:orange', 'tab:purple'])
+
+def evaluate_all_breakdowns(model, test_routines, lookahead_steps=5, deterministic_input_loop=False, node_names=[]):
+    
+    num_change_types = 3
+
+    raw_data = {'inputs':[], 'outputs':[], 'ground_truths':[], 'futures':[], 'change_types':[]}
+    results = {'recall_breakdown':[[0,0] for _ in range(lookahead_steps)],
+               'precision_breakdown': {
+                    'missed_changes' : 0,
+                    'by_lookahead' : [[0,0] for _ in range(lookahead_steps)],
+                    'by_change_type' : [[0,0] for _ in range(num_change_types)]
+                }
+              }
+    figures = []
 
     num_routines = len(test_routines)
     for (routine, additional_info) in test_routines:
-        while len(routine) > 0:
-            first_routine = test_routines.collate_fn([routine.pop()])
-            eval, one_step_details = model.step(first_routine)
+        
+        routine_length = len(routine)
+        num_nodes = additional_info['active_nodes'].sum()
+        routine_inputs = torch.empty(routine_length, num_nodes)
+        routine_outputs = torch.ones(routine_length, num_nodes).to(int) * -1
+        routine_output_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
+        routine_ground_truths = torch.ones(routine_length, num_nodes).to(int) * -1
+        routine_futures = torch.empty(routine_length, num_nodes)
+        routine_change_types = torch.zeros(routine_length, num_nodes).to(int)
 
-            change_type_masks = {}
-            change_type_masks['take_out'] = ((first_routine['change_type'] == 1).to(bool))[one_step_details['evaluate_node']]
-            change_type_masks['other'] = ((first_routine['change_type'] == 2).to(bool))[one_step_details['evaluate_node']]
-            change_type_masks['put_away'] = ((first_routine['change_type'] == 3).to(bool))[one_step_details['evaluate_node']]
-
-            gt_tensor = one_step_details['gt']['location'][one_step_details['evaluate_node']]
-            output_tensor = one_step_details['output']['location'][one_step_details['evaluate_node']]
-            input_tensor = one_step_details['input']['location'][one_step_details['evaluate_node']]
-
-            predicted_static_mask = deepcopy((output_tensor == input_tensor).to(bool))
-            predicted_changes = deepcopy(output_tensor)
-            recall_breakdown = torch.zeros_like(input_tensor).to(int)
-            predicted_changes[predicted_static_mask] = -1
-            recall_breakdown[predicted_static_mask] = -1000
-
-            ground_truth_static_mask = deepcopy((gt_tensor == input_tensor).to(bool))
-            ground_truth_changes = deepcopy(output_tensor)
-            precision_breakdown = torch.zeros_like(input_tensor).to(int)
-            ground_truth_changes[ground_truth_static_mask] = -1
-            precision_breakdown[ground_truth_static_mask] = -1000
-
-
-            def update_breakdown(breakdown, wrong, new_changes, step_num):
-                breakdown[(np.bitwise_and(new_changes, breakdown==0))] = step_num
-                breakdown[(np.bitwise_and(breakdown==step_num, wrong))] = -step_num
-                return breakdown
-
-            wrong = deepcopy((gt_tensor != output_tensor).to(bool))
-            predicted_moved = deepcopy((output_tensor != input_tensor).to(bool))
-            ground_truth_moved = deepcopy((gt_tensor != input_tensor).to(bool))
-            precision_breakdown = update_breakdown(precision_breakdown, wrong, predicted_moved, 1)
-            recall_breakdown = update_breakdown(recall_breakdown, wrong, ground_truth_moved, 1)
-
-            data_list = [test_routines.collate_fn([routine[j]]) for j in range(min(additional_steps, len(routine)))]
-            
+        changes_output_all = torch.zeros(routine_length, num_nodes).to(bool)
+        changes_gt = torch.zeros(routine_length, num_nodes).to(bool)
+        for step in range(routine_length):
+            data_list = [test_routines.collate_fn([routine[j]]) for j in range(step, min(step+lookahead_steps, routine_length))]
             for i,data in enumerate(data_list):
                 if i>0:
                     data['edges'] = prev_edges
+                
                 _, details = model.step(data)
-                gt_tensor, output_tensor = details['gt']['location'][details['evaluate_node']], details['output']['location'][details['evaluate_node']]
-                wrong = (gt_tensor != output_tensor).to(bool)
+                
+                gt_tensor = details['gt']['location'][details['evaluate_node']]
+                output_tensor = details['output']['location'][details['evaluate_node']]
+                input_tensor = details['input']['location'][details['evaluate_node']]
 
-                precision_breakdown = update_breakdown(precision_breakdown, 
-                                                       wrong = deepcopy((output_tensor != ground_truth_changes).to(bool)), 
-                                                       new_changes = deepcopy((output_tensor != input_tensor).to(bool)), 
-                                                       step_num = i+2)
-                recall_breakdown = update_breakdown(recall_breakdown, 
-                                                    wrong = deepcopy((gt_tensor != predicted_changes).to(bool)), 
-                                                    new_changes =  deepcopy((gt_tensor != input_tensor).to(bool)), 
-                                                    step_num = i+2)
+                if i == 0:
+                    routine_inputs[step,:] = deepcopy(input_tensor)
+                    changes_gt[step, :] = deepcopy((gt_tensor != input_tensor).to(bool))
+                    routine_ground_truths[step, changes_gt[step, :]] = deepcopy(gt_tensor[changes_gt[step, :]])
+                    routine_change_types[step,:] = deepcopy(data['change_type'].to(int)[details['evaluate_node']])
+                new_changes_out = deepcopy(np.bitwise_and(output_tensor != input_tensor , np.bitwise_not(changes_output_all[step,:]))).to(bool)
+                routine_outputs[step, :][new_changes_out] = deepcopy(output_tensor[new_changes_out])
+                routine_output_step[step, :][new_changes_out] = i
+                changes_output_all[step,:] = deepcopy(np.bitwise_or(changes_output_all[step,:], new_changes_out)).to(bool)
 
                 if deterministic_input_loop:
-                    prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1])
+                    prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1]).to(torch.float32)
                 else:
-                    prev_edges = details['output_probs']['location']
+                    prev_edges = (details['output_probs']['location']).to(torch.float32)
 
-            for val in metrics['recall_tp']:
-                metrics['recall_tp'][val] += float((recall_breakdown == val).sum())/num_routines                
-            for val in metrics['precision_tp']:
-                metrics['precision_tp'][val] += float((precision_breakdown == val).sum())/num_routines
-            for type in metrics['typewise']:
-                if type == 0:
-                    metrics['typewise'][type] = metrics['precision_tp'][0]
-                else:
-                    metrics['typewise'][type]['correct'] += float(np.bitwise_and(change_type_masks[type], precision_breakdown > 0).sum())/num_routines
-                    metrics['typewise'][type]['wrong'] += float(np.bitwise_and(change_type_masks[type], precision_breakdown < 0).sum())/num_routines
+        routine_future_steps = torch.zeros_like(routine_ground_truths) * (-1)
+        routine_futures = deepcopy(routine_ground_truths)
+        for i in range(routine_length-2, -1, -1):
+            mask_copy_next = routine_futures[i,:] == -1
+            routine_futures[i,:][mask_copy_next] = routine_futures[i+1,:][mask_copy_next]
+            routine_future_steps[i,:][mask_copy_next] = routine_future_steps[i+1,:][mask_copy_next] - 1
 
-    return metrics
+        routine_future_steps[routine_futures < 0] = 1
+        routine_future_steps *= -1
+
+        # assert np.equal((routine_ground_truths >= 0), changes_gt)
+        for ls in range(lookahead_steps):
+            changes_output_for_step = deepcopy(routine_output_step  == ls)
+            results['recall_breakdown'][ls][0] += float((routine_outputs[changes_output_for_step] == routine_futures[changes_output_for_step]).sum())/num_routines
+            results['recall_breakdown'][ls][1] += float((routine_outputs[changes_output_for_step] != routine_futures[changes_output_for_step]).sum())/num_routines
+            changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt))
+            results['precision_breakdown']['by_lookahead'][ls][0] += float((routine_outputs[changes_output_and_gt] == routine_ground_truths[changes_output_and_gt]).sum())/num_routines
+            results['precision_breakdown']['by_lookahead'][ls][1] += float((routine_outputs[changes_output_and_gt] != routine_ground_truths[changes_output_and_gt]).sum())/num_routines
+
+        new_missed = float(np.bitwise_and(np.bitwise_not(changes_output_all), changes_gt).sum())
+        results['precision_breakdown']['missed_changes'] += new_missed/num_routines
+
+        routine_change_types = routine_change_types.to(int)
+        assert torch.equal(routine_change_types > 0, changes_gt)
+        # changes_output_and_gt_all = deepcopy(np.bitwise_and(changes_output_all, changes_gt))
+        for ct in range(num_change_types):
+            ct_mask = deepcopy(np.bitwise_and(changes_output_all, routine_change_types == ct+1))
+            results['precision_breakdown']['by_change_type'][ct][0] += float((routine_outputs[:,:][ct_mask] == routine_ground_truths[ct_mask]).sum())/num_routines
+            results['precision_breakdown']['by_change_type'][ct][1] += float((routine_outputs[:,:][ct_mask] != routine_ground_truths[ct_mask]).sum())/num_routines
+
+        fig, axs = plt.subplots(1,5)
+        fig.set_size_inches(30,20)
+
+        labels = []
+        if len(node_names) > 0:
+            labels = [name for name,active in zip(node_names, additional_info['active_nodes']) if active]
+
+        ax = axs[0]
+        img_output = lookahead_steps - routine_output_step
+        ax.imshow(img_output, cmap='Blues', vmin=0, vmax=lookahead_steps, aspect='auto')
+        ax.set_title('Stepwise Output')
+        ax.set_xticks(np.arange(num_nodes))
+        ax.set_xticklabels(labels, rotation=90)
+
+        ax = axs[1]
+        img_output = changes_output_all.to(int)
+        img_output[routine_outputs != routine_futures] *= (-1)
+        ax.imshow(img_output, cmap='RdBu', vmin=-1, vmax=1, aspect='auto')
+        ax.set_title('Output Location Correctness')
+        ax.set_xticks(np.arange(num_nodes))
+        ax.set_xticklabels(labels, rotation=90)
+
+        ax = axs[2]
+        ax.imshow(routine_future_steps.to(int), cmap='Blues', aspect='auto')
+        ax.set_title('Future Ground Truths')
+        ax.set_xticks(np.arange(num_nodes))
+        ax.set_xticklabels(labels, rotation=90)
+
+        ax = axs[3]
+        img_gt = (routine_ground_truths >= 0).to(int)
+        img_gt[routine_ground_truths != routine_outputs] *= (-1)
+        ax.imshow(img_gt, cmap='RdBu', vmin=-1, vmax=1, aspect='auto')
+        ax.set_title('Ground Truths w/ Correctness')
+        ax.set_xticks(np.arange(num_nodes))
+        ax.set_xticklabels(labels, rotation=90)
+
+        ax = axs[4]
+        img_ct = routine_change_types
+        ax.imshow(img_ct, cmap=newcmp, vmin=0, vmax=3, aspect='auto')
+        ax.set_title('Ground Truths w/ Change Types')
+        ax.set_xticks(np.arange(num_nodes))
+        ax.set_xticklabels(labels, rotation=90)
+
+        fig.tight_layout()
+        figures.append(fig)
+
+        raw_data['inputs'].append(routine_inputs)
+        raw_data['outputs'].append(routine_outputs)
+        raw_data['ground_truths'].append(routine_ground_truths)
+        raw_data['futures'].append(routine_futures)
+        raw_data['change_types'].append(routine_change_types)
+
+    return results, raw_data, figures
 
 
 def evaluate(model, data, cfg, output_dir, logger=None):
     
-    info = evaluate_all_breakdowns(model, data.test_routines)
+    info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.node_classes)
     with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
         json.dump(info,f)
+
+    torch.save(raw_data, os.path.join(output_dir, 'raw_data.pt'))
+
+    os.makedirs(os.path.join(output_dir,'figures'))
+    for i,fig  in enumerate(figures):
+        fig.savefig(os.path.join(output_dir,'figures',str(i)+'.jpg'))
 
     return info

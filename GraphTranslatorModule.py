@@ -183,23 +183,27 @@ class GraphTranslatorModule(LightningModule):
         edges_pred, nodes_pred = self(edges, nodes, context)
 
         assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
-        edges_pred[dyn_edges == 0] = -float("inf")
+        edges_pred[dyn_edges == 0] = -float('inf')
+
+        edges_inferred = F.softmax(edges_pred, dim=-1)
+        edges_inferred[dyn_edges == 0] = edges[dyn_edges == 0]
+
         evaluate_node = dyn_edges.sum(-1) > 0
 
         input = {'class':self.inference_class(nodes), 
                  'location':self.inference_location(edges)}
                  
         output_probs = {'class':nodes_pred, 
-                        'location':edges_pred}
+                        'location':edges_inferred}
 
         gt = {'class':self.inference_class(y_nodes), 
               'location':self.inference_location(y_edges)}
 
         losses = {'class':self.class_loss(output_probs['class'], gt['class']),
-                  'location':self.location_loss(output_probs['location'], gt['location'])}
+                  'location':self.location_loss(edges_pred, gt['location'])}
 
         output = {'class':self.inference_class(output_probs['class']),
-                  'location':self.inference_location(output_probs['location'])}
+                  'location':self.inference_location(edges_inferred)}
         
         # for result, name in zip([input, gt, losses, output], ['input', 'gt', 'losses', 'output']):
         #     assert list(result['class'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())

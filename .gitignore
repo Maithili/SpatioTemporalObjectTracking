@@ -134,5 +134,5 @@ lightning_logs/
 wandb/
 *.ckpt
 data/
-logs/
+logs*
 screenlog*

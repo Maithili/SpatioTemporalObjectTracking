@@ -81,7 +81,7 @@ class DataSplit():
         # for sample in data_list:
         #     moved_obj_mask = np.bitwise_or(torch.Tensor(moved_obj_mask), (sample['edges'] != sample['prev_edges'])).to(bool)
         # additional_info = {'moved_obj_mask':moved_obj_mask}
-        additional_info = [{'timestamp':time_external(sample['time']), 'obj_in_use':sample['obj_in_use']} for sample in data_list]
+        additional_info = {'timestamp':[time_external(sample['time']) for sample in data_list], 'obj_in_use':[sample['obj_in_use'] for sample in data_list], 'active_nodes':self.active_edges.sum(-1) > 0}
         return samples, additional_info
     def __getitem__(self, idx: int):
         return self.get_routine(idx) if self.whole_routines else self.get_sample(idx)
@@ -184,13 +184,13 @@ class ProcessDataset():
         output_train_path = os.path.join(output_path, 'train')
         output_test_path = os.path.join(output_path, 'test')
         if os.path.exists(output_train_path): 
-            # overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
-            # if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
+            overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
+            if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
             shutil.rmtree(output_path)
         os.makedirs(output_train_path)
         if os.path.exists(output_test_path): 
-            # overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
-            # if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
+            overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
+            if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
             shutil.rmtree(output_path)
         os.makedirs(output_test_path)
 
