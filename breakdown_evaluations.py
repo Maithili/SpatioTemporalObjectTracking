@@ -42,7 +42,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=5, determinist
         routine_outputs = torch.ones(routine_length, num_nodes).to(int) * -1
         routine_output_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
         routine_ground_truths = torch.ones(routine_length, num_nodes).to(int) * -1
-        routine_futures = torch.empty(routine_length, num_nodes)
+        routine_futures = torch.ones(routine_length, num_nodes) * -1
         routine_change_types = torch.zeros(routine_length, num_nodes).to(int)
 
         changes_output_all = torch.zeros(routine_length, num_nodes).to(bool)
@@ -74,15 +74,14 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=5, determinist
                 else:
                     prev_edges = (details['output_probs']['location']).to(torch.float32)
 
-        routine_future_steps = torch.zeros_like(routine_ground_truths) * (-1)
+        routine_future_steps = torch.zeros_like(routine_ground_truths)
         routine_futures = deepcopy(routine_ground_truths)
         for i in range(routine_length-2, -1, -1):
             mask_copy_next = routine_futures[i,:] == -1
             routine_futures[i,:][mask_copy_next] = routine_futures[i+1,:][mask_copy_next]
             routine_future_steps[i,:][mask_copy_next] = routine_future_steps[i+1,:][mask_copy_next] - 1
 
-        routine_future_steps[routine_futures < 0] = 1
-        routine_future_steps *= -1
+        routine_future_steps[routine_futures < 0] = routine_future_steps.min().min()-1
 
         # assert np.equal((routine_ground_truths >= 0), changes_gt)
         for ls in range(lookahead_steps):

@@ -2,7 +2,7 @@
 
 DATE_TIME=`date "+%m%d_%H%M"`
 
-for dataset in data/Persona0219/basic_quick #$(find data/Persona0219/ -mindepth 1 -maxdepth 1)
+for dataset in $(find data/Persona0219/ -mindepth 1 -maxdepth 1)
 do
     # ./readerFileBased.py --path=$dataset
     ./run.py --cfg=default --path=$dataset --baselines --tags=$(basename $dataset)\_$DATE_TIME

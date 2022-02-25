@@ -152,12 +152,11 @@ class RoutinesDataset():
     
 
 def get_cooccurence_frequency(routines_dataset):
-    all_edges = torch.zeros_like(routines_dataset.train[0][0])
+    # one-smoothing
+    all_edges = torch.ones_like(routines_dataset.train[0][0])
     for r in routines_dataset.train:
         all_edges = all_edges + r[0]
-    # one-smoothing
-    all_edges += 1
-    prior = all_edges/(all_edges.sum(dim=0))
+    prior = all_edges/(all_edges.sum(dim=0))/(len(routines_dataset.train) + 1)
     return prior
 
 def get_spectral_components(routines_dataset, periods_mins):

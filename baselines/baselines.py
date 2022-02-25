@@ -27,7 +27,7 @@ class Baseline():
         result[self.dynamic_edges == 0] = self.edges[self.dynamic_edges == 0]
         assert result.squeeze(-1).argmax(-1).size() == self.edges.squeeze(-1).argmax(-1).size(), f"{result.size()} == {self.edges.size()}"
         details = {'input':{'class':self.nodes.argmax(-1), 'location':self.edges.squeeze(-1).argmax(-1)}, 
-            'output_probs':{'location': F.softmax(result, dim=-1)}, 
+            'output_probs':{'location': result}, 
             'gt':{'class':self.nodes.argmax(-1), 'location': self.gt.squeeze(-1).argmax(-1)}, 
             'losses':{'location': None}, 
             'output':{'class':self.nodes.argmax(-1), 'location': result.squeeze(-1).argmax(-1)}, 
