@@ -33,6 +33,8 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=5, determinist
               }
     figures = []
 
+    results['all_moves'] = []
+
     num_routines = len(test_routines)
     for (routine, additional_info) in test_routines:
         
@@ -83,25 +85,29 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=5, determinist
 
         routine_future_steps[routine_futures < 0] = routine_future_steps.min().min()-1
 
+        correct = deepcopy(routine_outputs == routine_ground_truths).to(int)
+        wrong = deepcopy(routine_outputs != routine_ground_truths).to(int)
+
         # assert np.equal((routine_ground_truths >= 0), changes_gt)
         for ls in range(lookahead_steps):
             changes_output_for_step = deepcopy(routine_output_step  == ls)
-            results['recall_breakdown'][ls][0] += float((routine_outputs[changes_output_for_step] == routine_futures[changes_output_for_step]).sum())/num_routines
-            results['recall_breakdown'][ls][1] += float((routine_outputs[changes_output_for_step] != routine_futures[changes_output_for_step]).sum())/num_routines
+            results['recall_breakdown'][ls][0] += float((correct[changes_output_for_step]).sum())/num_routines
+            results['recall_breakdown'][ls][1] += float((wrong[changes_output_for_step]).sum())/num_routines
             changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt))
-            results['precision_breakdown']['by_lookahead'][ls][0] += float((routine_outputs[changes_output_and_gt] == routine_ground_truths[changes_output_and_gt]).sum())/num_routines
-            results['precision_breakdown']['by_lookahead'][ls][1] += float((routine_outputs[changes_output_and_gt] != routine_ground_truths[changes_output_and_gt]).sum())/num_routines
+            results['precision_breakdown']['by_lookahead'][ls][0] += float((correct[changes_output_and_gt]).sum())/num_routines
+            results['precision_breakdown']['by_lookahead'][ls][1] += float((wrong[changes_output_and_gt]).sum())/num_routines
 
         new_missed = float(np.bitwise_and(np.bitwise_not(changes_output_all), changes_gt).sum())
         results['precision_breakdown']['missed_changes'] += new_missed/num_routines
 
         routine_change_types = routine_change_types.to(int)
         assert torch.equal(routine_change_types > 0, changes_gt)
+        assert torch.equal(routine_output_step<lookahead_steps, changes_output_all)
         # changes_output_and_gt_all = deepcopy(np.bitwise_and(changes_output_all, changes_gt))
         for ct in range(num_change_types):
-            ct_mask = deepcopy(np.bitwise_and(changes_output_all, routine_change_types == ct+1))
-            results['precision_breakdown']['by_change_type'][ct][0] += float((routine_outputs[:,:][ct_mask] == routine_ground_truths[ct_mask]).sum())/num_routines
-            results['precision_breakdown']['by_change_type'][ct][1] += float((routine_outputs[:,:][ct_mask] != routine_ground_truths[ct_mask]).sum())/num_routines
+            ct_mask = deepcopy(np.bitwise_and(changes_output_all, routine_change_types == (ct+1)))
+            results['precision_breakdown']['by_change_type'][ct][0] += float((correct[ct_mask]).sum())/num_routines
+            results['precision_breakdown']['by_change_type'][ct][1] += float((wrong[ct_mask]).sum())/num_routines
 
         fig, axs = plt.subplots(1,5)
         fig.set_size_inches(30,20)
@@ -132,8 +138,9 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=5, determinist
         ax.set_xticklabels(labels, rotation=90)
 
         ax = axs[3]
-        img_gt = (routine_ground_truths >= 0).to(int)
+        img_gt = (routine_ground_truths >= 0).to(float)
         img_gt[routine_ground_truths != routine_outputs] *= (-1)
+        img_gt[routine_outputs == -1] *= 0.5
         ax.imshow(img_gt, cmap='RdBu', vmin=-1, vmax=1, aspect='auto')
         ax.set_title('Ground Truths w/ Correctness')
         ax.set_xticks(np.arange(num_nodes))
@@ -148,6 +155,14 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=5, determinist
 
         fig.tight_layout()
         figures.append(fig)
+
+        moves = {}
+        for i,act_node in enumerate(labels):
+            changes = routine_ground_truths[:,i][routine_ground_truths[:,i]>0]
+            node_changes = [node_names[c] for c in changes]
+            moves[act_node] = node_changes
+
+        results['all_moves'].append(moves)
 
         raw_data['inputs'].append(routine_inputs)
         raw_data['outputs'].append(routine_outputs)
