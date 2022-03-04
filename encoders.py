@@ -13,7 +13,26 @@ def time_sine_uninformed(t):
     return torch.Tensor(enc)
 
 def time_sine_informed(t):
-    T_freq = [10, 60, 60*24]
+    # T_freq = [60, 60*12, 60*24]
+    T_freq = [10, 30, 60, 60*3, 60*6, 60*12, 60*24]
+    omegas = [2*np.pi/t_freq for t_freq in T_freq]
+    enc = []
+    for om in omegas:
+        enc = enc + [np.sin(om*t), np.cos(om*t)]
+    return torch.Tensor(enc)
+
+
+def time_sine_informed_few(t):
+    T_freq = [60, 60*12, 60*24]
+    omegas = [2*np.pi/t_freq for t_freq in T_freq]
+    enc = []
+    for om in omegas:
+        enc = enc + [np.sin(om*t), np.cos(om*t)]
+    return torch.Tensor(enc)
+
+
+def time_sine_informed_many(t):
+    T_freq = [10, 30, 60, 60*2, 60*4, 60*6, 60*8, 60*10, 60*12, 60*16, 60*20, 60*24]
     omegas = [2*np.pi/t_freq for t_freq in T_freq]
     enc = []
     for om in omegas:
@@ -30,6 +49,16 @@ def time_external(t):
     in_t = in_t // 7
     weeks = in_t
     return torch.Tensor([weeks, days, hrs, mins])
+
+def time_linear(t):
+    return torch.Tensor([t])
+
+def time_semantic(t):
+    clock_time = time_external(t)
+    morning = (clock_time[2]<12).to(float)
+    aft = (clock_time[2]>=12 and clock_time[2]<18).to(float)
+    evening = (clock_time[2]>=18).to(float)
+    return torch.Tensor([t, morning, aft, evening])
 
 def time_external_normalized(t):
     in_t = t
@@ -58,8 +87,16 @@ class TimeEncodingOptions():
     def __call__(self, encoder_option):
         if encoder_option == 'sine_uninformed':
             return time_sine_uninformed
-        if encoder_option == 'sine_informed':
+        elif encoder_option == 'sine_informed':
             return time_sine_informed
+        elif encoder_option == 'sine_informed_few':
+            return time_sine_informed_few
+        elif encoder_option == 'sine_informed_many':
+            return time_sine_informed_many
+        elif encoder_option == 'linear':
+            return time_linear
+        elif encoder_option == 'semantic':
+            return time_semantic
         elif encoder_option == 'external':
             return time_external
         elif encoder_option == 'external_normalized':

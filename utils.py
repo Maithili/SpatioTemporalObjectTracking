@@ -183,6 +183,18 @@ def visualize_conditional_datapoint(model, dataloader, node_classes, node_catego
             plt.close(fig)
 
 
+def visualize_parsed_routine(edges, nodes, node_classes):
+    num_plots = edges.size()[0]
+    num_x = int(floor(sqrt(num_plots)))
+    num_y = int(ceil(num_plots/num_x))
+    fig, axs = plt.subplots(num_x,num_y)
+    fig.set_size_inches(28, 16)
+    axs = axs.reshape(-1,)
+    pos=None
+    for i in range(num_plots):
+        pos = _visualize_graph(nodes[i,:,:].squeeze(0), edges[i,:,:].squeeze(0), node_classes=node_classes, ax = axs[i])
+    plt.show()
+
 
 def visualize_routine(routine, sparsify=False):
     graphs = routine['graphs']

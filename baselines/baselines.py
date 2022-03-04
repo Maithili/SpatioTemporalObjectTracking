@@ -72,7 +72,7 @@ class StaticSemantic(TimeConditionedBaseline):
         return self.cooccurence_freq.unsqueeze(0).repeat(self.edges.size()[0],1,1)
 
 class LastSeenAndStaticSemantic(StateTimeConditionedBaseline):
-    def __init__(self, cooccurence_freq, prob_change = 0.5) -> None:
+    def __init__(self, cooccurence_freq, prob_change = 0.6) -> None:
         super().__init__()
         self.cooccurence_freq = cooccurence_freq
         self.prob_change = prob_change
@@ -96,7 +96,7 @@ class Fremen(TimeConditionedBaseline):
         return prior.unsqueeze(0).repeat(self.edges.size()[0],1,1)
 
 class FremenStateConditioned(StateTimeConditionedBaseline):
-    def __init__(self, spectral_components, dt, time_decay=20):
+    def __init__(self, spectral_components, dt, time_decay=30):
         super().__init__()
         self.spectral_components = spectral_components
         self.decay_exponent = np.exp(-dt / time_decay)

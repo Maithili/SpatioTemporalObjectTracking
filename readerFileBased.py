@@ -11,7 +11,7 @@ import random
 from encoders import time_external
 from torch.utils.data import DataLoader
 
-from utils import visualize_routine
+from utils import visualize_routine, visualize_parsed_routine
 
 INTERACTIVE = False
 
@@ -245,11 +245,12 @@ class ProcessDataset():
             for f in files:
                 with open(os.path.join(root,f)) as f_in:
                     routine = json.load(f_in)
+                nodes, edges = self.read_graphs(routine["graphs"])
                 if viz:
                     visualize_routine(routine)
+                    visualize_parsed_routine(edges, nodes, self.common_data['node_classes'])
                     inp = input(f'Do you want to visualize the next routine?')
                     viz = (inp == 'y')
-                nodes, edges = self.read_graphs(routine["graphs"])
                 self.home_graph = edges[0,:,:]
                 times = torch.Tensor(routine["times"])
                 obj_in_use = routine["objects_in_use"]
