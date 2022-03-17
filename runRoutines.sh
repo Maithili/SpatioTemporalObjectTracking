@@ -9,11 +9,11 @@ trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
 
 DATE_TIME=`date "+%m%d_%H%M"`
 
-for dataset in $(find data/Persona0219/ -mindepth 1 -maxdepth 1) $(find data/completePersona0214/ -mindepth 1 -maxdepth 1) $(find data/Individual0219/ -mindepth 1 -maxdepth 1)
+for dataset in $(find data/finalDatasets0301/ -mindepth 1 -maxdepth 1) #$(find data/Individual0219/ -mindepth 1 -maxdepth 1)
 do
     # ./readerFileBased.py --path=$dataset
     ./run.py --cfg=default --path=$dataset --baselines --tags=$(basename $dataset)\_$DATE_TIME
-    for i in 1 2 3 # 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
+    for i in 1 2 3 #4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
     do
         mkdir -p checkpoints/$dataset/ours
         ./run.py --path=$dataset --name=ours --tags=$(basename $dataset)\_$DATE_TIME --ckpt_dir=checkpoints/$dataset/default --write_ckpt

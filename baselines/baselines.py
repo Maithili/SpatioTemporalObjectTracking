@@ -1,4 +1,5 @@
 import random
+from copy import deepcopy
 import numpy as np
 import torch
 from torch.nn import functional as F
@@ -21,10 +22,9 @@ class Baseline():
     
     def step(self, batch):
         self.extract(batch)
-        result = self.run()
-        result[self.dynamic_edges == 0] = -float('inf')
-        result = F.softmax(result, dim=-1)
+        result = deepcopy(self.run())
         result[self.dynamic_edges == 0] = self.edges[self.dynamic_edges == 0]
+        result = result/(result.sum(dim=-1).unsqueeze(-1).repeat(1,1,self.edges.size()[-1])+1e-8)
         assert result.squeeze(-1).argmax(-1).size() == self.edges.squeeze(-1).argmax(-1).size(), f"{result.size()} == {self.edges.size()}"
         details = {'input':{'class':self.nodes.argmax(-1), 'location':self.edges.squeeze(-1).argmax(-1)}, 
             'output_probs':{'location': result}, 
@@ -32,8 +32,8 @@ class Baseline():
             'losses':{'location': None}, 
             'output':{'class':self.nodes.argmax(-1), 'location': result.squeeze(-1).argmax(-1)}, 
             'evaluate_node':self.evaluate_node}
-        eval = self.evaluate(result)
-        return eval, details
+        # eval = self.evaluate(result)
+        return None, details
 
 
 
@@ -72,7 +72,7 @@ class StaticSemantic(TimeConditionedBaseline):
         return self.cooccurence_freq.unsqueeze(0).repeat(self.edges.size()[0],1,1)
 
 class LastSeenAndStaticSemantic(StateTimeConditionedBaseline):
-    def __init__(self, cooccurence_freq, prob_change = 0.6) -> None:
+    def __init__(self, cooccurence_freq, prob_change = 0.4) -> None:
         super().__init__()
         self.cooccurence_freq = cooccurence_freq
         self.prob_change = prob_change
@@ -82,9 +82,6 @@ class LastSeenAndStaticSemantic(StateTimeConditionedBaseline):
         next_edges += self.prob_change/next_edges.size()[-1]
         return self.cooccurence_freq * next_edges
 
-class LastSeenButMostlyStaticSemantic(LastSeenAndStaticSemantic):
-    def __init__(self, cooccurence_freq, prob_change=0.9) -> None:
-        super().__init__(cooccurence_freq, prob_change)
 
 class Fremen(TimeConditionedBaseline):
     def __init__(self, spectral_components):
@@ -96,7 +93,7 @@ class Fremen(TimeConditionedBaseline):
         return prior.unsqueeze(0).repeat(self.edges.size()[0],1,1)
 
 class FremenStateConditioned(StateTimeConditionedBaseline):
-    def __init__(self, spectral_components, dt, time_decay=30):
+    def __init__(self, spectral_components, dt, time_decay=40):
         super().__init__()
         self.spectral_components = spectral_components
         self.decay_exponent = np.exp(-dt / time_decay)

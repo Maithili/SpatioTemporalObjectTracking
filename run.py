@@ -18,7 +18,7 @@ from encoders import TimeEncodingOptions
 from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
 # from applications import evaluate_applications
 from breakdown_evaluations import evaluate as evaluate_applications
-from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, LastSeenButMostlyStaticSemantic, Fremen, FremenStateConditioned, Slim
+from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned
 
 import random
 random.seed(23435)
@@ -36,10 +36,10 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags)
-    wandb_logger.experiment.config.update(cfg)
+    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags, mode='disabled')
 
-    wandb_logger.experiment.config['DATA_PARAM'] = data.params
+    cfg['DATA_PARAM'] = data.params
+    wandb_logger.experiment.config.update(cfg)
     
 
     if read_ckpt:
@@ -81,6 +81,9 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
 
     evaluation_summary = evaluate_applications(model, data, cfg, output_dir, logger=wandb_logger.experiment)
 
+    with open (os.path.join(output_dir,'config.json'), 'w') as f:
+        json.dump(cfg, f)
+
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:
         visualize_unconditional_datapoint(model, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
@@ -111,7 +114,6 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     if baselines:
         cf = get_cooccurence_frequency(data)
         spec = get_spectral_components(data, periods_mins=[float('inf'), 60*24, 60*24/2])
-        # for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), LastSeenButMostlyStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt']), FremenStateConditionedFastDecay(spec, data.params['dt'])]:
         for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
             output_dir = os.path.join('logs', group,baseline.__class__.__name__)
             if os.path.exists(output_dir):
@@ -123,13 +125,17 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
                 output_dir = new_dir
             os.makedirs(output_dir)
 
-            wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = group, tags=tags)
+            wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = group, tags=tags, mode='disabled')
             cfg['NAME'] = wandb.run.name
             wandb.config.update(cfg)
             for routine in data.test:
                 eval, details = baseline.step(data.test.collate_fn([routine]))
             # wandb.log(baseline.log())
             _ = evaluate_applications(baseline, data, cfg, output_dir)
+
+
+            with open (os.path.join(output_dir,'config.json'), 'w') as f:
+                json.dump(cfg, f)
 
             print('Outputs saved at ',output_dir)
             if INTERACTIVE:
