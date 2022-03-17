@@ -25,12 +25,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
 
     raw_data = {'inputs':[], 'outputs':[], 'ground_truths':[], 'futures':[], 'change_types':[]}
     results = {'quality_breakdown':[[0,0] for _ in range(lookahead_steps)],
-               'quality_breakdown_truncated':[[0,0] for _ in range(lookahead_steps)],
                'completeness_breakdown': {
-                    'by_lookahead' : [[0,0,0] for _ in range(lookahead_steps)],
-                    'by_change_type' : [[0,0,0] for _ in range(num_change_types)]
-                },
-                'completeness_breakdown_1step': {
                     'by_lookahead' : [[0,0,0] for _ in range(lookahead_steps)],
                     'by_change_type' : [[0,0,0] for _ in range(num_change_types)]
                 }
@@ -100,31 +95,18 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
 
         correct = deepcopy(routine_outputs == routine_futures).to(int)
         wrong = deepcopy(routine_outputs != routine_futures).to(int)
-        changes_gt_for_1step = deepcopy(routine_ground_truth_step  == 0)
 
         # assert np.equal((routine_ground_truths >= 0), changes_gt)
         for ls in range(lookahead_steps):
             changes_output_for_step = deepcopy(routine_output_step  <= ls)
-            results['quality_breakdown'][ls][0] += int((correct[changes_output_for_step]).sum())
-            results['quality_breakdown'][ls][1] += int((wrong[changes_output_for_step]).sum())
-            changes_output_for_step_trunc = np.bitwise_and(changes_output_for_step, routine_future_steps > -6)
-            results['quality_breakdown_truncated'][ls][0] += int((correct[changes_output_for_step_trunc]).sum())
-            results['quality_breakdown_truncated'][ls][1] += int((wrong[changes_output_for_step_trunc]).sum())
-            # change this to first step to compare against first step only
             changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
             changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
+            changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
+            results['quality_breakdown'][ls][0] += int(changes_output_and_gt.sum())
+            results['quality_breakdown'][ls][1] += int(changes_output_and_not_gt.sum())
             results['completeness_breakdown']['by_lookahead'][ls][0] += int((correct[changes_output_and_gt]).sum())
             results['completeness_breakdown']['by_lookahead'][ls][1] += int((wrong[changes_output_and_gt]).sum())    
             results['completeness_breakdown']['by_lookahead'][ls][2] += int((deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))).sum())   
-            changes_output_and_gt_1step = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_1step))
-            results['completeness_breakdown_1step']['by_lookahead'][ls][0] += int((correct[changes_output_and_gt_1step]).sum())
-            results['completeness_breakdown_1step']['by_lookahead'][ls][1] += int((wrong[changes_output_and_gt_1step]).sum())
-            results['completeness_breakdown_1step']['by_lookahead'][ls][2] += int((deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_1step))).sum())   
-
-        # new_missed = int(np.bitwise_and(np.bitwise_not(changes_output_all), changes_gt_all).sum())
-        # results['completeness_breakdown']['missed_changes'] += new_missed
-        # new_missed_1step = int(np.bitwise_and(np.bitwise_not(changes_output_all), changes_gt_for_1step).sum())
-        # results['completeness_breakdown_1step']['missed_changes'] += new_missed_1step
 
         routine_change_types = routine_change_types.to(int)
         assert torch.equal(routine_change_types > 0, changes_gt_all)
@@ -140,17 +122,6 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
         assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][2] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][2]) == 0 , "missed changes don't add up!"
         assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][0] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][0]) == 0, "correct changes don't add up"
         assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][1] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][1]) == 0, "wrong changes don't add up"
-
-        for ct in range(num_change_types):
-            ct_mask = deepcopy(np.bitwise_and(np.bitwise_and(changes_output_all, routine_change_types == (ct+1)), changes_gt_for_1step))
-            results['completeness_breakdown_1step']['by_change_type'][ct][0] += int((correct[ct_mask]).sum())
-            results['completeness_breakdown_1step']['by_change_type'][ct][1] += int((wrong[ct_mask]).sum())
-            ct_mask_missed = deepcopy(np.bitwise_and(np.bitwise_and(np.bitwise_not(changes_output_all), routine_change_types == (ct+1)), changes_gt_for_1step))
-            results['completeness_breakdown_1step']['by_change_type'][ct][2] += int(ct_mask_missed.sum())
-        # print (routine_change_types.unique())
-        assert abs(sum([results['completeness_breakdown_1step']['by_change_type'][ct][2] for ct in range(num_change_types)]) - results['completeness_breakdown_1step']['by_lookahead'][-1][2]) == 0 , "_1step missed changes don't add up!"
-        assert abs(sum([results['completeness_breakdown_1step']['by_change_type'][ct][0] for ct in range(num_change_types)]) - results['completeness_breakdown_1step']['by_lookahead'][-1][0]) == 0, "_1step correct changes don't add up"
-        assert abs(sum([results['completeness_breakdown_1step']['by_change_type'][ct][1] for ct in range(num_change_types)]) - results['completeness_breakdown_1step']['by_lookahead'][-1][1]) == 0, "_1step wrong changes don't add up"
 
         fig, axs = plt.subplots(1,5)
         fig.set_size_inches(30,20)
