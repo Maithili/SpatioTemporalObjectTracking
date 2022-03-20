@@ -108,6 +108,7 @@ def visualize_eval_breakdowns(data, names, without_types=False):
         info[names[sample_num]]['precision'] = precisions
         info[names[sample_num]]['recall'] = completeness_t
         info[names[sample_num]]['destination_accuracy'] = completeness_tl
+        info[names[sample_num]]['f1_score'] = f1
 
 
     ax_f1.set_xticks(np.arange(len(names)))
