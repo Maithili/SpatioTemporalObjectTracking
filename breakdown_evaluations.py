@@ -19,12 +19,12 @@ white = np.array([1, 1, 1, 1])
 newcolors[:25, :] = white
 newcmp = ListedColormap(['white', 'tab:blue', 'tab:orange', 'tab:purple'])
 
-def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, deterministic_input_loop=False, node_names=[]):
+def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, deterministic_input_loop=False, node_names=[]):
     
     num_change_types = 3
 
     raw_data = {'inputs':[], 'outputs':[], 'ground_truths':[], 'futures':[], 'change_types':[]}
-    results = {'quality_breakdown':[[0,0] for _ in range(lookahead_steps)],
+    results = {'precision_breakdown':[[0,0] for _ in range(lookahead_steps)],
                'completeness_breakdown': {
                     'by_lookahead' : [[0,0,0] for _ in range(lookahead_steps)],
                     'by_change_type' : [[0,0,0] for _ in range(num_change_types)]
@@ -102,8 +102,8 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
             changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
             changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
             changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
-            results['quality_breakdown'][ls][0] += int(changes_output_and_gt.sum())
-            results['quality_breakdown'][ls][1] += int(changes_output_and_not_gt.sum())
+            results['precision_breakdown'][ls][0] += int(changes_output_and_gt.sum())
+            results['precision_breakdown'][ls][1] += int(changes_output_and_not_gt.sum())
             results['completeness_breakdown']['by_lookahead'][ls][0] += int((correct[changes_output_and_gt]).sum())
             results['completeness_breakdown']['by_lookahead'][ls][1] += int((wrong[changes_output_and_gt]).sum())    
             results['completeness_breakdown']['by_lookahead'][ls][2] += int((deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))).sum())   

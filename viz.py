@@ -29,41 +29,74 @@ method_labels = {
     'FremenStateConditioned':'FreMeN',
     # 'Fremen':'FreMeN Priors only',
     'ours':'Ours',
-    'ours_timeLinear':'Ours w/ \nLinear Time'
+    # 'ours_timeLinear':'Ours w/ \nLinear Time'
 }
 
+ablation=False
+filenames = ['recall_accuracy','precision','f1','precision_accuracy', 'precision_recall', 'recall_accuracy_norm', 'precision_norm']
+if ablation:
+    filenames = ['ablation_'+f for f in filenames]
+    method_labels = {
+    'ours':'Ours',
+    'ours_timeLinear':'Ours w/ \nLinear Time'
+    }
 
 def visualize_eval_breakdowns(data, names, without_types=False):
-    fig, ax = plt.subplots(2,2)
-    ax_comp_t_tl, ax_prec = ax[0,0], ax[0,1]
-    ax_comp_tl_prec, ax_comp_t_prec = ax[1,0], ax[1,1]
+    # fig, ax = plt.subplots(2,3)
+    f1, ax_comp_t_tl = plt.subplots()
+    f2, ax_prec = plt.subplots()
+    f3, ax_f1 = plt.subplots()
+    f4, ax_comp_tl_prec = plt.subplots()
+    f5, ax_comp_t_prec = plt.subplots()
+    f6, ax_dest_acc_recl_norm = plt.subplots()
+    f7, ax_prec_norm = plt.subplots()
+    figs =[f1,f2,f3,f4,f5,f6,f7]
+
+    info = {}
+
+    offsets = np.linspace(-0.45,0.45,len(data[0]['precision_breakdown'])+1)
+    offsets = (offsets[1:]+offsets[:-1])/2
+    width = offsets[1] - offsets[0] - 0.01
 
     for sample_num, sample_data in enumerate(data):
         if sample_data is None:
             continue
 
-        quality_steps = len(sample_data['quality_breakdown'])
-        offsets = np.linspace(-0.45,0.45,quality_steps+1)
-        offsets = (offsets[1:]+offsets[:-1])/2
-        width = offsets[1] - offsets[0] - 0.01
+        quality_steps = len(sample_data['precision_breakdown'])
         for step in range(quality_steps-1, -1, -1):
-            ax_prec.bar(sample_num + offsets[step], sum(sample_data['quality_breakdown'][step])/1080, color=red, width=width)
-            ax_prec.bar(sample_num + offsets[step], sample_data['quality_breakdown'][step][0]/1080, color=green, width=width)
-        precisions = [qb[0]/(sum(qb)+1e-8) for qb in sample_data['quality_breakdown']]
+            if sample_num == 0 and step == 0:
+                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step])/1080, color=red-redder*0.3, width=width, label='False Positives')
+                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/1080, color=green, width=width, label='Correct Time')
+                ax_prec_norm.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/(sum(sample_data['precision_breakdown'][step])+1e-8), color=green-greener*0.2, width=width, label='Precision')
+            else:
+                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step])/1080, color=red-redder*0.3, width=width)
+                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/1080, color=green, width=width)
+                ax_prec_norm.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/(sum(sample_data['precision_breakdown'][step])+1e-8), color=green-greener*0.2, width=width)
+        precisions = [qb[0]/(sum(qb)+1e-8) for qb in sample_data['precision_breakdown']]
 
         comp_steps = len(sample_data['completeness_breakdown']['by_lookahead'])
         assert quality_steps==comp_steps
 
         # if without_types:
-        offsets = np.linspace(-0.45,0.45,comp_steps+1)
-        offsets = (offsets[1:]+offsets[:-1])/2
-        width = offsets[1] - offsets[0] - 0.01
         for step in range(comp_steps-1, -1, -1):
-            ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step])/1080, color=red-redder*0.9, width=width)
-            ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/1080, color=green-greener*0.5, width=width)
-            ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown_1step']['by_lookahead'][step][0]/1080, color=green, width=width)
-        completeness_t = [cb[0]/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']]
-        completeness_tl = [(cb[0]+cb[1])/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown_1step']['by_lookahead']]
+            if sample_num == 0 and step == 0:
+                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step])/1080, color=red-redder*0.3, width=width, label='Wrong Time')
+                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/1080, color=green-greener*0.3, width=width, label='Correct Time')
+                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/1080, color=green, width=width, label='Correct Time \n+ Destination')
+                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.5, width=width, label='Recall')
+                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.0, width=width, label='Destination\nAccuracy')
+        
+            else:
+                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step])/1080, color=red-redder*0.3, width=width)
+                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/1080, color=green-greener*0.3, width=width)
+                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/1080, color=green, width=width)
+                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.5, width=width)
+                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.0, width=width)
+        completeness_tl = [cb[0]/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']]
+        completeness_t = [(cb[0]+cb[1])/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']]
+
+        f1 = [2*p*r/(p+r+1e-8) for p,r in zip(precisions, completeness_t)]
+        ax_f1.bar(sample_num+offsets, f1, color=green-greener*0.2, width=width)
 
         alphas = np.linspace(1,0.5,quality_steps)
         for i in range(quality_steps):
@@ -71,39 +104,86 @@ def visualize_eval_breakdowns(data, names, without_types=False):
             ax_comp_tl_prec.plot(completeness_tl[i], precisions[i], 'x', markersize=20, markeredgewidth = 5, label=label, color=method_colors[names[sample_num]], alpha=alphas[i])
             ax_comp_t_prec.plot(completeness_t[i], precisions[i], 'x', markersize=20, markeredgewidth = 5, label=label, color=method_colors[names[sample_num]], alpha=alphas[i])
             
+        info[names[sample_num]] = {}
+        info[names[sample_num]]['precision'] = precisions
+        info[names[sample_num]]['recall'] = completeness_t
+        info[names[sample_num]]['destination_accuracy'] = completeness_tl
 
+
+    ax_f1.set_xticks(np.arange(len(names)))
+    ax_f1.set_xticklabels([method_labels[n] for n in names], fontsize=30)
+    ax_f1.tick_params(axis = 'y', labelsize=20)
+    ax_f1.tick_params(axis = 'x', labelsize=30)
+    # ax_f1.set_title('F-1 Score', fontsize=30)
 
     ax_comp_t_prec.legend(fontsize=30)
-    ax_comp_t_prec.set_xlabel('Completeness (Time)', fontsize=30)
+    ax_comp_t_prec.set_xlabel('Recall', fontsize=30)
     ax_comp_t_prec.set_ylabel('Precision', fontsize=30)
-    ax_comp_t_prec.set_xlim([0,1])
-    ax_comp_t_prec.set_ylim([0,1])
+    ax_comp_t_prec.set_xlim([0,0.5])
+    ax_comp_t_prec.set_ylim([0,0.5])
 
     ax_comp_tl_prec.legend(fontsize=30)
-    ax_comp_tl_prec.set_xlabel('Completeness (Time + Destination)', fontsize=30)
+    ax_comp_tl_prec.set_xlabel('Destination Accuracy', fontsize=30)
     ax_comp_tl_prec.set_ylabel('Precision', fontsize=30)
-    ax_comp_tl_prec.set_xlim([0,1])
-    ax_comp_tl_prec.set_ylim([0,1])
+    # ax_comp_tl_prec.set_xlim([0,1])
+    # ax_comp_tl_prec.set_ylim([0,1])
     
+    ax_comp_t_tl.legend(fontsize=35)
     ax_comp_t_tl.set_xticks(np.arange(len(names)))
-    ax_comp_t_tl.set_xticklabels([method_labels[n] for n in names], fontsize=30)
-    ax_comp_t_tl.set_ylabel('Num. changes per step', fontsize=20)
-    ax_comp_t_tl.tick_params(axis = 'y', labelsize=20)
-    ax_comp_t_tl.tick_params(axis = 'x', labelsize=30)
-    ax_comp_t_tl.set_title('Completeness (Time, Time+Destination)', fontsize=30)
+    ax_comp_t_tl.set_xticklabels([method_labels[n] for n in names], fontsize=45)
+    ax_comp_t_tl.set_ylabel('Num. changes per step', fontsize=35)
+    ax_comp_t_tl.tick_params(axis = 'y', labelsize=30)
+    ax_comp_t_tl.tick_params(axis = 'x', labelsize=40)
+    # ax_comp_t_tl.set_title('Fraction of changes correctly predicted', fontsize=30)
     
+    ax_prec.legend(fontsize=35)
     ax_prec.set_xticks(np.arange(len(names)))
-    ax_prec.set_ylabel('Num. changes per step', fontsize=20)
-    ax_prec.set_xticklabels([method_labels[n] for n in names], fontsize=30)
-    ax_prec.tick_params(axis = 'y', labelsize=20)
-    ax_prec.tick_params(axis = 'x', labelsize=30)
-    ax_prec.set_title('Precision', fontsize=30)
+    ax_prec.set_ylabel('Num. changes per step', fontsize=35)
+    ax_prec.set_xticklabels([method_labels[n] for n in names], fontsize=45)
+    ax_prec.tick_params(axis = 'y', labelsize=30)
+    ax_prec.tick_params(axis = 'x', labelsize=40)
+    # ax_prec.set_title('Correct fraction of predictions', fontsize=30)
 
-    fig.set_size_inches(30,15)
-    fig.tight_layout()
+    ax_prec_norm.legend(fontsize=35)
+    ax_prec_norm.set_xticks(np.arange(len(names)))
+    ax_prec_norm.set_xticklabels([method_labels[n] for n in names], fontsize=45)
+    ax_prec_norm.tick_params(axis = 'y', labelsize=30)
+    ax_prec_norm.tick_params(axis = 'x', labelsize=40)
+    # ax_prec_norm.set_title('Precision', fontsize=30)
 
+    ax_dest_acc_recl_norm.legend(fontsize=35)
+    ax_dest_acc_recl_norm.set_xticklabels([method_labels[n] for n in names], fontsize=45)
+    ax_dest_acc_recl_norm.set_xticks(np.arange(len(names)))
+    ax_dest_acc_recl_norm.tick_params(axis = 'y', labelsize=30)
+    ax_dest_acc_recl_norm.tick_params(axis = 'x', labelsize=40)
+    # ax_dest_acc_recl_norm.set_title('Recall & Destination Accuracy', fontsize=30)
 
-    return fig
+    for fig in figs:
+        fig.set_size_inches(12,10)
+        fig.tight_layout()
+
+    f3.set_size_inches(15,8)
+    f3.tight_layout()
+
+    f4.set_size_inches(12,12)
+    f4.tight_layout()
+    f5.set_size_inches(12,12)
+    f5.tight_layout()
+    
+    if ablation:
+        for fig in figs:
+            fig.set_size_inches(8,10)
+            fig.tight_layout()
+
+        f3.set_size_inches(8,5)
+        f3.tight_layout()
+
+        f4.set_size_inches(8,8)
+        f4.tight_layout()
+        f5.set_size_inches(8,8)
+        f5.tight_layout()
+
+    return figs, info
 
 
 
@@ -112,8 +192,8 @@ def average_stats(stats_list):
     num_stats = len(stats_list)
     if num_stats == 0:
         return None
-    lookahead_steps = len(stats_list[0]['quality_breakdown'])
-    avg['quality_breakdown'] = [[ sum([sl['quality_breakdown'][s][c] for sl in stats_list])/num_stats for c in range(2)]for s in range(lookahead_steps)]
+    lookahead_steps = len(stats_list[0]['precision_breakdown'])
+    avg['precision_breakdown'] = [[ sum([sl['precision_breakdown'][s][c] for sl in stats_list])/num_stats for c in range(2)]for s in range(lookahead_steps)]
     lookahead_steps = len(stats_list[0]['completeness_breakdown']['by_lookahead'])
     avg['completeness_breakdown'] = {
         'by_lookahead' : [[ sum([sl['completeness_breakdown']['by_lookahead'][s][c] for sl in stats_list])/num_stats for c in range(3)]for s in range(lookahead_steps)],
@@ -122,7 +202,7 @@ def average_stats(stats_list):
     return avg
 
 
-dirs = ['logs/']
+dirs = ['logs0317newMetrics/']
 
 directory_list = []
 for dir in dirs:
@@ -158,35 +238,36 @@ def get_combined_data(name, filter_dataset):
     # return (random.choice(data_list))[1]
     return cdata
 
-## per dataset
-print('Datasets : ')
-for dataset in set(datasets):
-    print('Plotting :',dataset)
-    combined_data = [get_combined_data(name, lambda x: x==dataset) for name in combined_names]
-    fig = visualize_eval_breakdowns(combined_data, combined_names)
-    plt.savefig(os.path.join(dir_out,dataset+'_with_types.jpg'))
-    fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
-    plt.savefig(os.path.join(dir_out,dataset+'.jpg'))
+# ## per dataset
+# print('Datasets : ')
+# for dataset in set(datasets):
+#     print('Plotting :',dataset)
+#     combined_data = [get_combined_data(name, lambda x: x==dataset) for name in combined_names]
+#     # fig = visualize_eval_breakdowns(combined_data, combined_names)
+#     # plt.savefig(os.path.join(dir_out,dataset+'_with_types.jpg'))
+#     fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
+#     plt.savefig(os.path.join(dir_out,dataset+'.jpg'))
 
 ## all data
-print('All datasets : ')
-combined_data = [get_combined_data(name, lambda x: True) for name in combined_names]
-fig = visualize_eval_breakdowns(combined_data, combined_names)
-plt.savefig(os.path.join(dir_out,'all_with_types.jpg'))
-fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
-plt.savefig(os.path.join(dir_out,'all.jpg'))
-
-
-print('Individual datasets : ')
-combined_data = [get_combined_data(name, lambda x: x.startswith('A')) for name in combined_names]
-fig = visualize_eval_breakdowns(combined_data, combined_names)
-plt.savefig(os.path.join(dir_out,'allIndividual_with_types.jpg'))
-fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
-plt.savefig(os.path.join(dir_out,'allIndividual.jpg'))
-
 print('Persona datasets : ')
 combined_data = [get_combined_data(name, lambda x: not x.startswith('A')) for name in combined_names]
-fig = visualize_eval_breakdowns(combined_data, combined_names)
-plt.savefig(os.path.join(dir_out,'allPersona_with_types.jpg'))
-fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
-plt.savefig(os.path.join(dir_out,'allPersona.jpg'))
+figs, info = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
+for i,fig in enumerate(figs):
+    fig.savefig(os.path.join(dir_out,filenames[i]+'.jpg'))
+with open(os.path.join(dir_out,'info.json'), 'w') as f:
+    json.dump(info, f)
+
+
+# print('Individual datasets : ')
+# combined_data = [get_combined_data(name, lambda x: x.startswith('A')) for name in combined_names]
+# # fig = visualize_eval_breakdowns(combined_data, combined_names)
+# # plt.savefig(os.path.join(dir_out,'allIndividual_with_types.jpg'))
+# fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
+# plt.savefig(os.path.join(dir_out,'allIndividual.jpg'))
+
+# print('Persona datasets : ')
+# combined_data = [get_combined_data(name, lambda x: not x.startswith('A')) for name in combined_names]
+# # fig = visualize_eval_breakdowns(combined_data, combined_names)
+# # plt.savefig(os.path.join(dir_out,'allPersona_with_types.jpg'))
+# fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
+# plt.savefig(os.path.join(dir_out,'allPersona.jpg'))

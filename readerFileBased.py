@@ -157,6 +157,7 @@ def get_cooccurence_frequency(routines_dataset):
     for r in routines_dataset.train:
         all_edges = all_edges + r[0]
     prior = all_edges/(all_edges.sum(dim=0))/(len(routines_dataset.train) + 1)
+    print('Size of coccurence prior : ',prior.size())
     return prior
 
 def get_spectral_components(routines_dataset, periods_mins):
@@ -170,6 +171,7 @@ def get_spectral_components(routines_dataset, periods_mins):
     components = []
     for r,i,p in zip(reals, imags, periods_mins):
         components.append({'amplitude': (np.sqrt(np.square(r)+np.square(i))/len(routines_dataset.train)), 'phase': (np.arctan2(i,r)), 'period': p})
+    print('Size of FreMeN prior : ',str([(comp['amplitude'].size(),comp['phase'].size()) for comp in components]))
     return components
 
 
