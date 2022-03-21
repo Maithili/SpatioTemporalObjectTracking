@@ -1,9 +1,11 @@
 from random import random
+import numpy as np
 import torch
 from torch.nn import functional as F
 from torch import nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
+from evaluation import evaluate
 
 def _erase_edges(edges):
     return torch.ones_like(edges)/edges.size()[-1]
@@ -39,81 +41,52 @@ def chebyshev_polynomials(edges, k):
 
     return polynomials
 
-def _get_masks(gt_tensor, output_tensor):
-    masks = {}
-    masks['correct'] = gt_tensor == output_tensor
-    masks['wrong'] = gt_tensor != output_tensor
-    return masks
-
-def _classification_metrics(gt_tensor, output_tensor, loss_tensor):
-    masks = _get_masks(gt_tensor, output_tensor)
-    result = {'accuracy':None ,'losses':{}}
-    result['accuracy'] = (masks['correct'].sum())/torch.numel(gt_tensor)
-    result['losses']['mean'] = loss_tensor.mean()
-    result['losses']['correct'] = loss_tensor[masks['correct']].sum()/masks['correct'].sum()
-    result['losses']['wrong'] = loss_tensor[masks['wrong']].sum()/masks['wrong'].sum()
-    return result
-
-def _binary_metrics(gtt_tensor, output_tensor, loss_tensor):
-    return {}
-
-def evaluate(gt, losses, output, evaluate_node):
-    gt_tensor = gt['location'][evaluate_node]
-    output_tensor = output['location'][evaluate_node]
-    loss_tensor = losses['location'][evaluate_node]
-    location_results = _classification_metrics(gt_tensor, output_tensor, loss_tensor)
-    return location_results
-
 class GraphTranslatorModule(LightningModule):
     def __init__(self, 
                 num_nodes, 
                 node_feature_len,
                 context_len, 
-                learn_nodes,
                 edge_importance,
                 edge_dropout_prob,
-                duplication_loss_weight,
-                learn_context):
+                tn_loss_weight,
+                learned_time_periods,
+                hidden_layer_size):
         
         super().__init__()
 
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
         self.context_len = context_len
-        self.learn_nodes = learn_nodes
         self.edge_importance = edge_importance
         self.edge_dropout_prob = edge_dropout_prob
-        self.duplication_loss_weight = duplication_loss_weight
-        self.learn_context = learn_context
+        self.tn_loss_weight = tn_loss_weight
+        self.learned_time_periods = learned_time_periods
 
         self.hidden_influence_dim = 20
 
         self.edges_update_input_dim = self.hidden_influence_dim*4 + 1 + self.context_len
         
-        mlp_hidden = int(round(num_nodes*0.2))
-
-        self.mlp_context = nn.Sequential(nn.Linear(self.context_len, mlp_hidden),
-                                                    nn.ReLU(),
-                                                    nn.Linear(mlp_hidden, self.context_len),
-                                                    )
+        if learned_time_periods:
+            self.period_in_days = torch.nn.Parameter(torch.randn((1, 3)))
+            self.context_len = 2*3
+            omega_one_day = torch.Tensor([2*np.pi/60*24])
+            self.context_from_time = lambda t : torch.cat((torch.cos(omega_one_day * t / self.period_in_days),torch.sin(omega_one_day * t / self.period_in_days)), axis=1)
+ 
+        mlp_hidden = hidden_layer_size
 
         self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, mlp_hidden),
                                                     nn.ReLU(),
                                                     nn.Linear(mlp_hidden, self.hidden_influence_dim),
                                                     )
 
-        self.mlp_update_importance = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
+        self.mlp_update_importance = nn.Sequential(nn.Linear(self.edges_update_input_dim, self.hidden_influence_dim),
                                                     nn.ReLU(),
-                                                    nn.Linear(mlp_hidden, 1)
+                                                    nn.Linear(self.hidden_influence_dim, 1)
                                                     )
                                     
-        self.mlp_update_edges = nn.Sequential(nn.Linear(self.edges_update_input_dim, mlp_hidden),
+        self.mlp_update_edges = nn.Sequential(nn.Linear(self.edges_update_input_dim, self.hidden_influence_dim),
                                                     nn.ReLU(),
-                                                    nn.Linear(mlp_hidden, 1)
-                                                    )
-        self.mlp_update_nodes = nn.Sequential(nn.Linear(self.hidden_influence_dim*2+self.node_feature_len+self.context_len, 20),
-                                                    nn.ReLU(),
-                                                    nn.Linear(20, self.node_feature_len)
+                                                    nn.Linear(self.hidden_influence_dim, 1)
                                                     )
         
         self.location_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.squeeze(-1).permute(0,2,1), y.squeeze(-1).long()))
@@ -128,8 +101,7 @@ class GraphTranslatorModule(LightningModule):
 
         batch_size, num_nodes, node_feature_len = nodes.size()
 
-        if self.learn_context:
-            context = self.mlp_context(context)
+        context = context.view(size=[batch_size, self.context_len])
 
         x = self.collate_edges(edges=edges.unsqueeze(-1), nodes=nodes)
         x = x.view(
@@ -168,20 +140,8 @@ class GraphTranslatorModule(LightningModule):
                                         self.num_nodes, 
                                         self.num_nodes,
                                         1])
-
-        ## node update
-        if self.learn_nodes:
-            xn = self.message_collection_nodes(torch.mul(x,imp), nodes, context)
-            xn = xn.view(
-                size=[batch_size * self.num_nodes, 
-                    self.hidden_influence_dim*2 + self.node_feature_len + self.context_len])
-            xn = self.mlp_update_nodes(xn).view(size=[batch_size, 
-                                            self.num_nodes, 
-                                            self.node_feature_len])
-        else:
-            xn = nodes        
-
-        return xe, xn
+        
+        return xe, nodes
 
     def forward(self, edges, nodes, context):
         """
@@ -211,31 +171,39 @@ class GraphTranslatorModule(LightningModule):
     def step(self, batch):
         edges = batch['edges']
         nodes = batch['nodes']
-        context = batch['context']
         y_edges = batch['y_edges']
         y_nodes = batch['y_nodes']
         dyn_edges = batch['dynamic_edges_mask']
         
+        if self.learned_time_periods:
+            time = batch['time'].unsqueeze(1)
+            context = self.context_from_time(time)
+        else:
+            context = batch['context']
         edges_pred, nodes_pred = self(edges, nodes, context)
 
         assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
-        edges_pred[dyn_edges == 0] = -float("inf")
+        edges_pred[dyn_edges == 0] = -float('inf')
+
+        edges_inferred = F.softmax(edges_pred, dim=-1)
+        edges_inferred[dyn_edges == 0] = edges[dyn_edges == 0]
+
         evaluate_node = dyn_edges.sum(-1) > 0
 
         input = {'class':self.inference_class(nodes), 
                  'location':self.inference_location(edges)}
                  
         output_probs = {'class':nodes_pred, 
-                        'location':edges_pred}
+                        'location':edges_inferred}
 
         gt = {'class':self.inference_class(y_nodes), 
               'location':self.inference_location(y_edges)}
 
         losses = {'class':self.class_loss(output_probs['class'], gt['class']),
-                  'location':self.location_loss(output_probs['location'], gt['location']) - self.duplication_loss_weight * self.location_loss(output_probs['location'], input['location'])}
+                  'location':self.location_loss(edges_pred, gt['location'])}
 
         output = {'class':self.inference_class(output_probs['class']),
-                  'location':self.inference_location(output_probs['location'])}
+                  'location':self.inference_location(edges_inferred)}
         
         # for result, name in zip([input, gt, losses, output], ['input', 'gt', 'losses', 'output']):
         #     assert list(result['class'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())
@@ -244,7 +212,7 @@ class GraphTranslatorModule(LightningModule):
         # assert list(output_probs['class'].size())[:-1] == list(nodes.size())[:-1], 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), nodes.size())
         # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
 
-        eval = evaluate(gt, losses, output, evaluate_node)
+        eval = evaluate(gt=gt['location'], output=output['location'], input=input['location'], evaluate_node=evaluate_node, losses=losses['location'], tn_loss_weight=self.tn_loss_weight)
 
         ## NOT USED
         # eval['duplication_loss'] = (F.softmax(output_probs['location']) * edges)[evaluate_node].sum()
@@ -260,23 +228,34 @@ class GraphTranslatorModule(LightningModule):
 
 
     def training_step(self, batch, batch_idx):
+        dropout = False
         if random() < self.edge_dropout_prob:
+            dropout = True
             batch['edges'] = _erase_edges(batch['edges'])
         eval,_ = self.step(batch)
         self.log('Train accuracy',eval['accuracy'])
         self.log('Train losses',eval['losses'])
+        # if not dropout:
+            # self.log('Train CM metrics',eval['CM'])
         return eval['losses']['mean']
 
     def test_step(self, batch, batch_idx):
         eval, details = self.step(batch)
-        self.log('Test accuracy',eval['accuracy'])
+        # self.log('Test accuracy',eval['accuracy'])
         self.log('Test losses',eval['losses'])
+        # self.log('Test CM metrics',eval['CM'])
         
         uncond_batch = batch
         uncond_batch['edges'] = _erase_edges(uncond_batch['edges'])
         eval, details = self.step(uncond_batch)
-        self.log('Test accuracy (Unconditional)',eval['accuracy'])
+        # self.log('Test accuracy (Unconditional)',eval['accuracy'])
         self.log('Test losses (Unconditional)',eval['losses'])
+
+        # omegas_learned, _ = torch.sort(self.period_in_days*24) 
+        # self.log('Time Period 1',omegas_learned[0], on_epoch=True)
+        # self.log('Time Period 2',omegas_learned[1], on_epoch=True)
+        # self.log('Time Period 3',omegas_learned[2], on_epoch=True)
+        # print('Time Periods learned ',self.period_in_days*24)
 
         return 
 

@@ -206,7 +206,16 @@ class RoutinesDataset():
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
 
     def get_test_loader(self):
-        return DataLoader(self.test, num_workers=8, batch_size=min(len(self.test),5), sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
+        return DataLoader(self.test, num_workers=8, batch_size=self.params['batch_size'], sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
 
     def get_single_example_test_loader(self):
         return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
+
+
+def get_cooccurence_frequency(routines_dataset):
+    all_edges = torch.concat([routine[1] for routine in routines_dataset._train_data], dim=0).sum(dim=0)
+    all_edges += 1
+    prior = all_edges/(all_edges.sum(dim=0))
+    return prior
+
+

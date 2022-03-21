@@ -3,52 +3,30 @@
 import yaml
 import json
 import os
+import glob
 import argparse
 from copy import deepcopy
 import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
+import wandb
 
 from GraphTranslatorModule import GraphTranslatorModule
-from reader import RoutinesDataset, INTERACTIVE
+from readerFileBased import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
 from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
-from applications import multiple_steps, object_search, get_actions
+# from applications import evaluate_applications
+from breakdown_evaluations import evaluate as evaluate_applications
+from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned
 
-DEFAULT_CONFIG = 'config/default.yaml'
+import random
+random.seed(23435)
+from numpy import random as nrandom
+nrandom.seed(23435)
 
-def run(cfg = {}, path = None):
-    
-    if path is not None:
-        cfg['DATA_PATH'] = os.path.join(path, 'routines.json')
-        if not os.path.exists(cfg['DATA_PATH']):
-            cfg['DATA_PATH'] = (os.path.join(path, 'routines_train.json'), os.path.join(path, 'routines_test.json'))
-        if not (os.path.exists(cfg['DATA_PATH'][0]) and os.path.exists(cfg['DATA_PATH'][1])):
-            print('The data directory must contain a routines.json or else both of routines_train.json and routines_test.json')
-        cfg['CLASSES_PATH'] = os.path.join(path, 'classes.json')
-        cfg['DATA_INFO'] = os.path.join(path, 'info.json')
-        if cfg['NAME'] is None:
-            cfg['NAME'] = os.path.basename(path)
-    else:
-        print('No path provided. Will read from config file...')
-
-    with open(cfg['DATA_INFO']) as f:
-        cfg['DATA_INFO'] = json.load(f)
-
-    time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
-    time_encoding = time_options(cfg['TIME_ENCODING'])
-
-    if (cfg['DT'] != cfg['DATA_INFO']['dt']): print('Different dt found in config {} and data {}. The former will be used'.format(cfg['DT'], cfg['DATA_INFO']['dt']))
-
-    data = RoutinesDataset(data_path=cfg['DATA_PATH'], 
-                           classes_path=cfg['CLASSES_PATH'], 
-                           time_encoder=time_encoding, 
-                           dt=cfg['DT'],
-                           test_perc=cfg['TEST_SPLIT'], 
-                           batch_size=cfg['BATCH_SIZE'],
-                           only_seen_edges = cfg['ONLY_SEEN_EDGES'])
-
-    output_dir = os.path.join('logs',cfg['NAME'])
+def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[]):
+    output_dir = os.path.join('logs', group,cfg['NAME'])
     if os.path.exists(output_dir):
         n = 1
         new_dir = output_dir + "_"+str(n)
@@ -58,73 +36,148 @@ def run(cfg = {}, path = None):
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir=output_dir, log_model=True, group = os.path.basename(path))
+    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags, mode='disabled')
+
+    cfg['DATA_PARAM'] = data.params
     wandb_logger.experiment.config.update(cfg)
-
-    wandb_logger.experiment.config['DATA_PARAM'] = data.params
     
 
-    model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
-                              node_feature_len=data.params['n_len'],
-                              context_len=data.params['c_len'],
-                              learn_nodes=cfg['LEARN_NODES'],
-                              edge_importance=cfg['EDGE_IMPORTANCE'],
-                              edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
-                              duplication_loss_weight=cfg['DUPLICATION_LOSS_WEIGHT'],
-                              learn_context=cfg['LEARN_CONTEXT'])
+    if read_ckpt:
+        checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
+        model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
+                                                            num_nodes=data.params['n_nodes'],
+                                                            node_feature_len=data.params['n_len'],
+                                                            context_len=data.params['c_len'],
+                                                            edge_importance=cfg['EDGE_IMPORTANCE'],
+                                                            edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
+                                                            tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
+                                                            learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
+                                                            hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
 
-    trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
-    wandb_logger.watch(model, log='gradients', log_freq=20)
+    else:
 
-    trainer.fit(model, data.get_train_loader())
-    trainer.test(model, data.get_test_loader())
+        model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
+                                node_feature_len=data.params['n_len'],
+                                context_len=data.params['c_len'],
+                                edge_importance=cfg['EDGE_IMPORTANCE'],
+                                edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
+                                tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
+                                learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
+                                hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
     
-    evaluation = {}
-    evaluation['Actions'] = get_actions(model, deepcopy(data.test_routines), data.node_classes, os.path.join(output_dir, 'actions'), data.node_idx_from_id, lookahead_steps=cfg['PROACTIVE_LOOKAHEAD_STEPS'], action_probability_thresh=cfg['ACTION_PROBABILITY_THRESHOLDS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
-    hit_ratios, _ = object_search(model, deepcopy(data.test_routines), cfg['DATA_INFO']['search_object_ids'], data.node_idx_from_id, lookahead_steps=cfg['SEARCH_LOOKAHEAD_STEPS'], deterministic_input_loop=cfg['DETERMINISTIC_INPUT_LOOP'])
-    evaluation['Search hits'] = tuple(hit_ratios)
-    evaluation['Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines)))
-    evaluation['Un-Conditional accuracy drift'] = tuple(multiple_steps(model, deepcopy(data.test_routines), unconditional=True))
-    with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
-        json.dump(evaluation,f)
+        if write_ckpt:
+            ckpt_callback = ModelCheckpoint(dirpath=checkpoint_dir)
+            trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5, callbacks=[ckpt_callback])
 
-    evaluation_summary = {'Test Evaluation':
-                            {'all_actions':{'good':(evaluation['Actions']['proactive']['good']+evaluation['Actions']['restorative']['good'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total']), 
-                                            'bad':(evaluation['Actions']['proactive']['bad']+evaluation['Actions']['restorative']['bad'])/(evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'])},
-                            'proactive_actions':{'good':evaluation['Actions']['proactive']['good']/evaluation['Actions']['proactive']['total'], 
-                                                  'bad':evaluation['Actions']['proactive']['bad']/evaluation['Actions']['proactive']['total']},
-                            'restorative_actions':{'good':evaluation['Actions']['restorative']['good']/evaluation['Actions']['restorative']['total'], 
-                                                   'bad':evaluation['Actions']['restorative']['bad']/evaluation['Actions']['restorative']['total']},
-                            'num_total_actions':evaluation['Actions']['proactive']['total']+evaluation['Actions']['restorative']['total'],
-                            'num_proactive_actions':evaluation['Actions']['proactive']['total'],
-                            'num_restorative_actions':evaluation['Actions']['restorative']['total'],
-                            'object_search':{'1-hit':sum([h[0] for h in hit_ratios])/len(hit_ratios),
-                                            '2-hit':sum([h[1] for h in hit_ratios])/len(hit_ratios),
-                                            '3-hit':sum([h[2] for h in hit_ratios])/len(hit_ratios)}
-                            }
-                         }
-    wandb_logger.experiment.log(evaluation_summary)
+        else:
+            trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
+
+        wandb_logger.watch(model, log='gradients', log_freq=20)
+
+        trainer.fit(model, data.get_train_loader())
+        trainer.test(model, data.get_test_loader())
+
+    if cfg['LEARNED_TIME_PERIODS'] : print('Time Periods learned (hrs)',model.period_in_days*24)
+
+    evaluation_summary = evaluate_applications(model, data, cfg, output_dir, logger=wandb_logger.experiment)
+
+    with open (os.path.join(output_dir,'config.json'), 'w') as f:
+        json.dump(cfg, f)
 
     print('Outputs saved at ',output_dir)
     if INTERACTIVE:
         visualize_unconditional_datapoint(model, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
         visualize_conditional_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
 
+    wandb.finish()
+
+
+
+def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False, tags=[]):
+    
+    if cfg['NAME'] is None:
+        cfg['NAME'] = os.path.basename(data_dir)+'_trial'
+
+    with open(os.path.join(data_dir, 'processed', 'common_data.json')) as f:
+        cfg['DATA_INFO'] = json.load(f)['info']
+
+    time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
+    time_encoding = time_options(cfg['TIME_ENCODING'])
+
+    data = RoutinesDataset(data_path=os.path.join(data_dir,'processed'), 
+                           time_encoder=time_encoding, 
+                           batch_size=cfg['BATCH_SIZE'],
+                           only_seen_edges = cfg['ONLY_SEEN_EDGES'])
+    
+    group = os.path.basename(data_dir)
+
+    if baselines:
+        cf = get_cooccurence_frequency(data)
+        spec = get_spectral_components(data, periods_mins=[float('inf'), 60*24, 60*24/2])
+        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
+            output_dir = os.path.join('logs', group,baseline.__class__.__name__)
+            if os.path.exists(output_dir):
+                n = 1
+                new_dir = output_dir + "_"+str(n)
+                while os.path.exists(new_dir):
+                    n += 1
+                    new_dir = output_dir + "_"+str(n)
+                output_dir = new_dir
+            os.makedirs(output_dir)
+
+            wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = group, tags=tags, mode='disabled')
+            cfg['NAME'] = wandb.run.name
+            wandb.config.update(cfg)
+            for routine in data.test:
+                eval, details = baseline.step(data.test.collate_fn([routine]))
+            # wandb.log(baseline.log())
+            _ = evaluate_applications(baseline, data, cfg, output_dir)
+
+
+            with open (os.path.join(output_dir,'config.json'), 'w') as f:
+                json.dump(cfg, f)
+
+            print('Outputs saved at ',output_dir)
+            if INTERACTIVE:
+                visualize_unconditional_datapoint(baseline, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+                visualize_conditional_datapoint(baseline, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
+            wandb.finish()
+    else:
+        run_model(data, group=group, checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags)
+
+
+
+
+
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/breakfast', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/Persona0219/hard_worker', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--name', type=str, help='Name of run.')
+    parser.add_argument('--tags', type=str, help='Tags for the run separated by a comma \',\'')
+    parser.add_argument('--baselines', action='store_true')
+    parser.add_argument('--ckpt_dir', type=str, help='Path to checkpoint file')
+    parser.add_argument('--read_ckpt', action='store_true')
+    parser.add_argument('--write_ckpt', action='store_true')
 
     args = parser.parse_args()
 
-    with open(DEFAULT_CONFIG) as f:
+    with open('config/default.yaml') as f:
         cfg = yaml.safe_load(f)
+
+    if args.architecture_cfg is not None:
+        with open(os.path.join('config',args.architecture_cfg)+'.yaml') as f:
+            cfg.update(yaml.safe_load(f))
+
     if args.cfg is not None:
         with open(os.path.join('config',args.cfg)+'.yaml') as f:
             cfg.update(yaml.safe_load(f))
     if args.name is not None:
         cfg['NAME'] = args.name
-    run(cfg=cfg, path=args.path)
+
+    tags = args.tags.split(',') if args.tags is not None else []
+
+    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt, tags = tags)
