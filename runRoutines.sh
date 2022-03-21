@@ -9,7 +9,7 @@ trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
 
 DATE_TIME=`date "+%m%d_%H%M"`
 
-for dataset in $(find data/finalDatasets0301/ -mindepth 1 -maxdepth 1) #$(find data/Individual0219/ -mindepth 1 -maxdepth 1)
+for dataset in $(find data/finalDatasets0301/ -mindepth 1 -maxdepth 1)
 do
     # ./readerFileBased.py --path=$dataset
     ./run.py --cfg=default --path=$dataset --baselines --tags=$(basename $dataset)\_$DATE_TIME
@@ -17,7 +17,7 @@ do
     do
         mkdir -p checkpoints/$dataset/ours
         ./run.py --path=$dataset --name=ours --tags=$(basename $dataset)\_$DATE_TIME --ckpt_dir=checkpoints/$dataset/default --write_ckpt
-        for config in timeLinear timeFewFreq timeManyFreq timeClock bigBatch bigHiddenLayer
+        for config in timeLinear allEdges #timeFewFreq timeManyFreq timeClock bigBatch bigHiddenLayer
         do
             mkdir -p checkpoints/$dataset/$config
             ./run.py --cfg=$config --path=$dataset --name=ours_$config  --tags=$(basename $dataset)\_$DATE_TIME --ckpt_dir=checkpoints/$dataset/$config --write_ckpt
@@ -25,3 +25,4 @@ do
     done
 done
 
+python viz.py

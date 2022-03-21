@@ -23,25 +23,25 @@ method_colors = {
     'ours_timeLinear':'tab:orange'
 }
 
-method_labels = {
+def get_method_labels(ablation):
+    if ablation:
+        return {
+        'ours':'Ours',
+        'ours_timeLinear':'Ours w/ \nLinear Time'
+        }
+    return {
     # 'StaticSemantic':'Static Priors only',
     'LastSeenAndStaticSemantic':'Static\nSemantic',
     'FremenStateConditioned':'FreMeN',
     # 'Fremen':'FreMeN Priors only',
     'ours':'Ours',
     # 'ours_timeLinear':'Ours w/ \nLinear Time'
-}
-
-ablation=False
-filenames = ['recall_accuracy','precision','f1','precision_accuracy', 'precision_recall', 'recall_accuracy_norm', 'precision_norm']
-if ablation:
-    filenames = ['ablation_'+f for f in filenames]
-    method_labels = {
-    'ours':'Ours',
-    'ours_timeLinear':'Ours w/ \nLinear Time'
     }
 
-def visualize_eval_breakdowns(data, names, without_types=False):
+filenames = ['recall_accuracy','precision','f1','precision_accuracy', 'precision_recall', 'recall_accuracy_norm', 'precision_norm']
+
+
+def visualize_eval_breakdowns(data, names, ablation=False):
     # fig, ax = plt.subplots(2,3)
     f1, ax_comp_t_tl = plt.subplots()
     f2, ax_prec = plt.subplots()
@@ -51,6 +51,8 @@ def visualize_eval_breakdowns(data, names, without_types=False):
     f6, ax_dest_acc_recl_norm = plt.subplots()
     f7, ax_prec_norm = plt.subplots()
     figs =[f1,f2,f3,f4,f5,f6,f7]
+
+    method_labels = get_method_labels(ablation)
 
     info = {}
 
@@ -203,12 +205,12 @@ def average_stats(stats_list):
     return avg
 
 
-dirs = ['logs0317newMetrics/']
+dirs = ['logs/']
 
 directory_list = []
 for dir in dirs:
     directory_list += [os.path.join(dir,d) for d in os.listdir(dir)]
-dir_out = 'visuals/all'
+dir_out = 'logs/visuals'
 if not os.path.exists(dir_out): os.makedirs(dir_out)
 
 data = []
@@ -226,7 +228,7 @@ for directory in directory_list:
 
 combined_names = []
 combined_names = list(set([n for n in names if n[-2]!='_']))
-combined_names = [n for n in combined_names if n in method_labels]
+combined_names = [n for n in combined_names if n in get_method_labels]
 combined_names.sort()
 
 gen_names = [n[:-2] if n[-2]=='_' else n for n in names]
@@ -252,10 +254,15 @@ def get_combined_data(name, filter_dataset):
 ## all data
 print('Persona datasets : ')
 combined_data = [get_combined_data(name, lambda x: not x.startswith('A')) for name in combined_names]
-figs, info = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
+figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=False)
 for i,fig in enumerate(figs):
     fig.savefig(os.path.join(dir_out,filenames[i]+'.jpg'))
 with open(os.path.join(dir_out,'info.json'), 'w') as f:
+    json.dump(info, f)
+figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=True)
+for i,fig in enumerate(figs):
+    fig.savefig(os.path.join(dir_out,'ablation_'+filenames[i]+'.jpg'))
+with open(os.path.join(dir_out,'ablation_info.json'), 'w') as f:
     json.dump(info, f)
 
 
