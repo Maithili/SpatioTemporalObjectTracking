@@ -18,30 +18,39 @@ change_names = ['taking out', 'other', 'putting away']
 
 method_colors = {
     'LastSeenAndStaticSemantic':'tab:green',
+    'StaticSemantic':'tab:green',
     'FremenStateConditioned':'tab:blue',
+    'Fremen':'tab:blue',
     'ours':'tab:red',
-    'ours_timeLinear':'tab:orange'
+    'ours_timeLinear':'tab:orange',
+    'ours_allEdges':'tab:pink'
 }
 
-def get_method_labels(ablation):
-    if ablation:
+def get_method_labels(ablation = ''):
+    if ablation.lower() == 'ablation_time':
         return {
         'ours':'Ours',
-        'ours_timeLinear':'Ours w/ \nLinear Time'
+        'ours_timeLinear':'Ours w/ \nLinear Time',
         }
-    return {
-    # 'StaticSemantic':'Static Priors only',
-    'LastSeenAndStaticSemantic':'Static\nSemantic',
-    'FremenStateConditioned':'FreMeN',
-    # 'Fremen':'FreMeN Priors only',
-    'ours':'Ours',
-    # 'ours_timeLinear':'Ours w/ \nLinear Time'
-    }
+    if ablation.lower() == 'ablation_edges':
+        return {
+        'ours':'Ours',
+        'ours_allEdges':'Ours w/ \n All Edges'
+        }
+    if ablation == '': 
+        return {'StaticSemantic':'Static\n Priors only',
+                'LastSeenAndStaticSemantic':'Static\nSemantic',
+                'FremenStateConditioned':'FreMEn',
+                'Fremen':'FreMeN\n Priors only',
+                'ours':'Ours',
+                'ours_timeLinear':'Ours w/ \nLinear Time',
+                'ours_allEdges':'Ours w/ \n All Edges'
+                }
 
-filenames = ['recall_accuracy','precision','f1','precision_accuracy', 'precision_recall', 'recall_accuracy_norm', 'precision_norm']
+filenames = ['recall_accuracy','precision','f1','precision_accuracy', 'precision_recall', 'recall_accuracy_norm', 'precision_norm', 'time_only_prediction']
 
 
-def visualize_eval_breakdowns(data, names, ablation=False):
+def visualize_eval_breakdowns(data, names, ablation=''):
     # fig, ax = plt.subplots(2,3)
     f1, ax_comp_t_tl = plt.subplots()
     f2, ax_prec = plt.subplots()
@@ -50,7 +59,8 @@ def visualize_eval_breakdowns(data, names, ablation=False):
     f5, ax_comp_t_prec = plt.subplots()
     f6, ax_dest_acc_recl_norm = plt.subplots()
     f7, ax_prec_norm = plt.subplots()
-    figs =[f1,f2,f3,f4,f5,f6,f7]
+    f8, ax_time_only = plt.subplots()
+    figs =[f1,f2,f3,f4,f5,f6,f7, f8]
 
     method_labels = get_method_labels(ablation)
 
@@ -61,7 +71,7 @@ def visualize_eval_breakdowns(data, names, ablation=False):
     width = offsets[1] - offsets[0] - 0.01
 
     for sample_num, sample_data in enumerate(data):
-        if sample_data is None:
+        if sample_data is None or names[sample_num] not in method_labels:
             continue
 
         quality_steps = len(sample_data['precision_breakdown'])
@@ -106,11 +116,18 @@ def visualize_eval_breakdowns(data, names, ablation=False):
             ax_comp_tl_prec.plot(completeness_tl[i], precisions[i], 'x', markersize=20, markeredgewidth = 5, label=label, color=method_colors[names[sample_num]], alpha=alphas[i])
             ax_comp_t_prec.plot(completeness_t[i], precisions[i], 'x', markersize=20, markeredgewidth = 5, label=label, color=method_colors[names[sample_num]], alpha=alphas[i])
             
+        ax_time_only.bar(sample_num-0.21, sample_data['timeonly_breakdown_direct']['correct']/1080, color=green-greener*0.3, width=0.4)
+        ax_time_only.bar(sample_num-0.21, sample_data['timeonly_breakdown_direct']['wrong']/1080, bottom=sample_data['timeonly_breakdown_direct']['correct']/1080, color=red-redder*0.3, width=0.4)
+        ax_time_only.bar(sample_num+0.21, sample_data['timeonly_breakdown_playahead']['correct']/1080, color=green-greener*0.3, width=0.4)
+        ax_time_only.bar(sample_num+0.21, sample_data['timeonly_breakdown_playahead']['wrong']/1080, bottom=sample_data['timeonly_breakdown_playahead']['correct']/1080, color=red-redder*0.3, width=0.4)
+
         info[names[sample_num]] = {}
         info[names[sample_num]]['precision'] = precisions
         info[names[sample_num]]['recall'] = completeness_t
         info[names[sample_num]]['destination_accuracy'] = completeness_tl
         info[names[sample_num]]['f1_score'] = f1
+        info[names[sample_num]]['time_only_accuracy'] = {'direct':sample_data['timeonly_breakdown_direct']['correct']/(sample_data['timeonly_breakdown_direct']['correct']+sample_data['timeonly_breakdown_direct']['wrong']),
+                                                         'direct':sample_data['timeonly_breakdown_playahead']['correct']/(sample_data['timeonly_breakdown_playahead']['correct']+sample_data['timeonly_breakdown_playahead']['wrong'])}
 
 
     ax_f1.set_xticks(np.arange(len(names)))
@@ -159,13 +176,22 @@ def visualize_eval_breakdowns(data, names, ablation=False):
     ax_dest_acc_recl_norm.set_xticks(np.arange(len(names)))
     ax_dest_acc_recl_norm.tick_params(axis = 'y', labelsize=30)
     ax_dest_acc_recl_norm.tick_params(axis = 'x', labelsize=40)
+    ax_dest_acc_recl_norm.set_ylim([ax_dest_acc_recl_norm.get_ylim()[0], ax_dest_acc_recl_norm.get_ylim()[1]+0.12])
     # ax_dest_acc_recl_norm.set_title('Recall & Destination Accuracy', fontsize=30)
 
+    ax_time_only.legend(fontsize=35)
+    ax_time_only.set_xticks(np.arange(len(names)))
+    ax_time_only.set_ylabel('Num. changes per step', fontsize=35)
+    ax_time_only.set_xticklabels([method_labels[n] for n in names], fontsize=45)
+    ax_time_only.tick_params(axis = 'y', labelsize=30)
+    ax_time_only.tick_params(axis = 'x', labelsize=40)
+    # ax_time_only.set_title('Time-based predictions', fontsize=30)
+
     for fig in figs:
-        fig.set_size_inches(12,10)
+        fig.set_size_inches(25,10)
         fig.tight_layout()
 
-    f3.set_size_inches(15,8)
+    f3.set_size_inches(25,8)
     f3.tight_layout()
 
     f4.set_size_inches(12,12)
@@ -173,7 +199,7 @@ def visualize_eval_breakdowns(data, names, ablation=False):
     f5.set_size_inches(12,12)
     f5.tight_layout()
     
-    if ablation:
+    if ablation.startswith('ablation'):
         for fig in figs:
             fig.set_size_inches(8,10)
             fig.tight_layout()
@@ -202,6 +228,8 @@ def average_stats(stats_list):
         'by_lookahead' : [[ sum([sl['completeness_breakdown']['by_lookahead'][s][c] for sl in stats_list])/num_stats for c in range(3)]for s in range(lookahead_steps)],
         'by_change_type' : [[ sum([sl['completeness_breakdown']['by_change_type'][t][c] for sl in stats_list])/num_stats for c in range(3)]for t in range(3)]
     }
+    avg['timeonly_breakdown_direct'] = {k:sum([sl['timeonly_breakdown_direct'][k] for sl in stats_list])/num_stats for k in ['correct','wrong']}
+    avg['timeonly_breakdown_playahead'] = {k:sum([sl['timeonly_breakdown_playahead'][k] for sl in stats_list])/num_stats for k in ['correct','wrong']}
     return avg
 
 
@@ -210,7 +238,7 @@ dirs = ['logs/']
 directory_list = []
 for dir in dirs:
     directory_list += [os.path.join(dir,d) for d in os.listdir(dir)]
-dir_out = 'logs/visuals'
+dir_out = dirs[0]+'visuals'
 if not os.path.exists(dir_out): os.makedirs(dir_out)
 
 data = []
@@ -226,15 +254,12 @@ for directory in directory_list:
         names.append(f.split('/')[-2])
         datasets.append(d)
 
-combined_names = []
-combined_names = list(set([n for n in names if n[-2]!='_']))
-combined_names = [n for n in combined_names if n in get_method_labels]
-combined_names.sort()
+
 
 gen_names = [n[:-2] if n[-2]=='_' else n for n in names]
 
 import random
-def get_combined_data(name, filter_dataset):
+def get_combined_data(name, filter_dataset=lambda _: True):
     data_list = [(ds+'-'+n, d) for d,n,ds in zip(data, gen_names, datasets) if n==name and filter_dataset(ds)]
     print([d[0] for d in data_list])
     cdata = average_stats([d[1] for d in data_list])
@@ -252,18 +277,18 @@ def get_combined_data(name, filter_dataset):
 #     plt.savefig(os.path.join(dir_out,dataset+'.jpg'))
 
 ## all data
-print('Persona datasets : ')
-combined_data = [get_combined_data(name, lambda x: not x.startswith('A')) for name in combined_names]
-figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=False)
-for i,fig in enumerate(figs):
-    fig.savefig(os.path.join(dir_out,filenames[i]+'.jpg'))
-with open(os.path.join(dir_out,'info.json'), 'w') as f:
-    json.dump(info, f)
-figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=True)
-for i,fig in enumerate(figs):
-    fig.savefig(os.path.join(dir_out,'ablation_'+filenames[i]+'.jpg'))
-with open(os.path.join(dir_out,'ablation_info.json'), 'w') as f:
-    json.dump(info, f)
+for ablation in ['']:#, 'ablation_time', 'ablation_edges']:
+    print(ablation)
+    combined_names = []
+    combined_names = list(set([n for n in names if n[-2]!='_']))
+    combined_names = [n for n in combined_names if n in get_method_labels(ablation)]
+    combined_names.sort()
+    combined_data = [get_combined_data(name) for name in combined_names]
+    figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=ablation)
+    for i,fig in enumerate(figs):
+        fig.savefig(os.path.join(dir_out,ablation+filenames[i]+'.jpg'))
+    with open(os.path.join(dir_out,ablation+'info.json'), 'w') as f:
+        json.dump(info, f)
 
 
 # print('Individual datasets : ')

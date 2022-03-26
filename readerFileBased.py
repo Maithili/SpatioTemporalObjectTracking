@@ -11,7 +11,7 @@ import random
 from encoders import time_external
 from torch.utils.data import DataLoader
 
-from utils import visualize_routine, visualize_parsed_routine
+from graph_visualizations import visualize_routine, visualize_parsed_routine
 
 INTERACTIVE = False
 

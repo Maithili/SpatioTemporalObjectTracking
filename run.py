@@ -15,8 +15,7 @@ import wandb
 from GraphTranslatorModule import GraphTranslatorModule
 from readerFileBased import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
-from utils import visualize_unconditional_datapoint, visualize_conditional_datapoint
-# from applications import evaluate_applications
+from graph_visualizations import visualize_unconditional_datapoint, visualize_conditional_datapoint
 from breakdown_evaluations import evaluate as evaluate_applications
 from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned
 
@@ -79,7 +78,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
 
     if cfg['LEARNED_TIME_PERIODS'] : print('Time Periods learned (hrs)',model.period_in_days*24)
 
-    evaluation_summary = evaluate_applications(model, data, cfg, output_dir, logger=wandb_logger.experiment)
+    evaluation_summary = evaluate_applications(model, data, cfg, output_dir, logger=wandb_logger.experiment, print_importance=True)
 
     with open (os.path.join(output_dir,'config.json'), 'w') as f:
         json.dump(cfg, f)

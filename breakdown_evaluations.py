@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
-from math import isnan
+from math import isnan, floor, ceil, sqrt
 import torch
 from torch.nn.functional import one_hot
 import wandb
@@ -19,7 +19,7 @@ white = np.array([1, 1, 1, 1])
 newcolors[:25, :] = white
 newcmp = ListedColormap(['white', 'tab:blue', 'tab:orange', 'tab:purple'])
 
-def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, deterministic_input_loop=False, node_names=[]):
+def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, deterministic_input_loop=False, node_names=[], print_importance=False):
     
     num_change_types = 3
 
@@ -28,9 +28,18 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
                'completeness_breakdown': {
                     'by_lookahead' : [[0,0,0] for _ in range(lookahead_steps)],
                     'by_change_type' : [[0,0,0] for _ in range(num_change_types)]
+                },
+                'timeonly_breakdown_direct':{
+                    'correct': 0,
+                    'wrong': 0
+                },
+                'timeonly_breakdown_playahead':{
+                    'correct': 0,
+                    'wrong': 0
                 }
               }
     figures = []
+    figures_imp = []
 
     results['all_moves'] = []
 
@@ -49,8 +58,30 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
 
         changes_output_all = torch.zeros(routine_length, num_nodes).to(bool)
         changes_gt_all = torch.zeros(routine_length, num_nodes).to(bool)
+
+        play_forward_edges = test_routines.collate_fn([routine[0]])['edges']
+        if print_importance: 
+            fig_imp, axs_imp = plt.subplots(int(floor(sqrt(routine_length))), int(ceil(routine_length/floor(sqrt(routine_length)))))
+            axs_imp = axs_imp.reshape(-1)
+
         for step in range(routine_length):
             data_list = [test_routines.collate_fn([routine[j]]) for j in range(step, min(step+lookahead_steps, routine_length))]
+
+            first_data = deepcopy(data_list[0])
+
+            def evaluate_timeonly(edges, results_dict):
+                first_data['edges'] = edges
+                _, details = model.step(first_data)
+                correct = deepcopy(details['gt']['location'][details['evaluate_node']] == details['output']['location'][details['evaluate_node']]).to(int)
+                wrong = deepcopy(details['gt']['location'][details['evaluate_node']] != details['output']['location'][details['evaluate_node']]).to(int)
+                results_dict['correct'] += float(correct.sum())
+                results_dict['wrong'] += float(wrong.sum())
+                return (details['output_probs']['location']).to(torch.float32)
+
+            _ = evaluate_timeonly(_erase_edges(first_data['edges'], first_data['dynamic_edges_mask']), results['timeonly_breakdown_direct'])
+            play_forward_edges = evaluate_timeonly(play_forward_edges, results['timeonly_breakdown_playahead'])
+            
+
             for i,data in enumerate(data_list):
                 assert i<lookahead_steps
                 if i>0:
@@ -59,6 +90,8 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
                 expected_gt = data['y_edges'].squeeze(-1).argmax(-1)
                 _, details = model.step(data)
                 
+                if i==0 and print_importance:
+                    axs_imp[step].imshow(details['importance_weights'].squeeze(0))
                 assert torch.equal(expected_gt, details['gt']['location'])
 
                 gt_tensor = details['gt']['location'][details['evaluate_node']]
@@ -83,6 +116,12 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
                     prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1]).to(torch.float32)
                 else:
                     prev_edges = (details['output_probs']['location']).to(torch.float32)
+
+        if print_importance:
+            fig_imp.set_size_inches(25,22)
+            fig_imp.tight_layout()
+            figures_imp.append(fig_imp)
+
 
         routine_future_steps = torch.zeros_like(routine_ground_truths)
         routine_futures = deepcopy(routine_ground_truths)
@@ -186,12 +225,12 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
         raw_data['futures'].append(routine_futures)
         # raw_data['change_types'].append(routine_change_types)
 
-    return results, raw_data, figures
+    return results, raw_data, figures + figures_imp
 
 
-def evaluate(model, data, cfg, output_dir, logger=None):
+def evaluate(model, data, cfg, output_dir, logger=None, print_importance=False):
     
-    info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.node_classes)
+    info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.node_classes, print_importance=print_importance)
     with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
         json.dump(info,f)
 

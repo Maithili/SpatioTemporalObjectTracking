@@ -5,10 +5,46 @@ from torch.nn import functional as F
 from torch import nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
-from evaluation import evaluate
+from utils import get_masks
 
-def _erase_edges(edges):
-    return torch.ones_like(edges)/edges.size()[-1]
+def _erase_edges(edges, dyn_mask):
+    empty_edges = torch.ones_like(edges)/edges.size()[-1]
+    empty_edges[dyn_mask == 0] = edges[dyn_mask == 0]
+    empty_edges = empty_edges/(empty_edges.sum(dim=-1).unsqueeze(-1).repeat(1,1,edges.size()[-1])+1e-8)
+    return empty_edges
+
+def evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor, tn_loss_weight):
+    masks = get_masks(gt_tensor, output_tensor, input_tensor)
+    result = {}
+    result['accuracy'] = (masks['correct'].sum())/torch.numel(gt_tensor)
+    if loss_tensor is not None:
+        result['losses'] = {}
+        if tn_loss_weight is not None:
+            not_tn = np.bitwise_not(masks['tn']).to(bool)
+            # important_losses = loss_tensor[cm_masks['tp']]
+            # unimportant_losses = loss_tensor[np.bitwise_or(cm_masks['fp'], cm_masks['fn'])]
+            important_losses = loss_tensor[not_tn]
+            unimportant_losses = loss_tensor[masks['tn']]
+            result['losses']['mean'] = (1 - tn_loss_weight) * important_losses.mean() + tn_loss_weight * unimportant_losses.mean()
+            result['losses']['important'] = important_losses.mean()
+            result['losses']['unimportant'] = unimportant_losses.mean()
+        else:
+            result['losses']['mean'] = loss_tensor.mean()
+        result['losses']['correct'] = loss_tensor[masks['correct']].sum()/masks['correct'].sum()
+        result['losses']['wrong'] = loss_tensor[masks['wrong']].sum()/masks['wrong'].sum()
+    return result
+
+def evaluate(gt, output, input, evaluate_node, losses=None, tn_loss_weight=None):
+    gt_tensor = gt[evaluate_node]
+    input_tensor = input[evaluate_node]
+    output_tensor = output[evaluate_node]
+    if losses is not None:
+        loss_tensor = losses[evaluate_node]
+        result = evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor, tn_loss_weight)
+    else:
+        result = evaluate_accuracy(gt_tensor, None, output_tensor, input_tensor, tn_loss_weight)
+    # result['CM'] = evaluate_precision_recall(gt_tensor, output_tensor, input_tensor)
+    return result
 
 THRESH=0.5
 def chebyshev_polynomials(edges, k):
@@ -64,7 +100,7 @@ class GraphTranslatorModule(LightningModule):
 
         self.hidden_influence_dim = 20
 
-        self.edges_update_input_dim = self.hidden_influence_dim*4 + 1 + self.context_len
+        self.edges_update_input_dim = self.hidden_influence_dim*5 + self.context_len
         
         if learned_time_periods:
             self.period_in_days = torch.nn.Parameter(torch.randn((1, 3)))
@@ -141,7 +177,7 @@ class GraphTranslatorModule(LightningModule):
                                         self.num_nodes,
                                         1])
         
-        return xe, nodes
+        return xe, nodes, imp.view(size=[batch_size, self.num_nodes, self.num_nodes]).detach().cpu().numpy()
 
     def forward(self, edges, nodes, context):
         """
@@ -164,9 +200,9 @@ class GraphTranslatorModule(LightningModule):
         assert self.num_nodes == num_t_nodes, (str(self.num_nodes) +'!='+ str(num_t_nodes))
 
         # for step in range(len(self.edge_feature_len)-1):
-        edges, nodes = self.graph_step(edges, nodes, context)
+        edges, nodes, imp = self.graph_step(edges, nodes, context)
 
-        return edges.squeeze(-1), nodes
+        return edges.squeeze(-1), nodes, imp
 
     def step(self, batch):
         edges = batch['edges']
@@ -180,7 +216,7 @@ class GraphTranslatorModule(LightningModule):
             context = self.context_from_time(time)
         else:
             context = batch['context']
-        edges_pred, nodes_pred = self(edges, nodes, context)
+        edges_pred, nodes_pred, imp = self(edges, nodes, context)
 
         assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
         edges_pred[dyn_edges == 0] = -float('inf')
@@ -205,6 +241,7 @@ class GraphTranslatorModule(LightningModule):
         output = {'class':self.inference_class(output_probs['class']),
                   'location':self.inference_location(edges_inferred)}
         
+
         # for result, name in zip([input, gt, losses, output], ['input', 'gt', 'losses', 'output']):
         #     assert list(result['class'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())
         #     assert list(result['location'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())
@@ -222,7 +259,8 @@ class GraphTranslatorModule(LightningModule):
                    'gt':gt, 
                    'losses':losses, 
                    'output':output, 
-                   'evaluate_node':evaluate_node}
+                   'evaluate_node':evaluate_node,
+                   'importance_weights':imp}
 
         return eval, details
 
@@ -231,7 +269,7 @@ class GraphTranslatorModule(LightningModule):
         dropout = False
         if random() < self.edge_dropout_prob:
             dropout = True
-            batch['edges'] = _erase_edges(batch['edges'])
+            batch['edges'] = _erase_edges(batch['edges'], batch['dynamic_edges_mask'])
         eval,_ = self.step(batch)
         self.log('Train accuracy',eval['accuracy'])
         self.log('Train losses',eval['losses'])
@@ -246,7 +284,7 @@ class GraphTranslatorModule(LightningModule):
         # self.log('Test CM metrics',eval['CM'])
         
         uncond_batch = batch
-        uncond_batch['edges'] = _erase_edges(uncond_batch['edges'])
+        uncond_batch['edges'] = _erase_edges(uncond_batch['edges'], batch['dynamic_edges_mask'])
         eval, details = self.step(uncond_batch)
         # self.log('Test accuracy (Unconditional)',eval['accuracy'])
         self.log('Test losses (Unconditional)',eval['losses'])
@@ -291,7 +329,7 @@ class GraphTranslatorModule(LightningModule):
         context_repeated = context.unsqueeze(1).unsqueeze(1).repeat([1,self.num_nodes,self.num_nodes,1])
 
         # batch_size x from_nodes x to_nodes x self.edges_update_input_dim
-        message_to_edge = torch.cat([all_influences,edges,context_repeated],dim=-1)
+        message_to_edge = torch.cat([all_influences,edge_influence,context_repeated],dim=-1)
         
         assert(len(message_to_edge.size())==4)
         assert(message_to_edge.size()[1]==self.num_nodes)

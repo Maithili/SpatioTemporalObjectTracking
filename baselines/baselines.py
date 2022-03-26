@@ -4,7 +4,6 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from evaluation import evaluate as common_evaluation
 
 class Baseline():
     def __init__(self):
@@ -32,7 +31,6 @@ class Baseline():
             'losses':{'location': None}, 
             'output':{'class':self.nodes.argmax(-1), 'location': result.squeeze(-1).argmax(-1)}, 
             'evaluate_node':self.evaluate_node}
-        # eval = self.evaluate(result)
         return None, details
 
 
@@ -40,8 +38,6 @@ class Baseline():
 class StateTimeConditionedBaseline(Baseline):
     def __init__(self):
         super().__init__()
-    def evaluate(self, output):
-        return common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node)
     # def log(self):
     #     combined_cm_metrics = {k:sum([e['CM'][k] for e in self.eval]) for k in self.eval[0]['CM'].keys()}
     #     print(combined_cm_metrics)
@@ -50,8 +46,6 @@ class StateTimeConditionedBaseline(Baseline):
 class TimeConditionedBaseline(Baseline):
     def __init__(self):
         super().__init__()
-    def evaluate(self, output):
-        return common_evaluation(gt=self.gt.squeeze(-1).argmax(-1), output=output.squeeze(-1).argmax(-1), input=self.edges.squeeze(-1).argmax(-1), evaluate_node=self.evaluate_node)
     # def log(self):
     #     return {'Test accuracy (Unconditional)':sum([e['accuracy'] for e in self.eval])/len(self.eval)}
 
@@ -93,7 +87,7 @@ class Fremen(TimeConditionedBaseline):
         return prior.unsqueeze(0).repeat(self.edges.size()[0],1,1)
 
 class FremenStateConditioned(StateTimeConditionedBaseline):
-    def __init__(self, spectral_components, dt, time_decay=40):
+    def __init__(self, spectral_components, dt, time_decay=30):
         super().__init__()
         self.spectral_components = spectral_components
         self.decay_exponent = np.exp(-dt / time_decay)
