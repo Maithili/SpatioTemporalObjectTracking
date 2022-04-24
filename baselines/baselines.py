@@ -87,7 +87,7 @@ class Fremen(TimeConditionedBaseline):
         return prior.unsqueeze(0).repeat(self.edges.size()[0],1,1)
 
 class FremenStateConditioned(StateTimeConditionedBaseline):
-    def __init__(self, spectral_components, dt, time_decay=30):
+    def __init__(self, spectral_components, dt, time_decay=60):
         super().__init__()
         self.spectral_components = spectral_components
         self.decay_exponent = np.exp(-dt / time_decay)

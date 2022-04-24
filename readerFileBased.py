@@ -1,5 +1,3 @@
-#!./.venv/bin/python
-
 import json
 import os
 import shutil
@@ -51,7 +49,7 @@ class CollateToDict():
         return data
 
 class DataSplit():
-    def __init__(self, routines_dir, time_encoder, dt, active_edges, idx_map, whole_routines=False):
+    def __init__(self, routines_dir, time_encoder, dt, active_edges, idx_map, whole_routines=False, max_num_files=None):
         self.time_encoder = time_encoder
         self.dt = dt
         self.active_edges = active_edges
@@ -61,6 +59,10 @@ class DataSplit():
         self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'time', 'change_type'])
         self.files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(os.path.join(self.routines_dir, name))]
         self.files.sort()
+        if max_num_files is not None:
+            assert max_num_files <= len(self.files)
+            self.files = self.files[:max_num_files]
+            self.idx_map = [(f,i) for f,i in self.idx_map if f+'.pt' in self.files]
 
     def num_samples(self):
         return len(self.idx_map)
@@ -102,7 +104,8 @@ class RoutinesDataset():
     def __init__(self, data_path, 
                  time_encoder = time_external, 
                  batch_size = 1,
-                 only_seen_edges = False):
+                 only_seen_edges = False,
+                 max_routines = (None, None)):
 
         with open(os.path.join(data_path, 'common_data.json')) as f:
             self.common_data = json.load(f)
@@ -129,11 +132,11 @@ class RoutinesDataset():
         
             
         # Generate train and test loaders
-        self.train = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['train_data_index_list'])
-        self.test = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['test_data_index_list'])
+        self.train = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['train_data_index_list'], max_num_files=max_routines[0])
+        self.test = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['test_data_index_list'], max_num_files=max_routines[1])
         self.test_routines = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['test_data_index_list'], whole_routines=True)
-        print(len(self.common_data['train_data_index_list']),' examples in train split.')
-        print(len(self.common_data['test_data_index_list']),' examples in test split.')
+        print(len(self.train),' examples in train split.')
+        print(len(self.test),' examples in test split.')
 
         # Infer parameters for the model
         model_data = self.test.collate_fn([self.test[0]])

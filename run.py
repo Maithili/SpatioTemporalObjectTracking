@@ -1,5 +1,6 @@
-#!./.venv/bin/python
+#! 
 
+from multiprocessing import log_to_stderr
 import yaml
 import json
 import os
@@ -24,8 +25,8 @@ random.seed(23435)
 from numpy import random as nrandom
 nrandom.seed(23435)
 
-def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[]):
-    output_dir = os.path.join('logs', group,cfg['NAME'])
+def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[], logs_dir='logs'):
+    output_dir = os.path.join(logs_dir, group,cfg['NAME'])
     if os.path.exists(output_dir):
         n = 1
         new_dir = output_dir + "_"+str(n)
@@ -41,6 +42,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
     wandb_logger.experiment.config.update(cfg)
     
 
+
     if read_ckpt:
         checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
         model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
@@ -52,9 +54,9 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                                             tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
                                                             learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                                             hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
+        evaluation_summary = evaluate_applications(model, data, cfg, output_dir, logger=wandb_logger.experiment, print_importance=True)
 
     else:
-
         model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                                 node_feature_len=data.params['n_len'],
                                 context_len=data.params['c_len'],
@@ -63,27 +65,36 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                 tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
                                 learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                 hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
+
+        epochs = cfg['EPOCHS'] if isinstance(cfg['EPOCHS'],list) else [cfg['EPOCHS']]
+        done_epochs = 0
+
+        for epoch in epochs:
+            if output_dir[-2] == '_':
+                output_dir_new = output_dir[:-2]+'_'+str(epoch)+'epochs'+output_dir[-2:]
+            else:
+                output_dir_new = output_dir+'_'+str(epoch)+'epochs'
+            os.makedirs(output_dir_new)
+            if write_ckpt:
+                ckpt_callback = ModelCheckpoint(dirpath=checkpoint_dir)
+                trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch-done_epochs, logger=wandb_logger, log_every_n_steps=5, callbacks=[ckpt_callback])
+
+            else:
+                trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch-done_epochs, logger=wandb_logger, log_every_n_steps=5)
+
+            trainer.fit(model, data.get_train_loader())
+            trainer.test(model, data.get_test_loader())
+            done_epochs = epoch
+
+            evaluation_summary = evaluate_applications(model, data, cfg, output_dir_new, logger=wandb_logger.experiment, print_importance=True)
+
+
+            with open (os.path.join(output_dir_new,'config.json'), 'w') as f:
+                json.dump(cfg, f)
+
+            print('Outputs saved at ',output_dir_new)
     
-        if write_ckpt:
-            ckpt_callback = ModelCheckpoint(dirpath=checkpoint_dir)
-            trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5, callbacks=[ckpt_callback])
-
-        else:
-            trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=cfg['EPOCHS'], logger=wandb_logger, log_every_n_steps=5)
-
-        wandb_logger.watch(model, log='gradients', log_freq=20)
-
-        trainer.fit(model, data.get_train_loader())
-        trainer.test(model, data.get_test_loader())
-
-    if cfg['LEARNED_TIME_PERIODS'] : print('Time Periods learned (hrs)',model.period_in_days*24)
-
-    evaluation_summary = evaluate_applications(model, data, cfg, output_dir, logger=wandb_logger.experiment, print_importance=True)
-
-    with open (os.path.join(output_dir,'config.json'), 'w') as f:
-        json.dump(cfg, f)
-
-    print('Outputs saved at ',output_dir)
+    
     if INTERACTIVE:
         visualize_unconditional_datapoint(model, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
         visualize_conditional_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
@@ -92,7 +103,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
 
 
 
-def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False, tags=[]):
+def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False, tags=[], train_days=None, logs_dir='logs'):
     
     if cfg['NAME'] is None:
         cfg['NAME'] = os.path.basename(data_dir)+'_trial'
@@ -106,7 +117,8 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     data = RoutinesDataset(data_path=os.path.join(data_dir,'processed'), 
                            time_encoder=time_encoding, 
                            batch_size=cfg['BATCH_SIZE'],
-                           only_seen_edges = cfg['ONLY_SEEN_EDGES'])
+                           only_seen_edges = cfg['ONLY_SEEN_EDGES'],
+                           max_routines = (train_days, None))
     
     group = os.path.basename(data_dir)
 
@@ -114,7 +126,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
         cf = get_cooccurence_frequency(data)
         spec = get_spectral_components(data, periods_mins=[float('inf'), 60*24, 60*24/2])
         for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
-            output_dir = os.path.join('logs', group,baseline.__class__.__name__)
+            output_dir = os.path.join(logs_dir, group,baseline.__class__.__name__)
             if os.path.exists(output_dir):
                 n = 1
                 new_dir = output_dir + "_"+str(n)
@@ -142,7 +154,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
                 visualize_conditional_datapoint(baseline, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
             wandb.finish()
     else:
-        run_model(data, group=group, checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags)
+        run_model(data, group=group, checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags, logs_dir=logs_dir)
 
 
 
@@ -155,12 +167,14 @@ if __name__ == '__main__':
     parser.add_argument('--path', type=str, default='data/Persona0219/hard_worker', help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
+    parser.add_argument('--train_days', type=int, help='Number of routines to train on.')
     parser.add_argument('--name', type=str, help='Name of run.')
     parser.add_argument('--tags', type=str, help='Tags for the run separated by a comma \',\'')
     parser.add_argument('--baselines', action='store_true')
     parser.add_argument('--ckpt_dir', type=str, help='Path to checkpoint file')
     parser.add_argument('--read_ckpt', action='store_true')
     parser.add_argument('--write_ckpt', action='store_true')
+    parser.add_argument('--logs_dir', type=str, default='logs', help='Path to store putputs.')
 
     args = parser.parse_args()
 
@@ -177,6 +191,8 @@ if __name__ == '__main__':
     if args.name is not None:
         cfg['NAME'] = args.name
 
+    cfg['MAX_TRAINING_SAMPLES'] = args.train_days
     tags = args.tags.split(',') if args.tags is not None else []
 
-    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt, tags = tags)
+    print(args.logs_dir)
+    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt, tags = tags, train_days=args.train_days, logs_dir=args.logs_dir)

@@ -1,7 +1,9 @@
+from copy import deepcopy
 import os
+import argparse
 import glob
+import random
 import json
-from unicodedata import name
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as clrs
@@ -23,28 +25,41 @@ method_colors = {
     'Fremen':'tab:blue',
     'ours':'tab:red',
     'ours_timeLinear':'tab:orange',
-    'ours_allEdges':'tab:pink'
+    'ours_allEdges':'tab:pink',
+    'ours_3epochs':'tab:orange',
+    'ours_5epochs':'tab:orange',
+    'ours_10epochs':'tab:orange',
+    'ours_15epochs':'tab:pink',
+    'ours_20epochs':'tab:pink',
+    'ours_25epochs':'tab:pink',
+    'ours_30epochs':'tab:pink'
 }
 
 def get_method_labels(ablation = ''):
-    if ablation.lower() == 'ablation_time':
+    if ablation.lower() == 'ablation_time_':
         return {
         'ours':'Ours',
         'ours_timeLinear':'Ours w/ \nLinear Time',
         }
-    if ablation.lower() == 'ablation_edges':
+    if ablation.lower() == 'ablation_edges_':
         return {
         'ours':'Ours',
         'ours_allEdges':'Ours w/ \n All Edges'
         }
     if ablation == '': 
-        return {'StaticSemantic':'Static\n Priors only',
+        return {
+                # 'StaticSemantic':'Static\n Priors only',
                 'LastSeenAndStaticSemantic':'Static\nSemantic',
                 'FremenStateConditioned':'FreMEn',
-                'Fremen':'FreMeN\n Priors only',
-                'ours':'Ours',
-                'ours_timeLinear':'Ours w/ \nLinear Time',
-                'ours_allEdges':'Ours w/ \n All Edges'
+                # 'Fremen':'FreMeN\n Priors only',
+                'ours':'Ours w/ \n3 epochs',
+                'ours_3epochs':'Ours w/ \n 3 epochs',
+                'ours_5epochs':'Ours w/ \n 5 epochs',
+                'ours_10epochs':'Ours w/ \n 10 epochs',
+                'ours_15epochs':'Ours w/ \n 15 epochs',
+                'ours_20epochs':'Ours w/ \n 20 epochs',
+                'ours_25epochs':'Ours w/ \n 25 epochs',
+                'ours_30epochs':'Ours w/ \n 30 epochs',
                 }
 
 filenames = ['recall_accuracy','precision','f1','precision_accuracy', 'precision_recall', 'recall_accuracy_norm', 'precision_norm', 'time_only_prediction']
@@ -135,18 +150,19 @@ def visualize_eval_breakdowns(data, names, ablation=''):
     ax_f1.tick_params(axis = 'y', labelsize=20)
     ax_f1.tick_params(axis = 'x', labelsize=30)
     # ax_f1.set_title('F-1 Score', fontsize=30)
+    ax_f1.set_ylim([0,1])
 
     ax_comp_t_prec.legend(fontsize=30)
     ax_comp_t_prec.set_xlabel('Recall', fontsize=30)
     ax_comp_t_prec.set_ylabel('Precision', fontsize=30)
-    ax_comp_t_prec.set_xlim([0,0.5])
-    ax_comp_t_prec.set_ylim([0,0.5])
+    ax_comp_t_prec.set_xlim([0,1])
+    ax_comp_t_prec.set_ylim([0,1])
 
     ax_comp_tl_prec.legend(fontsize=30)
     ax_comp_tl_prec.set_xlabel('Destination Accuracy', fontsize=30)
     ax_comp_tl_prec.set_ylabel('Precision', fontsize=30)
-    # ax_comp_tl_prec.set_xlim([0,1])
-    # ax_comp_tl_prec.set_ylim([0,1])
+    ax_comp_tl_prec.set_xlim([0,1])
+    ax_comp_tl_prec.set_ylim([0,1])
     
     ax_comp_t_tl.legend(fontsize=35)
     ax_comp_t_tl.set_xticks(np.arange(len(names)))
@@ -163,6 +179,7 @@ def visualize_eval_breakdowns(data, names, ablation=''):
     ax_prec.tick_params(axis = 'y', labelsize=30)
     ax_prec.tick_params(axis = 'x', labelsize=40)
     # ax_prec.set_title('Correct fraction of predictions', fontsize=30)
+    # ax_prec.set_ylim([0,10])
 
     ax_prec_norm.legend(fontsize=35)
     ax_prec_norm.set_xticks(np.arange(len(names)))
@@ -170,6 +187,7 @@ def visualize_eval_breakdowns(data, names, ablation=''):
     ax_prec_norm.tick_params(axis = 'y', labelsize=30)
     ax_prec_norm.tick_params(axis = 'x', labelsize=40)
     # ax_prec_norm.set_title('Precision', fontsize=30)
+    ax_prec_norm.set_ylim([0,1])
 
     ax_dest_acc_recl_norm.legend(fontsize=35)
     ax_dest_acc_recl_norm.set_xticklabels([method_labels[n] for n in names], fontsize=45)
@@ -178,6 +196,7 @@ def visualize_eval_breakdowns(data, names, ablation=''):
     ax_dest_acc_recl_norm.tick_params(axis = 'x', labelsize=40)
     ax_dest_acc_recl_norm.set_ylim([ax_dest_acc_recl_norm.get_ylim()[0], ax_dest_acc_recl_norm.get_ylim()[1]+0.12])
     # ax_dest_acc_recl_norm.set_title('Recall & Destination Accuracy', fontsize=30)
+    ax_dest_acc_recl_norm.set_ylim([0,1])
 
     ax_time_only.legend(fontsize=35)
     ax_time_only.set_xticks(np.arange(len(names)))
@@ -212,6 +231,7 @@ def visualize_eval_breakdowns(data, names, ablation=''):
         f5.set_size_inches(8,8)
         f5.tight_layout()
 
+
     return figs, info
 
 
@@ -232,75 +252,136 @@ def average_stats(stats_list):
     avg['timeonly_breakdown_playahead'] = {k:sum([sl['timeonly_breakdown_playahead'][k] for sl in stats_list])/num_stats for k in ['correct','wrong']}
     return avg
 
-
-dirs = ['logs/']
-
-directory_list = []
-for dir in dirs:
-    directory_list += [os.path.join(dir,d) for d in os.listdir(dir)]
-dir_out = dirs[0]+'visuals'
-if not os.path.exists(dir_out): os.makedirs(dir_out)
-
-data = []
-names = []
-datasets = []
-for directory in directory_list:
-    d = os.path.basename(directory)
-    files=glob.glob(os.path.join(directory,'*','evaluation.json'))
-    files.sort()
-    for f in files:
-        with open(f) as openfile:
-            data.append(json.load(openfile))
-        names.append(f.split('/')[-2])
-        datasets.append(d)
-
-
-
-gen_names = [n[:-2] if n[-2]=='_' else n for n in names]
-
-import random
-def get_combined_data(name, filter_dataset=lambda _: True):
-    data_list = [(ds+'-'+n, d) for d,n,ds in zip(data, gen_names, datasets) if n==name and filter_dataset(ds)]
-    print([d[0] for d in data_list])
-    cdata = average_stats([d[1] for d in data_list])
-    # return (random.choice(data_list))[1]
-    return cdata
-
-# ## per dataset
-# print('Datasets : ')
-# for dataset in set(datasets):
-#     print('Plotting :',dataset)
-#     combined_data = [get_combined_data(name, lambda x: x==dataset) for name in combined_names]
-#     # fig = visualize_eval_breakdowns(combined_data, combined_names)
-#     # plt.savefig(os.path.join(dir_out,dataset+'_with_types.jpg'))
-#     fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
-#     plt.savefig(os.path.join(dir_out,dataset+'.jpg'))
-
-## all data
-for ablation in ['']:#, 'ablation_time', 'ablation_edges']:
-    print(ablation)
-    combined_names = []
-    combined_names = list(set([n for n in names if n[-2]!='_']))
-    combined_names = [n for n in combined_names if n in get_method_labels(ablation)]
-    combined_names.sort()
-    combined_data = [get_combined_data(name) for name in combined_names]
-    figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=ablation)
-    for i,fig in enumerate(figs):
-        fig.savefig(os.path.join(dir_out,ablation+filenames[i]+'.jpg'))
-    with open(os.path.join(dir_out,ablation+'info.json'), 'w') as f:
-        json.dump(info, f)
+def result_string_from_info(info):
+    info_averages = {kk:{k:np.mean(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()}
+    info_mins = {kk:{k:min(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()}
+    info_maxs = {kk:{k:max(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()}
+    info_stds = {kk:{k:np.std(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()}
+    methods = info.keys()
+    string = ''
+    for res in ['precision', 'recall', 'destination_accuracy', 'f1_score']:
+        string += ('\n----- '+ res +' -----')
+        for m in methods:
+            string += ('\n{} : {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}'.format(m+' '*(25-len(m)), info_mins[m][res], info_averages[m][res]-info_stds[m][res], info_averages[m][res], info_averages[m][res]+info_stds[m][res], info_maxs[m][res]))
+    string += '\n\n\n\n'
+    string += '\n precision  recall  destination_accuracy  f1_score'
+    second_best = {'precision':0,  'recall':0,  'destination_accuracy':0,  'f1_score':0}
+    for m in methods:
+        if m != 'ours':
+            for k in second_best.keys():
+                second_best[k] = max(second_best[k], info_averages[m][k])
+        string += ('\n{} : {:.4f} & {:.4f} & {:.4f} & {:.4f} \\'.format(m+' '*(25-len(m)), info_averages[m]['precision'], info_averages[m]['recall'], info_averages[m]['destination_accuracy'], info_averages[m]['f1_score']))
+    # m = 'second_best'
+    # string += ('\n{} : {:.4f} & {:.4f} & {:.4f} & {:.4f} \\'.format(m+' '*(25-len(m)), second_best['precision'], second_best['recall'], second_best['destination_accuracy'], second_best['f1_score']))
+    # perc_imp = [(info_averages['ours'][k] - second_best[k])/second_best[k] * 100 for k in ['precision', 'recall', 'destination_accuracy', 'f1_score']]
+    # m = 'perc_improvement'
+    # string += ('\n{} : {:2.2f} & {:2.2f} & {:2.2f} & {:2.2f} \\'.format(m+' '*(25-len(m)), perc_imp[0], perc_imp[1], perc_imp[2], perc_imp[3]))
+    return string
 
 
-# print('Individual datasets : ')
-# combined_data = [get_combined_data(name, lambda x: x.startswith('A')) for name in combined_names]
-# # fig = visualize_eval_breakdowns(combined_data, combined_names)
-# # plt.savefig(os.path.join(dir_out,'allIndividual_with_types.jpg'))
-# fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
-# plt.savefig(os.path.join(dir_out,'allIndividual.jpg'))
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Run model on routines.')
+    parser.add_argument('--paths', type=str, default='logs/', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--combined_dir_out', type=str, help='Combining data from all dirs')
+    args = parser.parse_args()
 
-# print('Persona datasets : ')
-# combined_data = [get_combined_data(name, lambda x: not x.startswith('A')) for name in combined_names]
-# # fig = visualize_eval_breakdowns(combined_data, combined_names)
-# # plt.savefig(os.path.join(dir_out,'allPersona_with_types.jpg'))
-# fig = visualize_eval_breakdowns(combined_data, combined_names, without_types=True)
-# plt.savefig(os.path.join(dir_out,'allPersona.jpg'))
+    f_f1, ax_f1 = plt.subplots()
+    f_pr, ax_pr = plt.subplots()
+    f_rc, ax_rc = plt.subplots()
+    f_da, ax_da = plt.subplots()
+
+    dirs = args.paths.split(',')
+    master_combined_data = {k:{'precision':[], 'recall':[], 'destination_accuracy':[], 'f1_score':[]} for k in method_colors.keys()}
+
+    for dir in dirs:
+        if not dir.endswith('/'):
+            dir += '/'
+        directory_list = []
+        directory_list += [os.path.join(dir,d) for d in os.listdir(dir)]
+        dir_out = dir+'all'
+        if not os.path.exists(dir_out): os.makedirs(dir_out)
+
+        data = []
+        names = []
+        datasets = []
+        for directory in directory_list:
+            d = os.path.basename(directory)
+            files=glob.glob(os.path.join(directory,'*','evaluation.json'))
+            files.sort()
+            for f in files:
+                with open(f) as openfile:
+                    data.append(json.load(openfile))
+                names.append(f.split('/')[-2])
+                datasets.append(d)
+
+        if len(datasets) == 0:
+            continue
+
+
+        gen_names = [n[:-2] if n[-2]=='_' else n for n in names]
+
+        def get_combined_data(name, filter_dataset=lambda _: True):
+            data_list = [(ds+'-'+n, d) for d,n,ds in zip(data, gen_names, datasets) if n==name and filter_dataset(ds)]
+            cdata = average_stats([d[1] for d in data_list])
+            return cdata
+
+        ## per dataset
+        print('Datasets : ')
+        for dataset in set(datasets):
+            ablation = ''
+            print('Plotting :',dataset)
+            combined_names = []
+            combined_names = list(set([n for n in names if n[-2]!='_']))
+            combined_names = [n for n in combined_names if n in get_method_labels(ablation)]
+            combined_names.sort()
+            print(combined_names)
+            combined_data = [get_combined_data(name, lambda x: x==dataset) for name in combined_names]
+            figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=ablation)
+            for i,fig in enumerate(figs):
+                fig.savefig(os.path.join(dir_out.replace('all',dataset),filenames[i]+'.jpg'))
+            with open(os.path.join(dir_out.replace('all',dataset),'info.json'), 'w') as f:
+                json.dump(info, f)
+            with open(os.path.join(dir_out.replace('all',dataset),'result.txt'), 'w') as f:
+                f.write(result_string_from_info(info))
+            info_averages = deepcopy({kk:{k:np.mean(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()})
+
+        ## all data
+        for ablation in ['']: #, 'ablation_time_', 'ablation_edges_']:
+            print(ablation)
+            combined_names = []
+            combined_names = list(set([n for n in names if n[-2]!='_']))
+            combined_names = [n for n in combined_names if n in get_method_labels(ablation)]
+            combined_names.sort()
+            combined_data = [get_combined_data(name, lambda x: True) for name in combined_names]
+            figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=ablation)
+            for i,fig in enumerate(figs):
+                fig.savefig(os.path.join(dir_out,ablation+filenames[i]+'.jpg'))
+            with open(os.path.join(dir_out,ablation+'info.json'), 'w') as f:
+                json.dump(info, f)
+            with open(os.path.join(dir_out,ablation+'result.txt'), 'w') as f:
+                f.write(result_string_from_info(info))
+
+        print(info_averages.keys())
+        for m in info_averages.keys():
+            for res in info_averages[m].keys():
+                master_combined_data[m][res].append(info_averages[m][res])
+
+    for m in info_averages:
+        ax_f1.plot(master_combined_data[m]['f1_score'], color=method_colors[m], label=m)
+        ax_pr.plot(master_combined_data[m]['precision'], color=method_colors[m], label=m)
+        ax_rc.plot(master_combined_data[m]['recall'], color=method_colors[m], label=m)
+        ax_da.plot(master_combined_data[m]['destination_accuracy'], color=method_colors[m], label=m)
+
+
+    labels = [os.path.basename(dir) for dir in dirs]
+    for ax in [ax_f1, ax_pr, ax_rc, ax_da]:
+        ax.set_xticks(np.arange(len(labels)))
+        ax.set_xticklabels(labels)
+        ax.set_xlabel('Number of training days')
+        ax.legend()
+
+    if args.combined_dir_out:
+        f_f1.savefig(os.path.join(args.combined_dir_out,'f1-score.jpg'))
+        f_pr.savefig(os.path.join(args.combined_dir_out,'precision.jpg'))
+        f_rc.savefig(os.path.join(args.combined_dir_out,'recall.jpg'))
+        f_da.savefig(os.path.join(args.combined_dir_out,'destination-accuracy.jpg'))
