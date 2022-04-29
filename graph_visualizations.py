@@ -22,7 +22,8 @@ category_colors = {
     "Appliances": "#996888",
     # dynamic
     "Props": "#C99DA3",
-    "placable_objects": "#C99DA3"
+    "placable_objects": "#C99DA3",
+    "placable_object": "#C99DA3"
 }
 
 node_colors_by_active = ["#C99DA3", "#996888"]
@@ -238,6 +239,6 @@ def visualize_routine(routine, sparsify=False):
         nx.draw_networkx(G, pos=pos, ax=axs[i], edge_cmap=plt.cm.Blues, edge_vmin = 0 ,edge_vmax = 1, node_size=300, node_color=node_colors, labels = node_labels)
         time_h = human_readable_from_external(time_external(t))
         axs[i].set_title(time_h)
-    plt.show()
-    # plt.savefig('temp.jpg')
+    # plt.show()
+    plt.savefig('temp.jpg')
     

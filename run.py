@@ -1,5 +1,3 @@
-#! 
-
 from multiprocessing import log_to_stderr
 import yaml
 import json
@@ -76,7 +74,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                 output_dir_new = output_dir+'_'+str(epoch)+'epochs'
             os.makedirs(output_dir_new)
             if write_ckpt:
-                ckpt_callback = ModelCheckpoint(dirpath=checkpoint_dir)
+                ckpt_callback = ModelCheckpoint(dirpath=output_dir_new)
                 trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch-done_epochs, logger=wandb_logger, log_every_n_steps=5, callbacks=[ckpt_callback])
 
             else:
@@ -93,6 +91,9 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                 json.dump(cfg, f)
 
             print('Outputs saved at ',output_dir_new)
+
+            if write_ckpt:
+                torch.save(model.state_dict(), os.path.join(output_dir_new,'weights.pt'))
     
     
     if INTERACTIVE:

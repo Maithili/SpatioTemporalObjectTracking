@@ -29,10 +29,18 @@ method_colors = {
     'ours_3epochs':'tab:orange',
     'ours_5epochs':'tab:orange',
     'ours_10epochs':'tab:orange',
-    'ours_15epochs':'tab:pink',
-    'ours_20epochs':'tab:pink',
-    'ours_25epochs':'tab:pink',
-    'ours_30epochs':'tab:pink'
+    'ours_15epochs':'tab:orange',
+    'ours_20epochs':'tab:orange',
+    'ours_25epochs':'tab:orange',
+    'ours_30epochs':'tab:orange',
+    'ours_biggerHiddenLayer_3epochs': 'tab:pink',
+    'ours_biggerHiddenLayer_5epochs': 'tab:pink',
+    'ours_biggerHiddenLayer_10epochs': 'tab:pink',
+    'ours_biggerHiddenLayer_15epochs': 'tab:pink',
+    'ours_biggerHiddenLayer_20epochs': 'tab:pink',
+    'ours_biggerHiddenLayer_25epochs': 'tab:pink',
+    'ours_biggerHiddenLayer_30epochs': 'tab:pink',
+
 }
 
 def get_method_labels(ablation = ''):
@@ -60,6 +68,13 @@ def get_method_labels(ablation = ''):
                 'ours_20epochs':'Ours w/ \n 20 epochs',
                 'ours_25epochs':'Ours w/ \n 25 epochs',
                 'ours_30epochs':'Ours w/ \n 30 epochs',
+                'ours_biggerHiddenLayer_3epochs':'Ours w/ \n big hidden layer \n 3 epochs',
+                'ours_biggerHiddenLayer_5epochs':'Ours w/ \n big hidden layer \n 5 epochs',
+                'ours_biggerHiddenLayer_10epochs':'Ours w/ \n big hidden layer \n 10 epochs',
+                'ours_biggerHiddenLayer_15epochs':'Ours w/ \n big hidden layer \n 15 epochs',
+                'ours_biggerHiddenLayer_20epochs':'Ours w/ \n big hidden layer \n 20 epochs',
+                'ours_biggerHiddenLayer_25epochs':'Ours w/ \n big hidden layer \n 25 epochs',
+                'ours_biggerHiddenLayer_30epochs':'Ours w/ \n big hidden layer \n 30 epochs',
                 }
 
 filenames = ['recall_accuracy','precision','f1','precision_accuracy', 'precision_recall', 'recall_accuracy_norm', 'precision_norm', 'time_only_prediction']
@@ -381,6 +396,7 @@ if __name__ == '__main__':
         ax.legend()
 
     if args.combined_dir_out:
+        os.makedirs(args.combined_dir_out)
         f_f1.savefig(os.path.join(args.combined_dir_out,'f1-score.jpg'))
         f_pr.savefig(os.path.join(args.combined_dir_out,'precision.jpg'))
         f_rc.savefig(os.path.join(args.combined_dir_out,'recall.jpg'))

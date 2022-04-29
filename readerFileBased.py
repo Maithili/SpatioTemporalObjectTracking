@@ -318,7 +318,6 @@ class ProcessDataset():
                 pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'obj_in_use':obj_in_use[data_idx], 'change_type':change_type})
             prev_edges = edges[data_idx]
             prev_nodes = nodes[data_idx]
-            prev_t = t
         return pairwise_samples
 
 

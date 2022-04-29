@@ -82,7 +82,7 @@ def clock_time_with_weekend_bit(t, weekend_days):
     return torch.Tensor([weekend, hrs, mins])
 
 class TimeEncodingOptions():
-    def __init__(self, weekend_days):
+    def __init__(self, weekend_days=None):
         self.weekend_days = weekend_days
     def __call__(self, encoder_option):
         if encoder_option == 'sine_uninformed':

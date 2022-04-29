@@ -240,4 +240,6 @@ def evaluate(model, data, cfg, output_dir, logger=None, print_importance=False):
     for i,fig  in enumerate(figures):
         fig.savefig(os.path.join(output_dir,'figures',str(i)+'.jpg'))
 
+    plt.close('all')
+
     return info
