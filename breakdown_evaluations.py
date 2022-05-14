@@ -42,6 +42,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
     figures_imp = []
 
     results['all_moves'] = []
+    results['num_changes'] = [[] for _ in range(lookahead_steps)]
 
     num_routines = len(test_routines)
     for (routine, additional_info) in test_routines:
@@ -139,6 +140,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
         for ls in range(lookahead_steps):
             changes_output_for_step = deepcopy(routine_output_step  <= ls)
             changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
+            # results['num_changes'][ls].append(list(changes_gt_for_step.sum(-1).reshape(-1)))
             changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
             changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
             results['precision_breakdown'][ls][0] += int(changes_output_and_gt.sum())

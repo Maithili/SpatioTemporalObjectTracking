@@ -1,6 +1,6 @@
 NAME: null
 TIME_ENCODING: sine_informed
-EPOCHS: [3,5,10,15]
+EPOCHS: [25, 30, 35, 40, 50]
 BATCH_SIZE: 1
 ONLY_SEEN_EDGES: False
 DATA_INFO: null

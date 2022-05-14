@@ -258,10 +258,9 @@ class ProcessDataset():
                     viz = (inp == 'y')
                 self.home_graph = edges[0,:,:]
                 times = torch.Tensor(routine["times"])
-                obj_in_use = routine["objects_in_use"]
                 file_basename = os.path.splitext(f)[0]
                 f_out = os.path.join(output_dir,file_basename+'.pt')
-                samples = self.make_pairwise(nodes, edges, times, obj_in_use)
+                samples = self.make_pairwise(nodes, edges, times)
                 for i in range(len(samples)):
                     idx_map.append((file_basename, i))
                 torch.save(samples, f_out)
@@ -291,7 +290,7 @@ class ProcessDataset():
             self.seen_edges[:,:] += edge_features[i,:,:]
         return torch.Tensor(node_features), torch.Tensor(edge_features)
 
-    def make_pairwise(self, nodes, edges, times, obj_in_use):
+    def make_pairwise(self, nodes, edges, times):
         pairwise_samples = []
         additional_data = []
         self.time_min = torch.Tensor([float("Inf")])
@@ -315,7 +314,7 @@ class ProcessDataset():
             if prev_edges is not None:
                 change_type = (np.absolute(edges[data_idx] - prev_edges)).sum(-1).to(int)
                 change_type += (self.home_graph * (edges[data_idx] - prev_edges)).sum(-1).to(int)
-                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'obj_in_use':obj_in_use[data_idx], 'change_type':change_type})
+                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'obj_in_use':[], 'change_type':change_type})
             prev_edges = edges[data_idx]
             prev_nodes = nodes[data_idx]
         return pairwise_samples
