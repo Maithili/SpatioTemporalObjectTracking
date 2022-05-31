@@ -1,0 +1,131 @@
+{
+    "nodes": [
+        {
+            "id": 0,
+            "class_name": "kitchen",
+            "category": "Rooms"
+        },
+        {
+            "id": 1,
+            "class_name": "shelf",
+            "category": "Furniture"
+        },
+        {
+            "id": 2,
+            "class_name": "drawer",
+            "category": "Furniture"
+        },
+        {
+            "id": 3,
+            "class_name": "sink",
+            "category": "Furniture"
+        },
+        {
+            "id": 4,
+            "class_name": "counter",
+            "category": "Furniture"
+        },
+        {
+            "id": 5,
+            "class_name": "fridge",
+            "category": "Furniture"
+        },
+        {
+            "id": 6,
+            "class_name": "table",
+            "category": "Furniture"
+        },
+        {
+            "id": 7,
+            "class_name": "cereal",
+            "category": "placable_object"
+        },
+        {
+            "id": 8,
+            "class_name": "bowl",
+            "category": "placable_object"
+        },
+        {
+            "id": 9,
+            "class_name": "pills",
+            "category": "placable_object"
+        },
+        {
+            "id": 10,
+            "class_name": "banana",
+            "category": "placable_object"
+        },
+        {
+            "id": 11,
+            "class_name": "glass",
+            "category": "placable_object"
+        },
+        {
+            "id": 12,
+            "class_name": "milk",
+            "category": "placable_object"
+        }
+    ],
+    "edges": [
+        {
+            "from_id": 1,
+            "to_id": 0,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 2,
+            "to_id": 0,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 3,
+            "to_id": 0,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 4,
+            "to_id": 0,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 5,
+            "to_id": 0,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 6,
+            "to_id": 0,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 7,
+            "to_id": 1,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 8,
+            "to_id": 2,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 9,
+            "to_id": 2,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 10,
+            "to_id": 4,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 11,
+            "to_id": 4,
+            "relation_type": "INSIDE"
+        },
+        {
+            "from_id": 12,
+            "to_id": 5,
+            "relation_type": "INSIDE"
+        }
+    ]
+}

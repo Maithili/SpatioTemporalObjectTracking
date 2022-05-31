@@ -12,9 +12,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import wandb
 
 from GraphTranslatorModule import GraphTranslatorModule
-from readerFileBased import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
+from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
-from graph_visualizations import visualize_unconditional_datapoint, visualize_conditional_datapoint
 from breakdown_evaluations import evaluate as evaluate_applications
 from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned
 
@@ -96,10 +95,6 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                 torch.save(model.state_dict(), os.path.join(output_dir_new,'weights.pt'))
     
     
-    if INTERACTIVE:
-        visualize_unconditional_datapoint(model, data.test_routines, data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
-        visualize_conditional_datapoint(model, data.get_single_example_test_loader(), data.node_classes, use_output_nodes=cfg['LEARN_NODES'])
-
     wandb.finish()
 
 

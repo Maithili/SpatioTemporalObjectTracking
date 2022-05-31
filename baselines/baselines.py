@@ -2,7 +2,6 @@ import random
 from copy import deepcopy
 import numpy as np
 import torch
-from torch.nn import functional as F
 
 
 class Baseline():
@@ -38,16 +37,10 @@ class Baseline():
 class StateTimeConditionedBaseline(Baseline):
     def __init__(self):
         super().__init__()
-    # def log(self):
-    #     combined_cm_metrics = {k:sum([e['CM'][k] for e in self.eval]) for k in self.eval[0]['CM'].keys()}
-    #     print(combined_cm_metrics)
-    #     return {'Test accuracy':sum([e['accuracy'] for e in self.eval])/len(self.eval), 'Test CM metrics':combined_cm_metrics}
 
 class TimeConditionedBaseline(Baseline):
     def __init__(self):
         super().__init__()
-    # def log(self):
-    #     return {'Test accuracy (Unconditional)':sum([e['accuracy'] for e in self.eval])/len(self.eval)}
 
 
 class LastSeen(StateTimeConditionedBaseline):
@@ -97,46 +90,4 @@ class FremenStateConditioned(StateTimeConditionedBaseline):
         posterior = prior + (self.edges-prior) * self.decay_exponent
         return posterior
 
-
-class Slim(StateTimeConditionedBaseline):
-    def __init__(self, cooccurence_freq, num_particles=10, noise=0.4) -> None:
-        super().__init__()
-        self.num_particles = num_particles
-        self.noise = noise
-        self.cooccurence_freq = cooccurence_freq
-
-    def sample_scene(self, edges):
-        prob_thresholds = torch.cumsum(edges, dim=-1)
-        sample = random.random()
-        _, idx = torch.max(prob_thresholds > sample, dim=-1)
-        return torch.nn.functional.one_hot(idx, num_classes=edges.size()[-1])
-
-    def add_noise(self, edges):
-        new_edges = edges
-        for i in range(new_edges.size()[0]):
-            random_parents = torch.randint(0, edges.size()[-1], (edges.size()[-1],1))
-            random_edges = torch.nn.functional.one_hot(random_parents, num_classes=edges.size()[-1])
-            for j in range(new_edges.size()[1]):
-                if random.random() < self.noise:
-                    new_edges[i,j,:] = random_edges[j,:]
-        return new_edges
-
-    def aggregate_particles(self, particles, weights):
-        weights = [w/sum(weights) for w in weights]
-        mean_aggregate = torch.concat([particle*weight for particle, weight in zip(particles, weights)], dim=0).sum(dim=0)
-        # mean_aggregate = mean_aggregate/mean_aggregate.sum(-1)
-        sums = mean_aggregate.sum(-1).unsqueeze(-1)
-        mean_aggregate = mean_aggregate/sums
-        assert np.allclose(mean_aggregate.sum(-1), torch.ones_like(mean_aggregate.sum(-1))), mean_aggregate.sum(-1)
-        return mean_aggregate
-
-    def run(self):
-        particles = []
-        weights = []
-
-        for _ in range(self.num_particles):
-            particles.append(self.add_noise(self.sample_scene(self.edges)))
-            weights.append(torch.prod(((particles[-1]*self.cooccurence_freq).sum(-1)),0))
-
-        return self.aggregate_particles(particles, weights)
 

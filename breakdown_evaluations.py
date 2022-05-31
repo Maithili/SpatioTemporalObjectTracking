@@ -11,13 +11,26 @@ import wandb
 from copy import deepcopy
 from GraphTranslatorModule import _erase_edges
 from encoders import human_readable_from_external
-from evaluation import _get_masks
 
 viridis = cm.get_cmap('viridis', 256)
 newcolors = viridis(np.linspace(0, 1, 256))
 white = np.array([1, 1, 1, 1])
 newcolors[:25, :] = white
 newcmp = ListedColormap(['white', 'tab:blue', 'tab:orange', 'tab:purple'])
+
+def _get_masks(gt_tensor, output_tensor, input_tensor):
+    masks = {}
+    masks['gt_negatives'] = (gt_tensor == input_tensor).cpu()
+    masks['gt_positives'] = (gt_tensor != input_tensor).cpu()
+    masks['out_negatives'] = (output_tensor == input_tensor).cpu()
+    masks['out_positives'] = (output_tensor != input_tensor).cpu()
+    masks['tp'] = np.bitwise_and(masks['out_positives'], masks['gt_positives']).to(bool)
+    masks['fp'] = np.bitwise_and(masks['out_positives'], masks['gt_negatives']).to(bool)
+    masks['tn'] = np.bitwise_and(masks['out_negatives'], masks['gt_negatives']).to(bool)
+    masks['fn'] = np.bitwise_and(masks['out_negatives'], masks['gt_positives']).to(bool)
+    masks['correct'] = gt_tensor == output_tensor
+    masks['wrong'] = gt_tensor != output_tensor
+    return masks
 
 def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, deterministic_input_loop=False, node_names=[], print_importance=False):
     
