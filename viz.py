@@ -1,4 +1,5 @@
 from copy import deepcopy
+from math import atan2
 import os
 import shutil
 import argparse
@@ -27,18 +28,14 @@ method_colors = {
     'Fremen':'tab:blue',
     'ours_50epochs':'tab:red',
     'ours_timeLinear_50epochs':'tab:orange',
-    'ours_allEdges_50epochs':'tab:orange'
+    'ours_allEdges_50epochs':'tab:pink'
 }
 
 def get_method_labels(ablation = ''):
-    if ablation.lower() == 'ablation_time_':
+    if ablation.lower() == 'ablation_':
         return {
         'ours_50epochs':'Ours',
         'ours_timeLinear_50epochs':'Ours w/ \nLinear Time',
-        }
-    if ablation.lower() == 'ablation_edges_':
-        return {
-        'ours_50epochs':'Ours',
         'ours_allEdges_50epochs':'Ours w/ Fully \nConnected Graph'
         }
     if ablation == '': 
@@ -66,10 +63,12 @@ def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method
     f11, ax_dest_acc_norm2 = plt.subplots()
     figs =[f1,f2,f3,f4,f5,f6,f7, f8, f9, f10, f11]
 
-    for f in [0.2, 0.4, 0.6, 0.8]:
+    for f in [0.2, 0.4, 0.6]:
         pinv = np.linspace(1,2/f-1, 100)
         rinv = 2/f - pinv
         ax_comp_t_prec.plot(1/pinv, 1/rinv, color='grey', linewidth=(1-f)*2)
+        p1, p2 = 1/(2/f-1/0.75), 1/(2/f-1/0.95)
+        ax_comp_t_prec.text(0.68,p2,f'F-1 score = {f}', rotation=np.rad2deg(atan2(p2-p1, 0.2)), fontsize=30, backgroundcolor=[1,1,1,0.5])
 
     method_labels = get_method_labels(ablation)
     lookahead_steps = None
@@ -125,7 +124,7 @@ def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method
         completeness_t = [(cb[0]+cb[1])/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']]
 
         if sample_num == len(data)-1 :
-            ax_num_changes.plot(np.arange(lookahead_steps)+1, [sum(cb)/num_steps for cb in sample_data['completeness_breakdown']['by_lookahead']], 'x-', label='Actual\nChanges', color='black', linewidth=3)
+            ax_num_changes.plot(np.arange(lookahead_steps)+1, [sum(cb)/num_steps for cb in sample_data['completeness_breakdown']['by_lookahead']], 'o--', label='Actual\nChanges', color='black', linewidth=3)
 
         f1 = [2*p*r/(p+r+1e-8) for p,r in zip(precisions, completeness_t)]
         if sample_num == 0:
@@ -304,18 +303,18 @@ def result_string_from_info(info):
     
     methods = info.keys()
     string = ''
-    for res in ['precision', 'recall', 'destination_accuracy', 'f1_score']:
+    for res in ['f1_score', 'precision', 'recall', 'destination_accuracy']:
         string += ('\n----- '+ res +' -----')
         for m in methods:
             string += ('\n{} : {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}'.format(m+' '*(40-len(m)), info_mins[m][res], info_averages[m][res]-info_stds[m][res], info_averages[m][res], info_averages[m][res]+info_stds[m][res], info_maxs[m][res]))
     string += '\n\n\n\n'
-    string += '\n precision  recall  destination_accuracy  f1_score'
+    string += '\n f1_score precision  recall  destination_accuracy'
     second_best = {'precision':0,  'recall':0,  'destination_accuracy':0,  'f1_score':0}
     for m in methods:
         if m != 'ours':
             for k in second_best.keys():
                 second_best[k] = max(second_best[k], info_averages[m][k])
-        string += ('\n{} : {:.4f} & {:.4f} & {:.4f} & {:.4f} \\'.format(m+' '*(40-len(m)), info_averages[m]['precision'], info_averages[m]['recall'], info_averages[m]['destination_accuracy'], info_averages[m]['f1_score']))
+        string += ('\n{} : {:.4f} & {:.4f} & {:.4f} & {:.4f} \\'.format(m+' '*(40-len(m)), info_averages[m]['f1_score'], info_averages[m]['precision'], info_averages[m]['recall'], info_averages[m]['destination_accuracy']))
     # m = 'second_best'
     # string += ('\n{} : {:.4f} & {:.4f} & {:.4f} & {:.4f} \\'.format(m+' '*(25-len(m)), second_best['precision'], second_best['recall'], second_best['destination_accuracy'], second_best['f1_score']))
     # perc_imp = [(info_averages['ours'][k] - second_best[k])/second_best[k] * 100 for k in ['precision', 'recall', 'destination_accuracy', 'f1_score']]
@@ -323,7 +322,7 @@ def result_string_from_info(info):
     # string += ('\n{} : {:2.2f} & {:2.2f} & {:2.2f} & {:2.2f} \\'.format(m+' '*(25-len(m)), perc_imp[0], perc_imp[1], perc_imp[2], perc_imp[3]))
 
     string += '\n\nSignificance\n'
-    for res in ['precision', 'recall', 'destination_accuracy', 'f1_score']:
+    for res in ['f1_score', 'precision', 'recall', 'destination_accuracy']:
         string += ('\n----- '+ res +' -----')
         for m1 in methods:
             string += '\n{} : '.format(m1+' '*(40-len(m1)))
@@ -399,7 +398,7 @@ if __name__ == '__main__':
                 f.write(result_string_from_info(info))
 
         ## all data
-        for ablation in ['', 'ablation_time_', 'ablation_edges_']:
+        for ablation in ['', 'ablation_']:
             print(ablation)
             combined_names = []
             combined_names = list(set([n[:-2] if n[-2]=='_' else n for n in names]))
