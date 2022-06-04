@@ -9,7 +9,6 @@ import torch
 from torch.nn.functional import one_hot
 import wandb
 from copy import deepcopy
-from GraphTranslatorModule import _erase_edges
 from encoders import human_readable_from_external
 
 viridis = cm.get_cmap('viridis', 256)
@@ -18,19 +17,13 @@ white = np.array([1, 1, 1, 1])
 newcolors[:25, :] = white
 newcmp = ListedColormap(['white', 'tab:blue', 'tab:orange', 'tab:purple'])
 
-def _get_masks(gt_tensor, output_tensor, input_tensor):
-    masks = {}
-    masks['gt_negatives'] = (gt_tensor == input_tensor).cpu()
-    masks['gt_positives'] = (gt_tensor != input_tensor).cpu()
-    masks['out_negatives'] = (output_tensor == input_tensor).cpu()
-    masks['out_positives'] = (output_tensor != input_tensor).cpu()
-    masks['tp'] = np.bitwise_and(masks['out_positives'], masks['gt_positives']).to(bool)
-    masks['fp'] = np.bitwise_and(masks['out_positives'], masks['gt_negatives']).to(bool)
-    masks['tn'] = np.bitwise_and(masks['out_negatives'], masks['gt_negatives']).to(bool)
-    masks['fn'] = np.bitwise_and(masks['out_negatives'], masks['gt_positives']).to(bool)
-    masks['correct'] = gt_tensor == output_tensor
-    masks['wrong'] = gt_tensor != output_tensor
-    return masks
+
+
+def _erase_edges(edges, dyn_mask):
+    empty_edges = torch.ones_like(edges)/edges.size()[-1]
+    empty_edges[dyn_mask == 0] = edges[dyn_mask == 0]
+    empty_edges = empty_edges/(empty_edges.sum(dim=-1).unsqueeze(-1).repeat(1,1,edges.size()[-1])+1e-8)
+    return empty_edges
 
 def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, deterministic_input_loop=False, node_names=[], print_importance=False):
     

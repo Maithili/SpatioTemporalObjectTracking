@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Colormap
 from torch.nn import functional as F
 
-from GraphTranslatorModule import _erase_edges
+from breakdown_evaluations import _erase_edges
 from encoders import time_external, human_readable_from_external
 
 SEED = 456

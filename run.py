@@ -1,4 +1,5 @@
-from multiprocessing import log_to_stderr
+import sys
+sys.path.append('helpers')
 import yaml
 import json
 import os

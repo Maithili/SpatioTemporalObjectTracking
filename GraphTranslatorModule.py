@@ -1,3 +1,5 @@
+import sys
+sys.path.append('helpers')
 from random import random
 import numpy as np
 import torch
@@ -6,12 +8,8 @@ from torch import nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
 
+from breakdown_evaluations import _erase_edges
 
-def _erase_edges(edges, dyn_mask):
-    empty_edges = torch.ones_like(edges)/edges.size()[-1]
-    empty_edges[dyn_mask == 0] = edges[dyn_mask == 0]
-    empty_edges = empty_edges/(empty_edges.sum(dim=-1).unsqueeze(-1).repeat(1,1,edges.size()[-1])+1e-8)
-    return empty_edges
 
 def get_masks(gt_tensor, output_tensor, input_tensor):
     masks = {}
