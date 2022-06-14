@@ -1,5 +1,5 @@
 # SpatioTemporalObjectTracking
-Graph translation network for modeling spatio-temporal dynamics of household objects for our paper 'XXXXX'. The model reads in an input graph representing the environment and time, and translates it to a probabilistic output graph representing the environment at the next time step.
+Graph translation network for modeling spatio-temporal dynamics of household objects for our paper 'Proactive Robot Assistance via Spatio-Temporal Object Modeling'. The model reads in an input graph representing the environment and time, and translates it to a probabilistic output graph representing the environment at the next time step.
 
 <img src="GNNarchitecture.png"
      alt="GNN Architecture"
