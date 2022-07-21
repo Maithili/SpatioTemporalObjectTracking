@@ -42,10 +42,15 @@ class CollateToDict():
 
     def __call__(self, tensor_tuple):
         data = {label:torch.Tensor() for label in self.dict_labels}
+        data['nodes'] = []
+        data['y_nodes'] = []
         for tensors in tensor_tuple:
             assert len(tensors) == len(self.dict_labels), f"Wrong number of labels provided to the collate function! {len(self.dict_labels)} labels for {len(tensors)} tensors"
             for label, tensor in zip(self.dict_labels, tensors):
-                data[label]=torch.cat([data[label], tensor.unsqueeze(0)], dim=0)
+                if label in ['nodes', 'y_nodes']:
+                    data[label].append(tensor)
+                else:
+                    data[label]=torch.cat([data[label], tensor.unsqueeze(0)], dim=0)
         return data
 
 class DataSplit():
@@ -73,24 +78,20 @@ class DataSplit():
 
     def get_sample(self, idx: int):
         filename, sample_idx = self.idx_map[idx]
-        data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
+        data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) 
         sample = data_list[sample_idx]
-        return sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time']), (sample['change_type']).to(int)
+        return torch.Tensor(sample['prev_edges']), sample['prev_nodes'], self.time_encoder(sample['time']), torch.Tensor(sample['edges']), sample['nodes'], self.active_edges, torch.tensor(sample['time']).to(int), sample['change_type']
     def get_routine(self, idx: int):
-        data_list = torch.load(os.path.join(self.routines_dir, self.files[idx])) #, map_location=lambda storage, loc: storage.cuda(1))
-        samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time']), (sample['change_type']).to(int)) for sample in data_list]
-        # moved_obj_mask = torch.zeros_like(data_list[0]['edges']).to(bool)
-        # for sample in data_list:
-        #     moved_obj_mask = np.bitwise_or(torch.Tensor(moved_obj_mask), (sample['edges'] != sample['prev_edges'])).to(bool)
-        # additional_info = {'moved_obj_mask':moved_obj_mask}
-        additional_info = {'timestamp':[time_external(sample['time']) for sample in data_list], 'obj_in_use':[sample['obj_in_use'] for sample in data_list], 'active_nodes':self.active_edges.sum(-1) > 0}
+        data_list = torch.load(os.path.join(self.routines_dir, self.files[idx])) 
+        samples = [(torch.Tensor(sample['prev_edges']), sample['prev_nodes'], self.time_encoder(sample['time']), torch.Tensor(sample['edges']), sample['nodes'], self.active_edges, torch.tensor(sample['time']), sample['change_type']) for sample in data_list]
+        additional_info = {'timestamp':[time_external(sample['time']) for sample in data_list], 'active_nodes':self.active_edges.sum(-1) > 0}
         return samples, additional_info
     def __getitem__(self, idx: int):
         return self.get_routine(idx) if self.whole_routines else self.get_sample(idx)
 
     def get_edges_and_time(self, idx:int):
         filename, sample_idx = self.idx_map[idx]
-        data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
+        data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) 
         sample = data_list[sample_idx]
         return sample['edges'], sample['time']
     
@@ -126,6 +127,7 @@ class RoutinesDataset():
         self.node_ids = self.common_data['node_ids']
         self.node_classes = self.common_data['node_classes']
         self.node_categories = self.common_data['node_categories']
+        self.node_states = self.common_data['node_states']
         self.node_idx_from_id = {int(k):v for k,v in self.common_data['node_idx_from_id'].items()}
         self.edge_keys = self.common_data['edge_keys']
         self.static_nodes = self.common_data['static_nodes']
@@ -141,8 +143,10 @@ class RoutinesDataset():
         # Infer parameters for the model
         model_data = self.test.collate_fn([self.test[0]])
         self.params['n_nodes'] = model_data['edges'].size()[1]
-        self.params['n_len'] = model_data['nodes'].size()[-1]
         self.params['c_len'] = model_data['context'].size()[-1]
+        self.params['num_classes'] = len(self.node_classes)
+        self.params['num_categories'] = len(self.node_categories)
+        self.params['num_states'] = len(self.node_states)
 
     def get_train_loader(self):
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
@@ -208,8 +212,7 @@ class ProcessDataset():
         assert type(data_path) == tuple
         self.common_data['train_data_index_list'] = self.read_data(data_path[0], output_train_path)
         self.common_data['test_data_index_list'] = self.read_data(data_path[1], output_test_path)
-        with open(os.path.join(output_path, 'common_data.json'), 'w') as f:
-            json.dump(self.common_data, f)
+        json.dump(self.common_data, open(os.path.join(output_path, 'common_data.json'), 'w'), indent=4)
         torch.save(self.seen_edges, os.path.join(output_path, 'seen_edges.pt'))
         torch.save(self.nonstatic_edges, os.path.join(output_path, 'nonstatic_edges.pt'))
         torch.save(self.home_graph, os.path.join(output_path, 'home_graph.pt'))
@@ -219,16 +222,18 @@ class ProcessDataset():
             classes = json.load(f)
         self.common_data['node_ids'] = [n['id'] for n in classes['nodes']]
         self.common_data['node_classes'] = [n['class_name'] for n in classes['nodes']]
-        self.common_data['node_categories'] = [n['category'] for n in classes['nodes']]
+        node_categories = [n['category'] for n in classes['nodes']]
         self.common_data['node_idx_from_id'] = {int(n['id']):i for i,n in enumerate(classes['nodes'])}
+        self.common_data['node_states'] = classes['states']
 
         # Diagonal nodes are always irrelevant
         self.nonstatic_edges = 1 - np.eye(len(classes['nodes']))
         # Rooms, furniture and appliances nodes don't move
-        self.nonstatic_edges[np.where(np.array(self.common_data['node_categories']) == "Rooms"),:] = 0
-        self.nonstatic_edges[np.where(np.array(self.common_data['node_categories']) == "Furniture"),:] = 0
-        self.nonstatic_edges[np.where(np.array(self.common_data['node_categories']) == "Decor"),:] = 0
-        self.nonstatic_edges[np.where(np.array(self.common_data['node_categories']) == "Appliances"),:] = 0
+        self.nonstatic_edges[np.where(np.array(node_categories) == "Rooms"),:] = 0
+        self.nonstatic_edges[np.where(np.array(node_categories) == "Furniture"),:] = 0
+        self.nonstatic_edges[np.where(np.array(node_categories) == "Decor"),:] = 0
+        self.nonstatic_edges[np.where(np.array(node_categories) == "Appliances"),:] = 0
+        print('Number of nonstatic edges = ',sum(self.nonstatic_edges.max(axis=1)))
         self.seen_edges = np.zeros_like(self.nonstatic_edges)
 
         self.home_graph = None
@@ -236,6 +241,7 @@ class ProcessDataset():
         self.common_data['edge_keys'] = classes['edges']
         static = lambda category : category in ["Furniture", "Room"]
         self.common_data['static_nodes'] = [n['id'] for n in classes['nodes'] if static(n['category'])]
+        self.common_data['node_categories'] = list(set(node_categories))
 
 
     def read_data(self, data_dir, output_dir):
@@ -256,7 +262,7 @@ class ProcessDataset():
                     visualize_parsed_routine(edges, nodes, self.common_data['node_classes'])
                     inp = input(f'Do you want to visualize the next routine?')
                     viz = (inp == 'y')
-                self.home_graph = edges[0,:,:]
+                self.home_graph = edges[0]
                 times = torch.Tensor(routine["times"])
                 file_basename = os.path.splitext(f)[0]
                 f_out = os.path.join(output_dir,file_basename+'.pt')
@@ -274,25 +280,31 @@ class ProcessDataset():
 
     def read_graphs(self, graphs):
         num_nodes = len(self.common_data['node_ids'])
-        node_features = np.zeros((len(graphs), num_nodes, num_nodes))
-        edge_features = np.zeros((len(graphs), num_nodes, num_nodes))
+        node_features_list = []
+        edge_features_list = []
         for i,graph in enumerate(graphs):
-            node_features[i,:,:num_nodes] = np.eye(num_nodes)
+            node_features_list.append([])
+            for n in graph['nodes']:
+                node_class = self.common_data['node_classes'].index(n['class_name'])
+                node_categ = self.common_data['node_categories'].index(n['category'])
+                node_states = [self.common_data['node_states'].index(ns) for ns in n['states']]
+                node_features_list[-1].append((node_class, node_categ, node_states))
+            edge_features = np.zeros((num_nodes, num_nodes))
             for e in graph['edges']:
                 if e['relation_type'] in self.common_data['edge_keys']:
-                    edge_features[i,self.common_data['node_idx_from_id'][e['from_id']],self.common_data['node_idx_from_id'][e['to_id']]] = 1
-            original_edges = edge_features[i,:,:]
-            edge_features[i,:,:] = _sparsify(edge_features[i,:,:])
-            if (edge_features[i,:,:].sum(axis=-1)).max() != 1:
-                print(f"Matrix {i} not really a tree \n{edge_features[i,:,:]}")
-                not_a_tree(original_edges, edge_features[i,:,:], self.common_data['node_classes'])
-            assert (edge_features[i,:,:].sum(axis=-1)).max() == 1, f"Matrix {i} not really a tree \n{edge_features[i,:,:]}"
-            self.seen_edges[:,:] += edge_features[i,:,:]
-        return torch.Tensor(node_features), torch.Tensor(edge_features)
+                    edge_features[self.common_data['node_idx_from_id'][e['from_id']],self.common_data['node_idx_from_id'][e['to_id']]] = 1
+            original_edges = edge_features[:,:]
+            edge_features[:,:] = _sparsify(edge_features[:,:])
+            if (edge_features[:,:].sum(axis=-1)).max() != 1:
+                print(f"Matrix {i} not really a tree \n{edge_features[:,:]}")
+                not_a_tree(original_edges, edge_features[:,:], self.common_data['node_classes'])
+            assert (edge_features[:,:].sum(axis=-1)).max() == 1, f"Matrix {i} not really a tree \n{edge_features[:,:]}"
+            self.seen_edges[:,:] += edge_features[:,:]
+            edge_features_list.append(edge_features)
+        return node_features_list, edge_features_list
 
     def make_pairwise(self, nodes, edges, times):
         pairwise_samples = []
-        additional_data = []
         self.time_min = torch.Tensor([float("Inf")])
         self.time_max = -torch.Tensor([float("Inf")])
     
@@ -312,9 +324,9 @@ class ProcessDataset():
                 continue
             # 3 = to home state; 1 = from home state; 2 = neither; 0 = no change
             if prev_edges is not None:
-                change_type = (np.absolute(edges[data_idx] - prev_edges)).sum(-1).to(int)
-                change_type += (self.home_graph * (edges[data_idx] - prev_edges)).sum(-1).to(int)
-                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'obj_in_use':[], 'change_type':change_type})
+                change_type = (np.absolute(edges[data_idx] - prev_edges)).sum(-1)
+                change_type += (self.home_graph * (edges[data_idx] - prev_edges)).sum(-1)
+                pairwise_samples.append({'prev_edges': torch.Tensor(prev_edges), 'prev_nodes': prev_nodes, 'time': t, 'edges': torch.Tensor((edges[data_idx])), 'nodes': nodes[data_idx], 'change_type': torch.Tensor(change_type).to(int)})
             prev_edges = edges[data_idx]
             prev_nodes = nodes[data_idx]
         return pairwise_samples

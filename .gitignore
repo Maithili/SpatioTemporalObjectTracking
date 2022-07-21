@@ -136,3 +136,5 @@ wandb/
 data/
 logs*
 screenlog*
+wandb_log_dir/
+logs_archived/

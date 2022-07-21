@@ -34,7 +34,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags, mode='disabled')
+    wandb_logger = WandbLogger(name=cfg['NAME'], save_dir='wandb_log_dir', log_model=True, group = group, tags = tags, mode='disabled')
 
     cfg['DATA_PARAM'] = data.params
     wandb_logger.experiment.config.update(cfg)
@@ -45,24 +45,28 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
         checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
         model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
                                                             num_nodes=data.params['n_nodes'],
-                                                            node_feature_len=data.params['n_len'],
+                                                            node_feature_len=cfg['NODE_CLASS_EMBEDDING_SIZE'],
                                                             context_len=data.params['c_len'],
                                                             edge_importance=cfg['EDGE_IMPORTANCE'],
                                                             edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
                                                             tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
                                                             learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
-                                                            hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
+                                                            hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
+                                                            num_embeddings=(data.params['num_classes'], data.params['num_categories'], data.params['num_states']),
+                                                            num_attention_heads=cfg['NUM_ATTENTION_HEADS'])
         evaluation_summary = evaluate_applications(model, data, cfg, output_dir, logger=wandb_logger.experiment, print_importance=True)
 
     else:
         model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
-                                node_feature_len=data.params['n_len'],
+                                node_feature_len=cfg['NODE_CLASS_EMBEDDING_SIZE'],
                                 context_len=data.params['c_len'],
                                 edge_importance=cfg['EDGE_IMPORTANCE'],
                                 edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
                                 tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
                                 learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
-                                hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
+                                hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
+                                num_embeddings=(data.params['num_classes'], data.params['num_categories'], data.params['num_states']),
+                                num_attention_heads=cfg['NUM_ATTENTION_HEADS'])
 
         epochs = cfg['EPOCHS'] if isinstance(cfg['EPOCHS'],list) else [cfg['EPOCHS']]
         done_epochs = 0
