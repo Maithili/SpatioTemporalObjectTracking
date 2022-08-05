@@ -21,28 +21,44 @@ greener = green-neutral
 change_colors = ['tab:blue', 'tab:orange', 'tab:purple']
 change_names = ['taking out', 'other', 'putting away']
 
-method_colors = {
-    'LastSeenAndStaticSemantic':'tab:green',
-    'StaticSemantic':'tab:green',
-    'FremenStateConditioned':'tab:blue',
-    'Fremen':'tab:blue',
-    'ours_50epochs':'tab:red',
-    'ours_timeLinear_50epochs':'tab:orange',
-    'ours_allEdges_50epochs':'tab:pink'
-}
 
-def get_method_labels(ablation = ''):
+def method_color(name):
+    if name.startswith('classOnly'):
+        return 'tab:purple'
+    if name.startswith('oneHotClassOnly'):
+        return 'tab:blue'
+    if name.startswith('ours'):
+        return 'tab:red'
+    raise RuntimeError(f"Method color not defined for {name}")
+
+def method_marker(name):
+    if name.endswith('05epochs'):
+        return 's'
+    if name.endswith('10epochs'):
+        return '^'
+    if name.endswith('15epochs'):
+        return 'o'
+    if name.endswith('20epochs'):
+        return 'x'
+    raise RuntimeError(f"Method marker not defined for {name}")
+
+
+def get_method_labels(ablation = None):
     if ablation.lower() == 'ablation_':
-        return {
-        'ours_50epochs':'Ours',
-        'ours_timeLinear_50epochs':'Ours w/ \nLinear Time',
-        'ours_allEdges_50epochs':'Ours w/ Fully \nConnected Graph'
-        }
+        return {}
     if ablation == '': 
-        return {
-                'LastSeenAndStaticSemantic':'Static\nSemantic',
-                'FremenStateConditioned':'FreMEn', ## 25
-                'ours_50epochs':'Ours',
+        return {'ours_05epochs':'Transf5',
+                'ours_10epochs':'Transf10',
+                'ours_15epochs':'Transf15',
+                'ours_20epochs':'Transf20',
+                'classOnly_05epochs':'ClassOnly5',
+                'classOnly_10epochs':'ClassOnly10',
+                'classOnly_15epochs':'ClassOnly15',
+                'classOnly_20epochs':'ClassOnly20',
+                'oneHotClassOnly_05epochs':'1HotClass5',
+                'oneHotClassOnly_10epochs':'1HotClass10',
+                'oneHotClassOnly_15epochs':'1HotClass15',
+                'oneHotClassOnly_20epochs':'1HotClass20'
                 }
 
 filenames = ['recall_accuracy','precision','f1','precision_accuracy', 'precision_recall', 'recall_accuracy_norm', 'precision_norm', 'time_only_prediction', 'destination_accuracy', 'num_changes','destination_accuracy_line']
@@ -74,7 +90,6 @@ def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method
     lookahead_steps = None
 
     info = {}
-    num_steps = 1080
 
     offsets = np.linspace(-0.45,0.45,len(data[0]['precision_breakdown'])+1)
     offsets = (offsets[1:]+offsets[:-1])/2
@@ -83,48 +98,46 @@ def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method
     for sample_num, sample_data in enumerate(data):
         if sample_data is None or names[sample_num] not in method_labels:
             continue
-        
-        lookahead_steps = len(sample_data['precision_breakdown'])
 
+        lookahead_steps = len(sample_data['precision_breakdown'])
         quality_steps = len(sample_data['precision_breakdown'])
         for step in range(quality_steps-1, -1, -1):
             if sample_num == 0 and step == 0:
-                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step])/num_steps, color=red-redder*0.3, width=width, label='False Positives')
-                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/num_steps, color=green, width=width, label='Correct Time')
+                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step]), color=red-redder*0.3, width=width, label='False Positives')
+                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0], color=green, width=width, label='Correct Time')
                 ax_prec_norm.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/(sum(sample_data['precision_breakdown'][step])+1e-8), color=green-greener*0.2, width=width, label='Precision')
             else:
-                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step])/num_steps, color=red-redder*0.3, width=width)
-                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/num_steps, color=green, width=width)
+                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step]), color=red-redder*0.3, width=width)
+                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0], color=green, width=width)
                 ax_prec_norm.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/(sum(sample_data['precision_breakdown'][step])+1e-8), color=green-greener*0.2, width=width)
-        ax_num_changes.plot(np.arange(lookahead_steps)+1, [sum(qb)/num_steps for qb in sample_data['precision_breakdown']], 'o-', label=method_labels[names[sample_num]], color=method_colors[names[sample_num]], linewidth=3)
+        ax_num_changes.plot(np.arange(lookahead_steps)+1, [sum(qb) for qb in sample_data['precision_breakdown']], markersize = 20, marker=method_marker(names[sample_num]), label=method_labels[names[sample_num]], color=method_color(names[sample_num]), linewidth=3)
         precisions = [qb[0]/(sum(qb)+1e-8) for qb in sample_data['precision_breakdown']]
-
         comp_steps = len(sample_data['completeness_breakdown']['by_lookahead'])
         assert quality_steps==comp_steps
 
         # if without_types:
         for step in range(comp_steps-1, -1, -1):
             if sample_num == 0 and step == 0:
-                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_steps, color=red-redder*0.3, width=width, label='Wrong Time')
-                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/num_steps, color=green-greener*0.3, width=width, label='Correct Time')
-                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/num_steps, color=green, width=width, label='Correct Time \n+ Destination')
+                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=red-redder*0.3, width=width, label='Wrong Time')
+                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1]), color=green-greener*0.3, width=width, label='Correct Time')
+                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0], color=green, width=width, label='Correct Time \n+ Destination')
                 ax_dest_acc_recl_norm.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.5, width=width, label='Recall')
                 ax_dest_acc_recl_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.0, width=width, label='Destination\nAccuracy')
                 ax_dest_acc_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.2, width=width, label='Destination\nAccuracy')
         
             else:
-                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_steps, color=red-redder*0.3, width=width)
-                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/num_steps, color=green-greener*0.3, width=width)
-                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/num_steps, color=green, width=width)
+                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=red-redder*0.3, width=width)
+                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1]), color=green-greener*0.3, width=width)
+                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0], color=green, width=width)
                 ax_dest_acc_recl_norm.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.5, width=width)
                 ax_dest_acc_recl_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.0, width=width)
                 ax_dest_acc_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.2, width=width)
-        ax_dest_acc_norm2.plot(np.arange(lookahead_steps)+1, [cb[0]/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']], 'o-', color=method_colors[names[sample_num]], linewidth=3, label=method_labels[names[sample_num]])
+        ax_dest_acc_norm2.plot(np.arange(lookahead_steps)+1, [cb[0]/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']], markersize = 20, marker=method_marker(names[sample_num]), color=method_color(names[sample_num]), linewidth=3, label=method_labels[names[sample_num]])
         completeness_tl = [cb[0]/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']]
         completeness_t = [(cb[0]+cb[1])/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']]
 
         if sample_num == len(data)-1 :
-            ax_num_changes.plot(np.arange(lookahead_steps)+1, [sum(cb)/num_steps for cb in sample_data['completeness_breakdown']['by_lookahead']], 'o--', label='Actual\nChanges', color='black', linewidth=3)
+            ax_num_changes.plot(np.arange(lookahead_steps)+1, [sum(cb) for cb in sample_data['completeness_breakdown']['by_lookahead']], 'o--', label='Actual\nChanges', color='black', linewidth=3)
 
         f1 = [2*p*r/(p+r+1e-8) for p,r in zip(precisions, completeness_t)]
         if sample_num == 0:
@@ -132,16 +145,16 @@ def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method
         else:
             ax_f1.bar(sample_num+offsets, f1, color=green-greener*0.2, width=width)
 
-        alphas = np.linspace(1,0.5,quality_steps)
+        alphas = np.linspace(1,0.2,quality_steps)
         for i in range(quality_steps):
             label = method_labels[names[sample_num]] if i==0 else None
-            ax_comp_tl_prec.plot(completeness_tl[i], precisions[i], 'x', markersize=20, markeredgewidth = 5, label=label, color=method_colors[names[sample_num]], alpha=alphas[i])
-            ax_comp_t_prec.plot(completeness_t[i], precisions[i], 'x', markersize=20, markeredgewidth = 5, label=label, color=method_colors[names[sample_num]], alpha=alphas[i])
+            ax_comp_tl_prec.plot(completeness_tl[i], precisions[i], markersize = 20, marker=method_marker(names[sample_num]),markeredgewidth = 5, label=label, color=method_color(names[sample_num]), alpha=alphas[i])
+            ax_comp_t_prec.plot(completeness_t[i], precisions[i], markersize = 20, marker=method_marker(names[sample_num]), markeredgewidth = 5, label=label, color=method_color(names[sample_num]), alpha=alphas[i])
             
-        ax_time_only.bar(sample_num-0.21, sample_data['timeonly_breakdown_direct']['correct']/num_steps, color=green-greener*0.3, width=0.4)
-        ax_time_only.bar(sample_num-0.21, sample_data['timeonly_breakdown_direct']['wrong']/num_steps, bottom=sample_data['timeonly_breakdown_direct']['correct']/num_steps, color=red-redder*0.3, width=0.4)
-        ax_time_only.bar(sample_num+0.21, sample_data['timeonly_breakdown_playahead']['correct']/num_steps, color=green-greener*0.3, width=0.4)
-        ax_time_only.bar(sample_num+0.21, sample_data['timeonly_breakdown_playahead']['wrong']/num_steps, bottom=sample_data['timeonly_breakdown_playahead']['correct']/num_steps, color=red-redder*0.3, width=0.4)
+        ax_time_only.bar(sample_num-0.21, sample_data['timeonly_breakdown_direct']['correct'], color=green-greener*0.3, width=0.4)
+        ax_time_only.bar(sample_num-0.21, sample_data['timeonly_breakdown_direct']['wrong'], bottom=sample_data['timeonly_breakdown_direct']['correct'], color=red-redder*0.3, width=0.4)
+        ax_time_only.bar(sample_num+0.21, sample_data['timeonly_breakdown_playahead']['correct'], color=green-greener*0.3, width=0.4)
+        ax_time_only.bar(sample_num+0.21, sample_data['timeonly_breakdown_playahead']['wrong'], bottom=sample_data['timeonly_breakdown_playahead']['correct'], color=red-redder*0.3, width=0.4)
 
         info[names[sample_num]] = {}
         info[names[sample_num]]['precision'] = precisions
@@ -164,13 +177,13 @@ def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method
     ax_comp_t_prec.set_ylabel('Precision', fontsize=45)
     ax_comp_t_prec.tick_params(axis = 'y', labelsize=30)
     ax_comp_t_prec.tick_params(axis = 'x', labelsize=30)
-    ax_comp_t_prec.set_xlim([0,1])
+    ax_comp_t_prec.set_xlim([0,1.8])
     ax_comp_t_prec.set_ylim([0,1])
 
     ax_comp_tl_prec.legend(fontsize=40)
     ax_comp_tl_prec.set_xlabel('Destination Accuracy', fontsize=45)
     ax_comp_tl_prec.set_ylabel('Precision', fontsize=45)
-    ax_comp_tl_prec.set_xlim([0,1])
+    ax_comp_tl_prec.set_xlim([0,1.8])
     ax_comp_tl_prec.set_ylim([0,1])
     
     ax_comp_t_tl.legend(fontsize=40)
@@ -247,9 +260,9 @@ def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method
     f3.set_size_inches(40,8)
     f3.tight_layout()
 
-    f4.set_size_inches(12,12)
+    f4.set_size_inches(20,12)
     f4.tight_layout()
-    f5.set_size_inches(12,12)
+    f5.set_size_inches(20,12)
     f5.tight_layout()
     f10.set_size_inches(15,10)
     f10.tight_layout()
@@ -284,6 +297,8 @@ def average_stats(stats_list):
     num_stats = len(stats_list)
     if num_stats == 0:
         return None
+    if num_stats == 1:
+        return stats_list[0]
     lookahead_steps = len(stats_list[0]['precision_breakdown'])
     avg['precision_breakdown'] = [[ sum([sl['precision_breakdown'][s][c] for sl in stats_list])/num_stats for c in range(2)]for s in range(lookahead_steps)]
     lookahead_steps = len(stats_list[0]['completeness_breakdown']['by_lookahead'])
@@ -293,6 +308,7 @@ def average_stats(stats_list):
     }
     avg['timeonly_breakdown_direct'] = {k:sum([sl['timeonly_breakdown_direct'][k] for sl in stats_list])/num_stats for k in ['correct','wrong']}
     avg['timeonly_breakdown_playahead'] = {k:sum([sl['timeonly_breakdown_playahead'][k] for sl in stats_list])/num_stats for k in ['correct','wrong']}
+    
     return avg
 
 def result_string_from_info(info):
@@ -336,13 +352,13 @@ def result_string_from_info(info):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--paths', type=str, default='logs/', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--paths', type=str, default='logs/', help='')
     parser.add_argument('--combined_dir_out', type=str, help='Combining data from all dirs')
     args = parser.parse_args()
 
     dirs = args.paths.split(',')
-    master_combined_data = {k:{'precision':[], 'recall':[], 'destination_accuracy':[], 'f1_score':[]} for k in method_colors.keys()}
-    master_combined_errs = {k:{'precision':[], 'recall':[], 'destination_accuracy':[], 'f1_score':[]} for k in method_colors.keys()}
+    master_combined_data = {}
+    master_combined_errs = {}
     master_combined_name = []
 
     for dir in dirs:
@@ -379,8 +395,9 @@ if __name__ == '__main__':
             return cdata
 
         ## per dataset
-        # print('Datasets : ')
+        print('Datasets : ')
         for dataset in set(datasets):
+            print(dataset)
             ablation = ''
             combined_names = []
             combined_names = list(set([n[:-2] if n[-2]=='_' else n for n in names]))
@@ -398,7 +415,8 @@ if __name__ == '__main__':
                 f.write(result_string_from_info(info))
 
         ## all data
-        for ablation in ['', 'ablation_']:
+        # for ablation in ['ablation_', '']:
+        for ablation in ['']:
             print(ablation)
             combined_names = []
             combined_names = list(set([n[:-2] if n[-2]=='_' else n for n in names]))
@@ -416,11 +434,14 @@ if __name__ == '__main__':
         info_averages = deepcopy({kk:{k:np.mean(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()})
         info_errs = deepcopy({kk:{k:np.std(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()})
 
-        for m in info_averages.keys():
-            for res in info_averages[m].keys():
-                master_combined_data[m][res].append(info_averages[m][res])
-                master_combined_errs[m][res].append(info_errs[m][res])
-        master_combined_name.append(int(os.path.basename(dir[:-1])))
+        if args.combined_dir_out:
+            for m in info_averages.keys():
+                master_combined_data[m] = {}
+                master_combined_errs[m] = {}
+                for res in info_averages[m].keys():
+                    master_combined_data[m][res].append(info_averages[m][res])
+                    master_combined_errs[m][res].append(info_errs[m][res])
+            master_combined_name.append(int(os.path.basename(dir[:-1])))
 
     if args.combined_dir_out:
         f_f1, ax_f1 = plt.subplots()
@@ -434,12 +455,12 @@ if __name__ == '__main__':
 
         labels = get_method_labels()
         for m in info_averages:
-            # print(m)
+            print(m)
             # print(master_combined_data[m])
-            ax_f1.errorbar(master_combined_name, master_combined_data[m]['f1_score'], yerr=master_combined_errs[m]['f1_score'], color=method_colors[m], label=labels[m], capsize=6.0, linewidth=3)
-            ax_pr.errorbar(master_combined_name, master_combined_data[m]['precision'], yerr=master_combined_errs[m]['precision'], color=method_colors[m], label=labels[m], capsize=6.0, linewidth=3)
-            ax_rc.errorbar(master_combined_name, master_combined_data[m]['recall'], yerr=master_combined_errs[m]['recall'], color=method_colors[m], label=labels[m], capsize=6.0, linewidth=3)
-            ax_da.errorbar(master_combined_name, master_combined_data[m]['destination_accuracy'], yerr=master_combined_errs[m]['destination_accuracy'], color=method_colors[m], label=labels[m], capsize=6.0, linewidth=3)
+            ax_f1.errorbar(master_combined_name, master_combined_data[m]['f1_score'], yerr=master_combined_errs[m]['f1_score'], markersize = 20, marker=method_marker(m), color=method_color(m), label=labels[m], capsize=6.0, linewidth=3)
+            ax_pr.errorbar(master_combined_name, master_combined_data[m]['precision'], yerr=master_combined_errs[m]['precision'], markersize = 20, marker=method_marker(m), color=method_color(m), label=labels[m], capsize=6.0, linewidth=3)
+            ax_rc.errorbar(master_combined_name, master_combined_data[m]['recall'], yerr=master_combined_errs[m]['recall'], markersize = 20, marker=method_marker(m), color=method_color(m), label=labels[m], capsize=6.0, linewidth=3)
+            ax_da.errorbar(master_combined_name, master_combined_data[m]['destination_accuracy'], yerr=master_combined_errs[m]['destination_accuracy'], markersize = 20, marker=method_marker(m), color=method_color(m), label=labels[m], capsize=6.0, linewidth=3)
 
         for ax in [ax_f1, ax_pr, ax_rc, ax_da]:
             ax.set_xticks(master_combined_name)

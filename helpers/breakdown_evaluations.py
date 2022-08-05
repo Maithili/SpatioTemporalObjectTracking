@@ -50,9 +50,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
     results['all_moves'] = []
     results['num_changes'] = [[] for _ in range(lookahead_steps)]
 
-    num_routines = len(test_routines)
     for (routine, additional_info) in test_routines:
-        
         routine_length = len(routine)
         num_nodes = additional_info['active_nodes'].sum()
         routine_inputs = torch.empty(routine_length, num_nodes)
@@ -62,6 +60,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
         routine_ground_truth_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
         routine_futures = torch.ones(routine_length, num_nodes) * -1
         routine_change_types = torch.zeros(routine_length, num_nodes).to(int)
+        nodes_changed = torch.zeros(routine_length, len(node_names)).to(int)
 
         changes_output_all = torch.zeros(routine_length, num_nodes).to(bool)
         changes_gt_all = torch.zeros(routine_length, num_nodes).to(bool)
@@ -81,8 +80,8 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
                 _, details = model.step(first_data)
                 correct = deepcopy(details['gt']['location'][details['evaluate_node']] == details['output']['location'][details['evaluate_node']]).to(int)
                 wrong = deepcopy(details['gt']['location'][details['evaluate_node']] != details['output']['location'][details['evaluate_node']]).to(int)
-                results_dict['correct'] += float(correct.sum())
-                results_dict['wrong'] += float(wrong.sum())
+                results_dict['correct'] += float(correct.sum())/routine_length
+                results_dict['wrong'] += float(wrong.sum())/routine_length
                 return (details['output_probs']['location']).to(torch.float32)
 
             _ = evaluate_timeonly(_erase_edges(first_data['edges'], first_data['dynamic_edges_mask']), results['timeonly_breakdown_direct'])
@@ -107,6 +106,9 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
 
                 if i == 0:
                     routine_inputs[step,:] = deepcopy(input_tensor)
+                    input_states = details['input']['states']
+                    gt_states = details['gt']['states']
+                    nodes_changed[step, (input_states - gt_states).sum(axis=-1).squeeze() != 0] = 1
                 new_changes_out = deepcopy(np.bitwise_and(output_tensor != input_tensor , np.bitwise_not(changes_output_all[step,:]))).to(bool)
                 new_changes_gt = deepcopy(np.bitwise_and(gt_tensor != routine_inputs[step,:] , np.bitwise_not(changes_gt_all[step,:]))).to(bool)
                 # assert new_changes_out.sum().sum() == 0
@@ -149,11 +151,11 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
             # results['num_changes'][ls].append(list(changes_gt_for_step.sum(-1).reshape(-1)))
             changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
             changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
-            results['precision_breakdown'][ls][0] += int(changes_output_and_gt.sum())
-            results['precision_breakdown'][ls][1] += int(changes_output_and_not_gt.sum())
-            results['completeness_breakdown']['by_lookahead'][ls][0] += int((correct[changes_output_and_gt]).sum())
-            results['completeness_breakdown']['by_lookahead'][ls][1] += int((wrong[changes_output_and_gt]).sum())    
-            results['completeness_breakdown']['by_lookahead'][ls][2] += int((deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))).sum())   
+            results['precision_breakdown'][ls][0] += int(changes_output_and_gt.sum())/routine_length
+            results['precision_breakdown'][ls][1] += int(changes_output_and_not_gt.sum())/routine_length
+            results['completeness_breakdown']['by_lookahead'][ls][0] += int((correct[changes_output_and_gt]).sum())/routine_length
+            results['completeness_breakdown']['by_lookahead'][ls][1] += int((wrong[changes_output_and_gt]).sum())/routine_length
+            results['completeness_breakdown']['by_lookahead'][ls][2] += int((deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))).sum())/routine_length
 
         routine_change_types = routine_change_types.to(int)
         assert torch.equal(routine_change_types > 0, changes_gt_all)
@@ -161,17 +163,17 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
         # changes_output_and_gt_all = deepcopy(np.bitwise_and(changes_output_all, changes_gt))
         for ct in range(num_change_types):
             ct_mask = deepcopy(np.bitwise_and(changes_output_all, routine_change_types == (ct+1)))
-            results['completeness_breakdown']['by_change_type'][ct][0] += int((correct[ct_mask]).sum())
-            results['completeness_breakdown']['by_change_type'][ct][1] += int((wrong[ct_mask]).sum())
+            results['completeness_breakdown']['by_change_type'][ct][0] += int((correct[ct_mask]).sum())/routine_length
+            results['completeness_breakdown']['by_change_type'][ct][1] += int((wrong[ct_mask]).sum())/routine_length
             ct_mask_missed = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_all), routine_change_types == (ct+1)))
-            results['completeness_breakdown']['by_change_type'][ct][2] += int(ct_mask_missed.sum())
+            results['completeness_breakdown']['by_change_type'][ct][2] += int(ct_mask_missed.sum())/routine_length
         # print (routine_change_types.unique())
-        assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][2] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][2]) == 0 , "missed changes don't add up!"
-        assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][0] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][0]) == 0, "correct changes don't add up"
-        assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][1] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][1]) == 0, "wrong changes don't add up"
+        # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][2] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][2]) == 0 , "missed changes don't add up!"
+        # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][0] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][0]) == 0, "correct changes don't add up"
+        # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][1] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][1]) == 0, "wrong changes don't add up"
 
-        fig, axs = plt.subplots(1,5)
-        fig.set_size_inches(30,20)
+        fig, axs = plt.subplots(1,6)
+        fig.set_size_inches(12,7)  #(30,20)
 
         labels = []
         if len(node_names) > 0:
@@ -179,40 +181,50 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
 
         ax = axs[0]
         img_output = lookahead_steps - routine_output_step
-        ax.imshow(img_output, cmap='Blues', vmin=0, vmax=lookahead_steps, aspect='auto')
+        img_output[routine_ground_truths == -1] *= (-1)
+        ax.imshow(img_output, cmap='RdBu', vmin=-lookahead_steps, vmax=lookahead_steps, aspect='auto')
         ax.set_title('Stepwise Output')
         ax.set_xticks(np.arange(num_nodes))
         ax.set_xticklabels(labels, rotation=90)
 
         ax = axs[1]
-        img_output = changes_output_all.to(int)
-        img_output[routine_outputs != routine_futures] *= (-1)
-        ax.imshow(img_output, cmap='RdBu', vmin=-1, vmax=1, aspect='auto')
-        ax.set_title('Output Location Correctness')
+        img_output = lookahead_steps - routine_ground_truth_step
+        ax.imshow(img_output, cmap='Blues', vmin=0, vmax=lookahead_steps, aspect='auto')
+        ax.set_title('Stepwise Ground Truth')
         ax.set_xticks(np.arange(num_nodes))
         ax.set_xticklabels(labels, rotation=90)
 
         ax = axs[2]
-        ax.imshow(routine_future_steps.to(int), cmap='Blues', aspect='auto')
-        ax.set_title('Future Ground Truths')
+        img_output = changes_output_all.to(float)
+        img_output[routine_outputs != routine_ground_truths] *= (-1)
+        img_output[np.bitwise_and(changes_gt_all, routine_outputs != routine_ground_truths)] *= (-0.5)
+        ax.imshow(img_output, cmap='RdBu', vmin=-1, vmax=1, aspect='auto')
+        ax.set_title('Output Correctness')
         ax.set_xticks(np.arange(num_nodes))
         ax.set_xticklabels(labels, rotation=90)
 
         ax = axs[3]
-        img_gt = (routine_ground_truths >= 0).to(float)
+        img_gt = (changes_gt_all).to(float)
         img_gt[routine_ground_truths != routine_outputs] *= (-1)
-        img_gt[routine_outputs == -1] *= 0.5
+        img_gt[np.bitwise_and(changes_output_all, routine_ground_truths != routine_outputs)] *= (-0.5)
         ax.imshow(img_gt, cmap='RdBu', vmin=-1, vmax=1, aspect='auto')
-        ax.set_title('Ground Truths w/ Correctness')
+        ax.set_title('Ground Truths\n w/ Correctness')
         ax.set_xticks(np.arange(num_nodes))
         ax.set_xticklabels(labels, rotation=90)
 
         ax = axs[4]
         img_ct = routine_change_types
         ax.imshow(img_ct, cmap=newcmp, vmin=0, vmax=3, aspect='auto')
-        ax.set_title('Ground Truths w/ Change Types')
+        ax.set_title('Ground Truths\n w/ Change Types')
         ax.set_xticks(np.arange(num_nodes))
         ax.set_xticklabels(labels, rotation=90)
+
+        ax = axs[5]
+        ax.imshow(nodes_changed, cmap='Blues', aspect='auto')
+        ax.set_title('Node State Changes')
+        ax.set_xticks(np.arange(len(node_names)))
+        ax.set_xticklabels(node_names, rotation=90)
+
 
         fig.tight_layout()
         figures.append(fig)
@@ -238,9 +250,8 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
 
 def evaluate(model, data, cfg, output_dir, logger=None, print_importance=False):
     
-    info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.node_classes, print_importance=print_importance)
-    with open(os.path.join(output_dir, 'evaluation.json'), 'w') as f:
-        json.dump(info,f)
+    info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.common_data['node_classes'], print_importance=print_importance)
+    json.dump(info, open(os.path.join(output_dir, 'evaluation.json'), 'w'), indent=4)
 
     torch.save(raw_data, os.path.join(output_dir, 'raw_data.pt'))
 

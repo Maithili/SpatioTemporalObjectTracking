@@ -70,19 +70,22 @@ class GraphTranslatorModule(LightningModule):
                 learned_time_periods,
                 hidden_layer_size,
                 num_embeddings,
-                num_attention_heads):
+                num_attention_heads,
+                use_state_info,
+                feature_option_num,
+                use_embedding):
         
         super().__init__()
 
         self.num_nodes  = num_nodes 
-        self.node_feature_len = int(node_feature_len)
+        self.node_feature_len = int(node_feature_len) if use_embedding else num_nodes
         self.context_len = context_len
         self.edge_importance = edge_importance
         self.edge_dropout_prob = edge_dropout_prob
         self.tn_loss_weight = tn_loss_weight
         self.learned_time_periods = learned_time_periods
 
-        self.hidden_influence_dim = 20
+        self.hidden_influence_dim = hidden_layer_size
 
         self.edges_update_input_dim = self.hidden_influence_dim*5 + self.context_len
         
@@ -109,6 +112,7 @@ class GraphTranslatorModule(LightningModule):
                                                     nn.Linear(self.hidden_influence_dim, 1)
                                                     )
         
+        self.location_unchanged = lambda xout,xin: (nn.CrossEntropyLoss(reduction='none')(xout.squeeze(-1).permute(0,2,1), xin.squeeze(-1).long()))
         self.location_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.squeeze(-1).permute(0,2,1), y.squeeze(-1).long()))
         self.inference_location = lambda x: x.squeeze(-1).argmax(-1)
 
@@ -117,13 +121,14 @@ class GraphTranslatorModule(LightningModule):
 
         ## Transformer Encoder
 
-        self.embedding = {'class': torch.nn.Embedding(num_embeddings[0], node_feature_len), #, padding_idx=role2idx["#PAD_TOKEN"]),
-                           'category': torch.nn.Embedding(num_embeddings[1], node_feature_len), #, padding_idx=role2idx["#PAD_TOKEN"]),
-                           'states': torch.nn.Embedding(num_embeddings[2], node_feature_len), #, padding_idx=role2idx["#PAD_TOKEN"])
-                           'role_temp': torch.nn.Embedding(1, node_feature_len) #, padding_idx=role2idx["#PAD_TOKEN"])
-                          }
+        self.use_state_info = use_state_info
+        self.use_embedding = use_embedding
 
-        encoder_layers = nn.TransformerEncoderLayer(node_feature_len, num_attention_heads)
+        self.embedding = {'roles': torch.nn.Embedding(len(feature_option_num)+1, node_feature_len), #, padding_idx=role2idx["#PAD_TOKEN"]),
+                          'values': [torch.nn.Embedding(num+1, node_feature_len, padding_idx=0) for num in feature_option_num], #, padding_idx=role2idx["#PAD_TOKEN"]),
+                         }
+
+        encoder_layers = nn.TransformerEncoderLayer(node_feature_len, num_attention_heads, batch_first=True)
         self.encoder = nn.TransformerEncoder(encoder_layers, 2)
 
 
@@ -174,26 +179,32 @@ class GraphTranslatorModule(LightningModule):
         
         return xe, nodes, imp.view(size=[batch_size, self.num_nodes, self.num_nodes]).detach().cpu().numpy()
 
-    def encoder_step(self, batch_nodes_tuple):
-        batch_encodings = []
-        for nodes_tuple in batch_nodes_tuple:
-            encodings = []
-            for nt in nodes_tuple:
-                node_class, node_category, node_states = nt
-                embedding = torch.Tensor()
-                if len(node_states) > 0:
-                    embedding = torch.cat([self.embedding['states'](s).unsqueeze(0) for s in torch.Tensor(node_states).to(int)])
-                embedding = torch.cat([self.embedding['category'](torch.Tensor([node_category]).to(int)), embedding])
-                embedding = torch.cat([self.embedding['class'](torch.Tensor([node_class]).to(int)), embedding])
-                embedding = torch.cat([self.embedding['role_temp'](torch.Tensor([0]).to(int)), embedding])
-                encodings.append(self.encoder(embedding)[0,:].unsqueeze(0))
-            encodings = torch.cat(encodings, dim=0)
-            batch_encodings.append(encodings.unsqueeze(0))
-        batch_encodings = torch.cat(batch_encodings, dim=0)
-        return batch_encodings
+    def encoder_step(self, batch_nodes):
+
+        if self.use_state_info:
+            embedded_values = torch.zeros(size=(batch_nodes.size()[0], batch_nodes.size()[1], batch_nodes.size()[2] + 1, self.node_feature_len))
+            for i, embedder in enumerate(self.embedding['values']):
+                embedded_values[:,:,i,:] = embedder(batch_nodes[:,:,i])
+            embedded_roles = self.embedding['roles'](torch.Tensor(np.arange(len(self.embedding['values'])+1)).to(int)).reshape(1,1,len(self.embedding['values'])+1,self.node_feature_len)
+
+            padding_mask = torch.zeros(size=(batch_nodes.size()[0], batch_nodes.size()[1], batch_nodes.size()[2] + 1))
+            padding_mask[:,:,:-1] = (batch_nodes == 0)
+
+            b, nnodes, nr, fl = embedded_values.size()
+
+            node_encodings = self.encoder((embedded_roles + embedded_values).reshape(b*nnodes, nr, fl), src_key_padding_mask=padding_mask.reshape(b*nnodes, nr))
+            node_encodings = node_encodings.reshape(b, nnodes, nr, fl)[:,:,-1,:]
+        
+        elif self.use_embedding:
+            node_encodings = self.embedding['values'][0](batch_nodes[:,:,0])
+        
+        else:
+            node_encodings = nn.functional.one_hot(batch_nodes[:,:,0], num_classes=self.num_nodes)
+
+        return node_encodings
 
 
-    def forward(self, edges, nodes_tuple, context):
+    def forward(self, edges, nodes, context):
         """
         Args:
             adjacency: batch_size x from_nodes x to_nodes x 1
@@ -203,7 +214,7 @@ class GraphTranslatorModule(LightningModule):
             context_query: batch_size x context_len
         """
 
-        nodes = self.encoder_step(nodes_tuple)
+        nodes = self.encoder_step(nodes.to(int))
 
         batch_size, num_nodes, node_feature_len = nodes.size()
         batch_size_e, num_f_nodes, num_t_nodes = edges.size()
@@ -215,24 +226,33 @@ class GraphTranslatorModule(LightningModule):
         assert self.num_nodes == num_f_nodes, (str(self.num_nodes) +'!='+ str(num_f_nodes))
         assert self.num_nodes == num_t_nodes, (str(self.num_nodes) +'!='+ str(num_t_nodes))
 
-        # for step in range(len(self.edge_feature_len)-1):
         edges, nodes, imp = self.graph_step(edges, nodes, context)
 
         return edges.squeeze(-1), nodes, imp
 
     def step(self, batch):
         edges = batch['edges']
-        nodes_tuple = batch['nodes']
+        nodes = batch['nodes']
         y_edges = batch['y_edges']
-        y_nodes_tuple = batch['y_nodes']
+        y_nodes = batch['y_nodes']
         dyn_edges = batch['dynamic_edges_mask']
+        
+        input = {'class':nodes[:,:,0], 
+                 'category':nodes[:,:,1],
+                 'states':nodes[:,:,2:], 
+                 'location':self.inference_location(edges)}
+        
+        gt = {'class':y_nodes[:,:,0], 
+              'category':y_nodes[:,:,1],
+              'states':y_nodes[:,:,2:], 
+              'location':self.inference_location(y_edges)}
         
         if self.learned_time_periods:
             time = batch['time'].unsqueeze(1)
             context = self.context_from_time(time)
         else:
             context = batch['context']
-        edges_pred, nodes_pred, imp = self(edges, nodes_tuple, context)
+        edges_pred, nodes, imp = self(edges, nodes, context)
 
         assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
         edges_pred[dyn_edges == 0] = -float('inf')
@@ -242,17 +262,13 @@ class GraphTranslatorModule(LightningModule):
 
         evaluate_node = dyn_edges.sum(-1) > 0
 
-        input = {'class':self.inference_class(torch.Tensor(np.array([[n[0] for n in nodes] for nodes in nodes_tuple]))), 
-                 'location':self.inference_location(edges)}
                  
-        output_probs = {'class':nodes_pred, 
+        output_probs = {'class': None, #nodes_pred
                         'location':edges_inferred}
 
-        gt = {'class':self.inference_class(torch.Tensor(np.array([[n[0] for n in nodes] for nodes in y_nodes_tuple]))), 
-              'location':self.inference_location(y_edges)}
 
         losses = {'class': 0, #self.class_loss(output_probs['class'], gt['class']),
-                  'location':self.location_loss(edges_pred, gt['location'])}
+                  'location':self.location_loss(edges_pred, gt['location'])} # - 0.5*self.location_unchanged(edges_pred, input['location'])}
 
         output = {'class': None, #self.inference_class(output_probs[0]),
                   'location':self.inference_location(edges_inferred)}

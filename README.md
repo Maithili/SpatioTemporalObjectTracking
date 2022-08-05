@@ -15,6 +15,10 @@ If you're curious about the code itself:
 - The `reader.py` file contains code to process the (HOMER) dataset
 - The evaluation functions for our model are in `breakdown_evaluations.py`
 
+### Change Notes
+The states are read in the reader.py and passed on as a part of the node feature (class, category, state1, state2,... stateN). '0' means state is absent/irrelevant and the rest are indices. The model is changed accordingly to embed roles and values of states before passing them into a transformer. The evaluation is kept as was before. If we ever pursue this, we'll need to change the evaluation so that transitions like moving cereal bowl while it is still full are penalized.
+
+
 ### Citation
 ```
 Anonymous

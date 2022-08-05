@@ -9,22 +9,18 @@ trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
 
 DATE_TIME=`date "+%m%d_%H%M"`
 
-logs_dir="logs"
+logs_dir="logs/0720_stretched/set7"
 
-for train_days in 50
+for dataset in $(find data/0720_stretched/ -mindepth 1 -maxdepth 1)
 do
-    for dataset in $(find data/persona/ -mindepth 1 -maxdepth 1)
+    echo $dataset
+    for i in 1 2 3
     do
-        echo $dataset
-        python3 ./run.py --cfg=default --path=$dataset --baselines --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
-        for i in 1 2 3
+        python3 ./run.py --path=$dataset --name=ours --logs_dir=$logs_dir --write_ckpt
+        for config in oneHotClassOnly  classOnly
         do
-            python3 ./run.py --path=$dataset --name=ours --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
-            for config in allEdges timeLinear
-            do
-                python3 ./run.py --cfg=$config --path=$dataset --name=ours_$config --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
-            done
+            python3 ./run.py --cfg=$config --path=$dataset --name=$config --logs_dir=$logs_dir --write_ckpt
         done
     done
-    python3 viz.py --paths=$logs_dir/$train_days
+    python3 ./helpers/viz.py --paths=$logs_dir
 done

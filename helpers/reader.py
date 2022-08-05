@@ -9,9 +9,20 @@ import random
 from encoders import time_external
 from torch.utils.data import DataLoader
 
-from graph_visualizations import visualize_routine, visualize_parsed_routine
+from graph_visualizations import visualize_routine, visualize_parsed_routine, visualize_raw_and_parsed_routine
 
 INTERACTIVE = False
+
+ROLES = {
+    'cleanliness' : ["CLEAN", "DIRTY"],
+    'cookedness' : ["UNCOOKED", "COOKED"],
+    'fullness' : ["EMPTY", "FULL"],
+    'openness' : ["CLOSED", "OPEN"],
+    'pluggedin' : ["PLUGGED_IN", "PLUGGED_OUT"],
+    'turnedon' : ["OFF", "ON"],
+    'wetness' : ["DRY", "WET"]
+    }
+
 
 def not_a_tree(original_edges, sparse_edges, nodes):
     num_parents = sparse_edges.sum(axis=-1)
@@ -42,15 +53,10 @@ class CollateToDict():
 
     def __call__(self, tensor_tuple):
         data = {label:torch.Tensor() for label in self.dict_labels}
-        data['nodes'] = []
-        data['y_nodes'] = []
         for tensors in tensor_tuple:
             assert len(tensors) == len(self.dict_labels), f"Wrong number of labels provided to the collate function! {len(self.dict_labels)} labels for {len(tensors)} tensors"
             for label, tensor in zip(self.dict_labels, tensors):
-                if label in ['nodes', 'y_nodes']:
-                    data[label].append(tensor)
-                else:
-                    data[label]=torch.cat([data[label], tensor.unsqueeze(0)], dim=0)
+                data[label]=torch.cat([data[label], tensor.unsqueeze(0)], dim=0)
         return data
 
 class DataSplit():
@@ -83,7 +89,7 @@ class DataSplit():
         return torch.Tensor(sample['prev_edges']), sample['prev_nodes'], self.time_encoder(sample['time']), torch.Tensor(sample['edges']), sample['nodes'], self.active_edges, torch.tensor(sample['time']).to(int), sample['change_type']
     def get_routine(self, idx: int):
         data_list = torch.load(os.path.join(self.routines_dir, self.files[idx])) 
-        samples = [(torch.Tensor(sample['prev_edges']), sample['prev_nodes'], self.time_encoder(sample['time']), torch.Tensor(sample['edges']), sample['nodes'], self.active_edges, torch.tensor(sample['time']), sample['change_type']) for sample in data_list]
+        samples = [(torch.Tensor(sample['prev_edges']), sample['prev_nodes'], self.time_encoder(sample['time']), torch.Tensor(sample['edges']), sample['nodes'], self.active_edges, torch.tensor(sample['time']).to(int), sample['change_type']) for sample in data_list]
         additional_info = {'timestamp':[time_external(sample['time']) for sample in data_list], 'active_nodes':self.active_edges.sum(-1) > 0}
         return samples, additional_info
     def __getitem__(self, idx: int):
@@ -124,13 +130,10 @@ class RoutinesDataset():
         
         self.home_graph = torch.load(os.path.join(data_path, 'home_graph.pt'))
 
-        self.node_ids = self.common_data['node_ids']
-        self.node_classes = self.common_data['node_classes']
-        self.node_categories = self.common_data['node_categories']
-        self.node_states = self.common_data['node_states']
-        self.node_idx_from_id = {int(k):v for k,v in self.common_data['node_idx_from_id'].items()}
-        self.edge_keys = self.common_data['edge_keys']
-        self.static_nodes = self.common_data['static_nodes']
+        # self.node_ids = self.common_data['node_ids']
+        # self.node_idx_from_id = {int(k):v for k,v in self.common_data['node_idx_from_id'].items()}
+        # self.edge_keys = self.common_data['edge_keys']
+        # self.static_nodes = self.common_data['static_nodes']
         
             
         # Generate train and test loaders
@@ -144,9 +147,10 @@ class RoutinesDataset():
         model_data = self.test.collate_fn([self.test[0]])
         self.params['n_nodes'] = model_data['edges'].size()[1]
         self.params['c_len'] = model_data['context'].size()[-1]
-        self.params['num_classes'] = len(self.node_classes)
-        self.params['num_categories'] = len(self.node_categories)
-        self.params['num_states'] = len(self.node_states)
+        self.params['num_classes'] = len(self.common_data['node_classes'])
+        self.params['num_categories'] = len(self.common_data['node_categories'])
+        self.params['num_states'] = len(self.common_data['node_states'])
+
 
     def get_train_loader(self):
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
@@ -217,18 +221,57 @@ class ProcessDataset():
         torch.save(self.nonstatic_edges, os.path.join(output_path, 'nonstatic_edges.pt'))
         torch.save(self.home_graph, os.path.join(output_path, 'home_graph.pt'))
 
+    def feature_from_node(self, node=None):
+        if node == None:
+            empty_feature = self.state_features["NONE"]
+            empty_feature = np.concatenate([np.array([0, 0]),empty_feature], axis=-1).reshape(1,-1)
+            return empty_feature
+
+        if len(node['states']) > 0:
+            feature = sum(self.state_features[state] for state in node['states'])
+        else:
+            feature = self.state_features["NONE"]
+        cls = self.common_data['node_roles']['class'].index(node['class_name'])
+        cat = self.common_data['node_roles']['category'].index(node['category'])
+        feature = np.concatenate([np.array([cls, cat]),feature], axis=-1)
+        return feature.reshape(1,-1)
+
+    def decode_states(self, state_array):
+        states = set()
+        for idx_onebased, (role, values) in zip(state_array, ROLES.items()):
+            if idx_onebased > 0:
+                states.add(values[idx_onebased-1])
+        return states
+
     def read_classes(self, classes_path):
         with open(classes_path, 'r') as f:
             classes = json.load(f)
-        self.common_data['node_ids'] = [n['id'] for n in classes['nodes']]
         self.common_data['node_classes'] = [n['class_name'] for n in classes['nodes']]
-        node_categories = [n['category'] for n in classes['nodes']]
-        self.common_data['node_idx_from_id'] = {int(n['id']):i for i,n in enumerate(classes['nodes'])}
+        self.common_data['node_categories'] = [n['category'] for n in classes['nodes']]
         self.common_data['node_states'] = classes['states']
+        self.common_data['node_ids'] = [n['id'] for n in classes['nodes']]
+        self.common_data['node_idx_from_id'] = {int(n['id']):i for i,n in enumerate(classes['nodes'])}
+        
+        self.state_features = {}
+        self.common_data['feature_order'] = ['class', 'category']
+        for loc, (role, values) in enumerate(ROLES.items()):
+            self.common_data['feature_order'].append(role)
+            for idx, v in enumerate(values):
+                self.state_features[v] = np.zeros((len(ROLES)))
+                self.state_features[v][loc] = idx + 1
+            self.state_features["NONE"] = np.zeros((len(ROLES)))
+
+        self.common_data['node_roles'] = ROLES
+        self.common_data['node_roles']['class'] = list(set(self.common_data['node_classes']))
+        self.common_data['node_roles']['class'].sort()
+        self.common_data['node_roles']['category'] = list(set(self.common_data['node_categories']))
+        self.common_data['node_roles']['category'].sort()
+        self.common_data['feature_options_num'] = [len(self.common_data['node_roles'][f]) for f in self.common_data['feature_order']]
 
         # Diagonal nodes are always irrelevant
         self.nonstatic_edges = 1 - np.eye(len(classes['nodes']))
         # Rooms, furniture and appliances nodes don't move
+        node_categories = [n['category'] for n in classes['nodes']]
         self.nonstatic_edges[np.where(np.array(node_categories) == "Rooms"),:] = 0
         self.nonstatic_edges[np.where(np.array(node_categories) == "Furniture"),:] = 0
         self.nonstatic_edges[np.where(np.array(node_categories) == "Decor"),:] = 0
@@ -241,7 +284,6 @@ class ProcessDataset():
         self.common_data['edge_keys'] = classes['edges']
         static = lambda category : category in ["Furniture", "Room"]
         self.common_data['static_nodes'] = [n['id'] for n in classes['nodes'] if static(n['category'])]
-        self.common_data['node_categories'] = list(set(node_categories))
 
 
     def read_data(self, data_dir, output_dir):
@@ -258,8 +300,7 @@ class ProcessDataset():
                     routine = json.load(f_in)
                 nodes, edges = self.read_graphs(routine["graphs"])
                 if viz:
-                    visualize_routine(routine)
-                    visualize_parsed_routine(edges, nodes, self.common_data['node_classes'])
+                    visualize_raw_and_parsed_routine(routine, edges, nodes, self.common_data['node_classes'], self.common_data['node_categories'])
                     inp = input(f'Do you want to visualize the next routine?')
                     viz = (inp == 'y')
                 self.home_graph = edges[0]
@@ -283,12 +324,11 @@ class ProcessDataset():
         node_features_list = []
         edge_features_list = []
         for i,graph in enumerate(graphs):
-            node_features_list.append([])
-            for n in graph['nodes']:
-                node_class = self.common_data['node_classes'].index(n['class_name'])
-                node_categ = self.common_data['node_categories'].index(n['category'])
-                node_states = [self.common_data['node_states'].index(ns) for ns in n['states']]
-                node_features_list[-1].append((node_class, node_categ, node_states))
+            assert len(graph['nodes']) == len(self.common_data['node_idx_from_id']), "Weren't we supposed to have the same number of nodes each time?!"
+            node_features = np.zeros((len(graph['nodes']),self.feature_from_node().shape[-1]))
+            for node in graph['nodes']:
+                node_features[self.common_data['node_idx_from_id'][node['id']],:] = self.feature_from_node(node)
+            node_features_list.append(node_features)
             edge_features = np.zeros((num_nodes, num_nodes))
             for e in graph['edges']:
                 if e['relation_type'] in self.common_data['edge_keys']:
@@ -301,7 +341,7 @@ class ProcessDataset():
             assert (edge_features[:,:].sum(axis=-1)).max() == 1, f"Matrix {i} not really a tree \n{edge_features[:,:]}"
             self.seen_edges[:,:] += edge_features[:,:]
             edge_features_list.append(edge_features)
-        return node_features_list, edge_features_list
+        return torch.Tensor(np.array(node_features_list)), torch.Tensor(np.array(edge_features_list))
 
     def make_pairwise(self, nodes, edges, times):
         pairwise_samples = []
@@ -326,7 +366,17 @@ class ProcessDataset():
             if prev_edges is not None:
                 change_type = (np.absolute(edges[data_idx] - prev_edges)).sum(-1)
                 change_type += (self.home_graph * (edges[data_idx] - prev_edges)).sum(-1)
-                pairwise_samples.append({'prev_edges': torch.Tensor(prev_edges), 'prev_nodes': prev_nodes, 'time': t, 'edges': torch.Tensor((edges[data_idx])), 'nodes': nodes[data_idx], 'change_type': torch.Tensor(change_type).to(int)})
+                pairwise_samples.append({'prev_edges': torch.Tensor(prev_edges), 
+                                         'prev_nodes': prev_nodes, 
+                                         'time': t, 
+                                         'edges': torch.Tensor((edges[data_idx])), 
+                                         'nodes': nodes[data_idx], 
+                                         'change_type': torch.Tensor(change_type).to(int)})
+                # if (prev_nodes != nodes[data_idx]).max() > 0:
+                #     print(prev_nodes)
+                #     print(nodes[data_idx])
+                #     print(prev_nodes - nodes[data_idx])
+                #     print('\n\n')
             prev_edges = edges[data_idx]
             prev_nodes = nodes[data_idx]
         return pairwise_samples
@@ -334,9 +384,8 @@ class ProcessDataset():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/differentBreakfasts0202', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/0720_stretched/0720_stretched_breakfast', help='Path where the data lives. Must contain routines, info and classes json files.')
     args = parser.parse_args()
-
 
     data_path = (os.path.join(args.path, 'routines_train'), os.path.join(args.path, 'routines_test'))
     if not (os.path.exists(data_path[0]) and os.path.exists(data_path[1])):

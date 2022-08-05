@@ -1,3 +1,4 @@
+import os
 import networkx as nx
 import torch
 from math import sqrt, floor, ceil
@@ -33,11 +34,19 @@ days = ["Monday", 'Tuesday', "Wednesday", "Thursday", "Friday", "Saturday", "Sun
 def _get_node_info(graph_nodes, node_classes):
     node_names = []
     for node in list(graph_nodes):
-        next_node = node_classes[node.argmax()]
+        next_node = node_classes[int(node)]
         while next_node in node_names:
             next_node += '.'
         node_names.append(next_node)
     return node_names
+
+def _de_duplicate(list_in):
+    list_out = []
+    for a in list_in:
+        while a in list_out:
+            a += '.'
+        list_out.append(a)
+    return list_out
 
 def _draw_graph(G, ax=None, pos=None, colors = "#996888"):
     if pos is None:
@@ -49,15 +58,22 @@ def _draw_graph(G, ax=None, pos=None, colors = "#996888"):
 
 def _visualize_graph(graph_nodes, graph_edges, node_classes, ax=None, pos=None, node_categories=[], node_color=None, edge_thresh=0.1):
     G = nx.DiGraph()
-    graph_node_names = _get_node_info(graph_nodes, node_classes)
+    # graph_node_names = _get_node_info(graph_nodes, node_classes)
+    graph_node_names = _de_duplicate(node_classes)
     colors = "#996888"
     if node_color is not None:
         colors = node_color
     elif node_categories:
-        categories = _get_node_info(graph_nodes, node_categories)
+        # categories = [node_categories[int(node)] for node in list(graph_nodes)]
+        categories = node_categories
         colors = [category_colors[c] for c in categories]
+   
     G.add_nodes_from(graph_node_names)
-    
+    if pos is None:
+        layers = category_colors.values()
+        nlist = [[i for i,c in zip(graph_node_names,colors) if c==color] for color in layers]
+        pos = nx.shell_layout(G, nlist=nlist)
+
     nodes_from, nodes_to = np.argwhere(graph_edges > edge_thresh)
 
     for n_from, n_to in zip(list(nodes_from), list(nodes_to)):
@@ -83,7 +99,6 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
         while(len(routine_data)):
             if fig_step == num_steps_per_fig:
                 plt.show()
-                # plt.savefig('temp.jpg')
                 inp = input('Do you want to visualize another output? (y/n)')
                 if inp == 'n':
                     break
@@ -98,7 +113,7 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
             
             colors = [node_colors_by_active[act] for act in details['evaluate_node'].squeeze(0)]
             
-            info = 'Context : '+str(data['context'])+' \nLoss : '+str(eval['losses']['mean'])+' ; \nAccuracy : '+str(eval['accuracy'])
+            info = 'Context : '+str(human_readable_from_external(time_external(data['time'])))+' \nLoss : '+str(eval['losses']['mean'])+' ; \nAccuracy : '+str(eval['accuracy'])
 
             ax = axs[0][fig_step]
             positions = _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), F.one_hot(details['gt']['location'].squeeze(0)), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
@@ -135,57 +150,72 @@ def visualize_unconditional_datapoint(model, routines, node_classes, node_catego
 
 
 
-def visualize_conditional_datapoint(model, dataloader, node_classes, node_categories = [], use_output_nodes = False):
+def visualize_conditional_datapoint(model, datasplit, node_classes, node_categories = [], use_output_nodes = False, save_fig_dir = None, ask=True):
 
-    inp = input('Do you want to visualize conditioned outputs? (y/n)')
+    if ask:
+        inp = input('Do you want to visualize conditioned outputs? (y/n)')
+    else:
+        inp = 'y'
 
-    data_list = list(dataloader)
+    data_list = list(datasplit)
+    idx = 0
     while(inp == 'y' and len(data_list)>0):
         data = data_list.pop()
+        data = datasplit.collate_fn([data])
         eval, details = model.step(data)
-        
-        colors = [node_colors_by_active[act] for act in details['evaluate_node'].squeeze(0)]
+
+        nodes = details['input']['class'].squeeze(0).to(int)
+        input_edges = F.one_hot(details['input']['location'].squeeze(0), num_classes = details['input']['location'].size()[-1])
+        output_edges = details['output']['location'].squeeze(0)
+        output_probs = F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1)
+        gt_edges = F.one_hot(details['gt']['location'].squeeze(0), num_classes = details['gt']['location'].size()[-1])
+
+        colors = None #[node_colors_by_active[act] for act in details['evaluate_node'].squeeze(0)]
 
         fig, axs = plt.subplots(2,2)
         fig.set_size_inches(28, 16)
         
         ax = axs[0][0]
-        positions = _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.one_hot(details['input']['location'].squeeze(0)), node_classes, ax = ax, node_categories=node_categories, node_color=colors)
+        positions = _visualize_graph(nodes, input_edges, node_classes, ax = ax, node_categories=node_categories, node_color=colors)
         ax.set_title('Input')
 
         ax = axs[1][0]
-        if use_output_nodes:
-            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
-        else:
-            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), F.softmax(details['output_probs']['location'].squeeze(0).squeeze(-1), dim=-1), node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        _visualize_graph(nodes, output_probs, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
         ax.set_title('Predicted (probabilities)')
             
         ax = axs[1][1]
-        output = F.one_hot(details['output']['location'].squeeze(0), num_classes = details['output']['location'].size()[-1]) * details['evaluate_node'].squeeze(0).int().unsqueeze(1)
-        new_in_out = torch.clamp(output - 0.5 * F.one_hot(details['input']['location'].squeeze(0), num_classes = details['input']['location'].size()[-1]), min=0, max=1)
-        if use_output_nodes:
-            _visualize_graph(F.one_hot(details['output']['class'].squeeze(0)), new_in_out, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
-        else:
-            _visualize_graph(F.one_hot(details['input']['class'].squeeze(0)), new_in_out, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        output = F.one_hot(output_edges, num_classes = output_edges.size()[-1]) * details['evaluate_node'].squeeze(0).int().unsqueeze(1)
+        new_in_out = torch.clamp(output - 0.5 * input_edges, min=0, max=1)
+        _visualize_graph(nodes, new_in_out, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
         ax.set_title('Predicted')
         
-        new_in_gt = torch.clamp(F.one_hot(details['gt']['location'].squeeze(0), num_classes = details['gt']['location'].size()[-1]) - 0.5 * F.one_hot(details['input']['location'].squeeze(0), num_classes = details['input']['location'].size()[-1]), min=0, max=1)
+        new_in_gt = torch.clamp(gt_edges - 0.5 * input_edges, min=0, max=1)
         ax = axs[0][1]
-        _visualize_graph(F.one_hot(details['gt']['class'].squeeze(0)), new_in_gt, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
+        _visualize_graph(nodes, new_in_gt, node_classes, ax = ax, pos=positions, node_categories=node_categories, node_color=colors)
         ax.set_title('Expected')
 
-        fig.suptitle('Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy'])+' ; Context '+human_readable_from_external(data['context'].squeeze(0)))
+        fig.suptitle('Loss : '+str(eval['losses']['mean'])+' ; Accuracy : '+str(eval['accuracy'])+' ; Context '+human_readable_from_external(time_external(data['time'])))
         
-        if eval['accuracy']<1 or new_in_gt.max() > 0.6 or new_in_out.max() > 0.6:
-            plt.show()
-            # plt.savefig('temp.jpg')
-            inp = input('Do you want to visualize another output? (y/n)')
+        if save_fig_dir is None:
+            save_fig_dir = '.'
+        if new_in_out.max() > 0.6:
+            filename = os.path.join(save_fig_dir,'outChange_{:02d}.jpg'.format(idx))
+            plt.savefig(filename)
+            if ask:
+                inp = input('Do you want to visualize another output? (y/n)')
+        elif new_in_gt.max() > 0.6:
+            filename = os.path.join(save_fig_dir,'gtChange_{:02d}.jpg'.format(idx))
+            plt.savefig(filename)
+            if ask:
+                inp = input('Do you want to visualize another output? (y/n)')
         else:
             plt.close(fig)
+        
+        idx += 1
 
 
-def visualize_parsed_routine(edges, nodes, node_classes):
-    num_plots = edges.size()[0]
+def visualize_parsed_routine(edges, nodes, node_classes, node_categories=None):
+    num_plots = len(edges)
     num_x = int(floor(sqrt(num_plots)))
     num_y = int(ceil(num_plots/num_x))
     fig, axs = plt.subplots(num_x,num_y)
@@ -193,8 +223,9 @@ def visualize_parsed_routine(edges, nodes, node_classes):
     axs = axs.reshape(-1,)
     pos=None
     for i in range(num_plots):
-        pos = _visualize_graph(nodes[i,:,:].squeeze(0), edges[i,:,:].squeeze(0), node_classes=node_classes, ax = axs[i])
-    plt.show()
+        pos = _visualize_graph([n[0] for n in nodes[i]], torch.Tensor(edges[i]), node_classes=node_classes, node_categories=node_categories, ax = axs[i], pos=pos)
+    plt.savefig('temp.jpg')
+    # plt.show()
 
 
 def visualize_routine(routine, sparsify=False):
@@ -242,3 +273,48 @@ def visualize_routine(routine, sparsify=False):
     # plt.show()
     plt.savefig('temp.jpg')
     
+def visualize_raw_and_parsed_routine(routine, edges, nodes, node_classes, node_categories=None):
+    num_plots = len(edges) * 2 + 1
+    num_x = int(floor(sqrt(num_plots)))
+    num_y = int(ceil(num_plots/num_x))
+    fig, axs = plt.subplots(num_x,num_y)
+    fig.set_size_inches(28, 16)
+    axs = axs.reshape(-1,)
+    pos=None
+    
+    for i,(graph,t) in enumerate(zip(graphs,times)):
+        node_labels = {n['id']:n['class_name'] for n in graph['nodes']}
+        node_ids = [n['id'] for n in graph['nodes']]
+        node_colors = [category_colors[n['category']] for n in graph['nodes']]
+        G = nx.DiGraph()
+        G.add_nodes_from(node_ids)
+        for edge in graph['edges']:
+            if edge['relation_type'] in ["INSIDE","ON"]:
+                n1, n2 = edge['from_id'], edge['to_id']
+                G.add_edge(n1, n2, weight=1)
+        
+        if sparsify:
+            for nid in node_ids:
+                direct_edges = [to_1 for fro_1,to_1 in G.edges() if fro_1 == nid]
+                connected_HO = set([to_2 for fro_2,to_2 in G.edges() for to_1 in direct_edges if fro_2 == to_1])
+                for _ in range(10):
+                    next_connection = [to_2 for fro_2,to_2 in G.edges() for to_1 in connected_HO if fro_2 == to_1]
+                    if not next_connection:
+                        break
+                    connected_HO.update(next_connection)
+                for to in direct_edges:
+                    if to in connected_HO:
+                        G.remove_edge(nid,to)
+
+        if pos is None:
+            layers = category_colors.values()
+            nlist = [[i for i,c in zip(node_ids,node_colors) if c==color] for color in layers]
+            pos = nx.shell_layout(G, nlist=nlist)
+            # pos = nx.spring_layout(G)
+        nx.draw_networkx(G, pos=pos, ax=axs[i], edge_cmap=plt.cm.Blues, edge_vmin = 0 ,edge_vmax = 1, node_size=300, node_color=node_colors, labels = node_labels)
+        time_h = human_readable_from_external(time_external(t))
+        axs[i].set_title(time_h)
+
+    for j in range(num_plots):
+        pos = _visualize_graph([n[0] for n in nodes[j]], torch.Tensor(edges[j]), node_classes=node_classes, node_categories=node_categories, ax = axs[i+j+1], pos=pos)
+    plt.savefig('temp.jpg')    
