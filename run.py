@@ -17,6 +17,7 @@ from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_
 from encoders import TimeEncodingOptions
 from breakdown_evaluations import evaluate as evaluate_applications
 from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned
+from graph_visualizations import visualize_conditional_datapoint
 
 import random
 random.seed(23435)
@@ -34,7 +35,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags, mode='disabled')
+    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags, mode='disabled', save_dir='wandb_logs')
 
     cfg['DATA_PARAM'] = data.params
     wandb_logger.experiment.config.update(cfg)
@@ -49,10 +50,16 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                                             context_len=data.params['c_len'],
                                                             edge_importance=cfg['EDGE_IMPORTANCE'],
                                                             edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
-                                                            tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
                                                             learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
-                                                            hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
-        evaluation_summary = evaluate_applications(model, data, cfg, output_dir, logger=wandb_logger.experiment, print_importance=True)
+                                                            hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
+                                                            learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
+                                                            preprocess_context=cfg['PREPROCESS_CONTEXT'])
+
+        graph_visuals_out = os.path.join(checkpoint_dir, 'graph_visuals')
+        if not os.path.exists(graph_visuals_out):
+            os.makedirs(graph_visuals_out)
+        visualize_conditional_datapoint(model, data.test, data.common_data['node_classes'], node_categories = data.common_data['node_categories'], use_output_nodes = False, save_fig_dir = graph_visuals_out, ask=False)
+
 
     else:
         model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
@@ -60,9 +67,10 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                 context_len=data.params['c_len'],
                                 edge_importance=cfg['EDGE_IMPORTANCE'],
                                 edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
-                                tn_loss_weight=cfg['TN_LOSS_WEIGHT'],
                                 learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
-                                hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'])
+                                hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
+                                learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
+                                preprocess_context=cfg['PREPROCESS_CONTEXT'])
 
         epochs = cfg['EPOCHS'] if isinstance(cfg['EPOCHS'],list) else [cfg['EPOCHS']]
         done_epochs = 0
@@ -94,7 +102,6 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
 
             if write_ckpt:
                 torch.save(model.state_dict(), os.path.join(output_dir_new,'weights.pt'))
-    
     
     wandb.finish()
 
@@ -158,17 +165,17 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/Persona0219/hard_worker', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/persona/persona0', help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--train_days', type=int, help='Number of routines to train on.')
-    parser.add_argument('--name', type=str, help='Name of run.')
+    parser.add_argument('--name', type=str, default='trial', help='Name of run.')
     parser.add_argument('--tags', type=str, help='Tags for the run separated by a comma \',\'')
     parser.add_argument('--baselines', action='store_true')
     parser.add_argument('--ckpt_dir', type=str, help='Path to checkpoint file')
     parser.add_argument('--read_ckpt', action='store_true')
     parser.add_argument('--write_ckpt', action='store_true')
-    parser.add_argument('--logs_dir', type=str, default='logs', help='Path to store putputs.')
+    parser.add_argument('--logs_dir', type=str, default='logs_default', help='Path to store putputs.')
 
     args = parser.parse_args()
 

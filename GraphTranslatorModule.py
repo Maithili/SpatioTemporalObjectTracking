@@ -25,37 +25,26 @@ def get_masks(gt_tensor, output_tensor, input_tensor):
     masks['wrong'] = gt_tensor != output_tensor
     return masks
 
-def evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor, tn_loss_weight):
+def evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor):
     masks = get_masks(gt_tensor, output_tensor, input_tensor)
     result = {}
     result['accuracy'] = (masks['correct'].sum())/torch.numel(gt_tensor)
     if loss_tensor is not None:
         result['losses'] = {}
-        if tn_loss_weight is not None:
-            not_tn = np.bitwise_not(masks['tn']).to(bool)
-            # important_losses = loss_tensor[cm_masks['tp']]
-            # unimportant_losses = loss_tensor[np.bitwise_or(cm_masks['fp'], cm_masks['fn'])]
-            important_losses = loss_tensor[not_tn]
-            unimportant_losses = loss_tensor[masks['tn']]
-            result['losses']['mean'] = (1 - tn_loss_weight) * important_losses.mean() + tn_loss_weight * unimportant_losses.mean()
-            result['losses']['important'] = important_losses.mean()
-            result['losses']['unimportant'] = unimportant_losses.mean()
-        else:
-            result['losses']['mean'] = loss_tensor.mean()
-        result['losses']['correct'] = loss_tensor[masks['correct']].sum()/masks['correct'].sum()
-        result['losses']['wrong'] = loss_tensor[masks['wrong']].sum()/masks['wrong'].sum()
+        result['losses']['mean'] = loss_tensor.mean()
+        for key, mask in masks.items():
+            result['losses'][key] = loss_tensor[mask].sum()/mask.sum()
     return result
 
-def evaluate(gt, output, input, evaluate_node, losses=None, tn_loss_weight=None):
+def evaluate(gt, output, input, evaluate_node, losses=None):
     gt_tensor = gt[evaluate_node]
     input_tensor = input[evaluate_node]
     output_tensor = output[evaluate_node]
     if losses is not None:
         loss_tensor = losses[evaluate_node]
-        result = evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor, tn_loss_weight)
+        result = evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor)
     else:
-        result = evaluate_accuracy(gt_tensor, None, output_tensor, input_tensor, tn_loss_weight)
-    # result['CM'] = evaluate_precision_recall(gt_tensor, output_tensor, input_tensor)
+        result = evaluate_accuracy(gt_tensor, None, output_tensor, input_tensor)
     return result
 
 
@@ -66,9 +55,10 @@ class GraphTranslatorModule(LightningModule):
                 context_len, 
                 edge_importance,
                 edge_dropout_prob,
-                tn_loss_weight,
                 learned_time_periods,
-                hidden_layer_size):
+                hidden_layer_size,
+                learn_node_embeddings,
+                preprocess_context):
         
         super().__init__()
 
@@ -77,8 +67,9 @@ class GraphTranslatorModule(LightningModule):
         self.context_len = context_len
         self.edge_importance = edge_importance
         self.edge_dropout_prob = edge_dropout_prob
-        self.tn_loss_weight = tn_loss_weight
         self.learned_time_periods = learned_time_periods
+        self.learn_node_embeddings = learn_node_embeddings
+        self.preprocess_context = preprocess_context
 
         self.hidden_influence_dim = 20
 
@@ -90,6 +81,14 @@ class GraphTranslatorModule(LightningModule):
             omega_one_day = torch.Tensor([2*np.pi/60*24])
             self.context_from_time = lambda t : torch.cat((torch.cos(omega_one_day * t / self.period_in_days),torch.sin(omega_one_day * t / self.period_in_days)), axis=1)
  
+        if preprocess_context:
+            self.mlp_context = nn.Sequential(nn.Linear(self.context_len, self.context_len),
+                                             nn.ReLU(),
+                                             nn.Linear(self.context_len, self.context_len),
+                                             )
+        else:
+            self.mlp_context = lambda x: x
+
         mlp_hidden = hidden_layer_size
 
         self.mlp_influence = nn.Sequential(nn.Linear(2*self.node_feature_len+1, mlp_hidden),
@@ -195,9 +194,9 @@ class GraphTranslatorModule(LightningModule):
         
         if self.learned_time_periods:
             time = batch['time'].unsqueeze(1)
-            context = self.context_from_time(time)
+            context = self.mlp_context(self.context_from_time(time))
         else:
-            context = batch['context']
+            context = self.mlp_context(batch['context'])
         edges_pred, nodes_pred, imp = self(edges, nodes, context)
 
         assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
@@ -231,11 +230,8 @@ class GraphTranslatorModule(LightningModule):
         # assert list(output_probs['class'].size())[:-1] == list(nodes.size())[:-1], 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), nodes.size())
         # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
 
-        eval = evaluate(gt=gt['location'], output=output['location'], input=input['location'], evaluate_node=evaluate_node, losses=losses['location'], tn_loss_weight=self.tn_loss_weight)
+        eval = evaluate(gt=gt['location'], output=output['location'], input=input['location'], evaluate_node=evaluate_node, losses=losses['location'])
 
-        ## NOT USED
-        # eval['duplication_loss'] = (F.softmax(output_probs['location']) * edges)[evaluate_node].sum()
-        
         details = {'input':input, 
                    'output_probs':output_probs, 
                    'gt':gt, 
