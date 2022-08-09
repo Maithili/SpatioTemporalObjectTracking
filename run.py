@@ -104,7 +104,6 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
                 torch.save(model.state_dict(), os.path.join(output_dir_new,'weights.pt'))
     
 
-
 def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False, tags=[], train_days=None, logs_dir='logs', finetune=False):
     
     if cfg['NAME'] is None:
