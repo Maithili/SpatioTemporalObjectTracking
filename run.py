@@ -35,13 +35,12 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags, mode='disabled', save_dir='wandb_logs')
+    wandb.watch(log='all')
+    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags, save_dir='wandb_logs')
 
     cfg['DATA_PARAM'] = data.params
     wandb_logger.experiment.config.update(cfg)
     
-
-
     if read_ckpt:
         checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
         model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
@@ -53,7 +52,9 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                                             learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                                             hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
                                                             learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
-                                                            preprocess_context=cfg['PREPROCESS_CONTEXT'])
+                                                            preprocess_context=cfg['PREPROCESS_CONTEXT'],
+                                                            num_activities=data.params['n_activities'],
+                                                            context_type_to_use='activity')
 
         graph_visuals_out = os.path.join(checkpoint_dir, 'graph_visuals')
         if not os.path.exists(graph_visuals_out):
@@ -70,7 +71,9 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                 learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                 hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
                                 learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
-                                preprocess_context=cfg['PREPROCESS_CONTEXT'])
+                                preprocess_context=cfg['PREPROCESS_CONTEXT'],
+                                num_activities=data.params['n_activities'],
+                                context_type_to_use='activity')
 
         epochs = cfg['EPOCHS'] if isinstance(cfg['EPOCHS'],list) else [cfg['EPOCHS']]
         done_epochs = 0
@@ -165,7 +168,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/persona/persona0', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/routineWithActivities/persona0', help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--train_days', type=int, help='Number of routines to train on.')

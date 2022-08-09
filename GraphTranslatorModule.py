@@ -58,7 +58,9 @@ class GraphTranslatorModule(LightningModule):
                 learned_time_periods,
                 hidden_layer_size,
                 learn_node_embeddings,
-                preprocess_context):
+                preprocess_context,
+                num_activities,
+                context_type_to_use):
         
         super().__init__()
 
@@ -70,6 +72,7 @@ class GraphTranslatorModule(LightningModule):
         self.learned_time_periods = learned_time_periods
         self.learn_node_embeddings = learn_node_embeddings
         self.preprocess_context = preprocess_context
+        self.context_type_to_use = context_type_to_use
 
         self.hidden_influence_dim = 20
 
@@ -81,13 +84,14 @@ class GraphTranslatorModule(LightningModule):
             omega_one_day = torch.Tensor([2*np.pi/60*24])
             self.context_from_time = lambda t : torch.cat((torch.cos(omega_one_day * t / self.period_in_days),torch.sin(omega_one_day * t / self.period_in_days)), axis=1)
  
-        if preprocess_context:
-            self.mlp_context = nn.Sequential(nn.Linear(self.context_len, self.context_len),
+        self.mlp_context = nn.Sequential(nn.Linear(self.context_len, self.context_len),
                                              nn.ReLU(),
                                              nn.Linear(self.context_len, self.context_len),
                                              )
-        else:
-            self.mlp_context = lambda x: x
+
+        self.embed_context_action = torch.nn.Embedding(num_activities, self.context_len)
+
+
 
         mlp_hidden = hidden_layer_size
 
@@ -113,7 +117,21 @@ class GraphTranslatorModule(LightningModule):
         self.inference_class = lambda xc: xc.argmax(-1)
 
         # self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
-        
+
+    def get_context(self, batch_in):
+        if self.context_type_to_use == 'time':
+            if self.learned_time_periods:
+                input('Are you really trying to learn time periods?')
+                time = batch_in['time'].unsqueeze(1)
+                context = self.context_from_time(time)
+            else:
+                context = batch_in['context_time']
+        elif self.context_type_to_use == 'activity':
+            context = self.embed_context_action(batch_in['context_activity'].to(int))
+        if self.preprocess_context:
+            context = self.mlp_context(context)
+        return context
+
     def graph_step(self, edges, nodes, context):
 
         batch_size, num_nodes, node_feature_len = nodes.size()
@@ -192,11 +210,8 @@ class GraphTranslatorModule(LightningModule):
         y_nodes = batch['y_nodes']
         dyn_edges = batch['dynamic_edges_mask']
         
-        if self.learned_time_periods:
-            time = batch['time'].unsqueeze(1)
-            context = self.mlp_context(self.context_from_time(time))
-        else:
-            context = self.mlp_context(batch['context'])
+        context = self.get_context(batch_in=batch)
+        
         edges_pred, nodes_pred, imp = self(edges, nodes, context)
 
         assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
