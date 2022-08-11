@@ -9,22 +9,22 @@ trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
 
 DATE_TIME=`date "+%m%d_%H%M"`
 
-logs_dir="logs"
+logs_dir="logs/probing_context"
 
-for train_days in 50
-do
-    for dataset in $(find data/persona/ -mindepth 1 -maxdepth 1)
+# for train_days in 50
+# do
+    for dataset in $(find data/routineWithActivities/ -mindepth 1 -maxdepth 1)
     do
         echo $dataset
-        python3 ./run.py --cfg=default --path=$dataset --baselines --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
+        # python3 ./run.py --cfg=default --path=$dataset --baselines --logs_dir=$logs_dir/$train_days --write_ckpt
         for i in 1 2 3
         do
-            python3 ./run.py --path=$dataset --name=ours --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
-            for config in allEdges timeLinear
+            python3 ./run.py --path=$dataset --name=timeSine --logs_dir=$logs_dir --write_ckpt
+            for config in timeLinear randomContext diffContext
             do
-                python3 ./run.py --cfg=$config --path=$dataset --name=ours_$config --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
+                python3 ./run.py --cfg=$config --path=$dataset --name=$config --logs_dir=$logs_dir --write_ckpt
             done
         done
+        python3 helper/viz.py --paths=$logs_dir
     done
-    python3 viz.py --paths=$logs_dir/$train_days
-done
+# done

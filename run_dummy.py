@@ -16,7 +16,8 @@ from numpy import random as nrandom
 nrandom.seed(23435)
 
 output_dir = 'logs_default/dummy/'
-shutil.rmtree(output_dir)
+if os.path.exists(output_dir):
+    shutil.rmtree(output_dir)
 
 data = DummyDataset()
 with open('config/default.yaml') as f:
@@ -30,15 +31,17 @@ model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
                                 learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                 hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
                                 learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
-                                preprocess_context=cfg['PREPROCESS_CONTEXT'])
+                                preprocess_context=True,
+                                num_activities = 5,
+                                context_type_to_use='time')
 
-epochs = cfg['EPOCHS'] if isinstance(cfg['EPOCHS'],list) else [cfg['EPOCHS']]
-done_epochs = 0
 
 wandb_logger = WandbLogger(name='Dummy', log_model=True, save_dir='wandb_logs')
-epoch = 20
+wandb_logger.watch(model, log="all", log_freq=1)
+wandb_logger.experiment.config.update(cfg)
+epoch = 500
 output_dir_new = output_dir+'_'+str(epoch)+'epochs'
 os.makedirs(output_dir_new)
-trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch, logger=wandb_logger, log_every_n_steps=5)
+trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch, logger=wandb_logger, log_every_n_steps=1)
 trainer.fit(model, data.get_train_loader())
 trainer.test(model, data.get_test_loader())

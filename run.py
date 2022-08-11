@@ -35,7 +35,6 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb.watch(log='all')
     wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags, save_dir='wandb_logs')
 
     cfg['DATA_PARAM'] = data.params
@@ -54,7 +53,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                                             learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
                                                             preprocess_context=cfg['PREPROCESS_CONTEXT'],
                                                             num_activities=data.params['n_activities'],
-                                                            context_type_to_use='activity')
+                                                            context_type_to_use=cfg['CONTEXT_TO_USE'])
 
         graph_visuals_out = os.path.join(checkpoint_dir, 'graph_visuals')
         if not os.path.exists(graph_visuals_out):
@@ -73,7 +72,9 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                 learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
                                 preprocess_context=cfg['PREPROCESS_CONTEXT'],
                                 num_activities=data.params['n_activities'],
-                                context_type_to_use='activity')
+                                context_type_to_use=cfg['CONTEXT_TO_USE'])
+        wandb.watch(model, log='all')
+
 
         epochs = cfg['EPOCHS'] if isinstance(cfg['EPOCHS'],list) else [cfg['EPOCHS']]
         done_epochs = 0
@@ -172,7 +173,7 @@ if __name__ == '__main__':
     parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--train_days', type=int, help='Number of routines to train on.')
-    parser.add_argument('--name', type=str, default='trial', help='Name of run.')
+    parser.add_argument('--name', type=str, default='diff_trial', help='Name of run.')
     parser.add_argument('--tags', type=str, help='Tags for the run separated by a comma \',\'')
     parser.add_argument('--baselines', action='store_true')
     parser.add_argument('--ckpt_dir', type=str, help='Path to checkpoint file')

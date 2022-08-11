@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from torch import nn
+import torch_geometric.nn as geom_nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
 
@@ -33,7 +34,7 @@ def evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor):
         result['losses'] = {}
         result['losses']['mean'] = loss_tensor.mean()
         for key, mask in masks.items():
-            result['losses'][key] = loss_tensor[mask].sum()/mask.sum()
+            result['losses'][key] = loss_tensor[mask].sum()
     return result
 
 def evaluate(gt, output, input, evaluate_node, losses=None):
@@ -60,9 +61,10 @@ class GraphTranslatorModule(LightningModule):
                 learn_node_embeddings,
                 preprocess_context,
                 num_activities,
-                context_type_to_use):
+                context_type_to_use,):
         
         super().__init__()
+
 
         self.num_nodes  = num_nodes 
         self.node_feature_len = node_feature_len
@@ -75,6 +77,9 @@ class GraphTranslatorModule(LightningModule):
         self.context_type_to_use = context_type_to_use
 
         self.hidden_influence_dim = 20
+        
+        # if self.context_type_to_use == 'difference':
+        #     self.context_len = 100
 
         self.edges_update_input_dim = self.hidden_influence_dim*5 + self.context_len
         
@@ -116,7 +121,26 @@ class GraphTranslatorModule(LightningModule):
         self.class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.long())
         self.inference_class = lambda xc: xc.argmax(-1)
 
-        # self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
+        ## transition encoder-decoder
+        self.graph_encoder = geom_nn.Sequential('x, edge_index',
+                                                  [(geom_nn.GCNConv(self.node_feature_len, self.context_len*4), 'x, edge_index -> x'),
+                                                  nn.ReLU(inplace=True),
+                                                  (geom_nn.GCNConv(self.context_len*4, self.context_len*2), 'x, edge_index -> x'),
+                                                   ])
+        self.context_from_graph_encodings = nn.Sequential(nn.Linear(self.context_len*2, self.context_len*2),
+                                                          nn.ReLU(),
+                                                          nn.Linear(self.context_len*2, self.context_len)
+                                                          )
+
+    def graph_transition_encoder(self, nodes, edges, y_nodes, y_edges):
+        assert nodes.size()[0] == 1, "Graph transition only supports batch size 1 right now!"
+        mat2idx = lambda e_mat: np.argwhere(e_mat.squeeze() == 1)
+        graph_in = geom_nn.global_mean_pool(self.graph_encoder(nodes.squeeze(), mat2idx(edges)), batch=torch.zeros(size=(nodes.size()[1],1)).to(int))
+        graph_out = geom_nn.global_mean_pool(self.graph_encoder(y_nodes.squeeze(), mat2idx(y_edges)), batch=torch.zeros(size=(nodes.size()[1],1)).to(int))
+        context_diff = self.context_from_graph_encodings(graph_in + graph_out)
+        assert context_diff.size()[0] == 1
+        assert context_diff.size()[1] == self.context_len
+        return context_diff
 
     def get_context(self, batch_in):
         if self.context_type_to_use == 'time':
@@ -128,9 +152,18 @@ class GraphTranslatorModule(LightningModule):
                 context = batch_in['context_time']
         elif self.context_type_to_use == 'activity':
             context = self.embed_context_action(batch_in['context_activity'].to(int))
+        elif self.context_type_to_use == 'random':
+            context = torch.rand_like(batch_in['context_time'])
+        elif self.context_type_to_use == 'difference':
+            context = self.graph_transition_encoder(batch_in['nodes'], batch_in['edges'], batch_in['y_nodes'], batch_in['y_edges'])
+        else:
+            raise RuntimeError(f"Context type to use cannot {self.context_type_to_use}")
+        
         if self.preprocess_context:
             context = self.mlp_context(context)
+
         return context
+
 
     def graph_step(self, edges, nodes, context):
 
@@ -270,6 +303,7 @@ class GraphTranslatorModule(LightningModule):
 
     def test_step(self, batch, batch_idx):
         eval, details = self.step(batch)
+        self.log('Test accuracy',eval['accuracy'])
         self.log('Test losses',eval['losses'])
         
         uncond_batch = batch

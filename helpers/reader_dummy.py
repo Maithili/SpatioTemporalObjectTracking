@@ -5,6 +5,7 @@ import argparse
 import numpy as np
 from math import ceil, floor
 import torch
+import torch.nn.functional as F
 import random
 from encoders import time_external
 from torch.utils.data import DataLoader
@@ -30,10 +31,14 @@ def get_binary_graph(num_nodes):
     return nodes, edges
 
 class DataSplitDummy():
-    def __init__(self, num_nodes = 10, dataset_size = 15):
+    def __init__(self, num_nodes = 5, dataset_size = -1):
         self.num_nodes = num_nodes
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'time', 'change_type'])
-        self.contexts = [random.choice(np.arange(num_nodes-1))+1 for _ in range(dataset_size)]
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context_time', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'time', 'change_type'])
+        if dataset_size == -1:
+            self.contexts = list(np.arange(num_nodes-1)+1)
+        else:
+            self.contexts = [random.choice(np.arange(num_nodes-1))+1 for _ in range(dataset_size)]
+        self.context_length = 1
 
     def __len__(self):
         return len(self.contexts)
@@ -46,17 +51,37 @@ class DataSplitDummy():
         y_edges[context, context-1] = 1
         dynamic_edges_mask = torch.ones_like(edges)
         dynamic_edges_mask[0,:] = 0
-        return edges, nodes, torch.Tensor([context]), y_edges, nodes, dynamic_edges_mask, torch.Tensor(), torch.Tensor()
+        return edges, nodes, torch.Tensor([1]), y_edges, nodes, dynamic_edges_mask, torch.Tensor(), torch.Tensor()
+
+
+class ContextOnlyDummy():
+    def __init__(self, num_nodes = 5, dataset_size = 20):
+        self.num_nodes = num_nodes
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context_time', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'time', 'change_type'])
+        self.context_length = self.num_nodes * self.num_nodes
+        self.dataset_size = dataset_size
+
+    def __len__(self):
+        return self.dataset_size
+
+    def __getitem__(self, idx: int):
+        nodes = torch.Tensor(np.eye(self.num_nodes))
+        edges = torch.Tensor(np.eye(self.num_nodes))
+        context = F.one_hot(torch.Tensor([random.choice(np.arange(self.num_nodes)) for _ in range(self.num_nodes)]).to(int), num_classes=self.num_nodes)
+        y_edges = context
+        dynamic_edges_mask = torch.ones_like(edges)
+        return edges, nodes, context.view(size=[-1]), y_edges, nodes, dynamic_edges_mask, torch.Tensor(), torch.Tensor()
+
 
 class DummyDataset():
     def __init__(self):
-        n_nodes = 10
-        self.train = DataSplitDummy(num_nodes=n_nodes, dataset_size=15)
-        self.test = DataSplitDummy(num_nodes=n_nodes, dataset_size=15)
+        n_nodes = 3
+        self.train = ContextOnlyDummy(num_nodes=n_nodes, dataset_size=30)
+        self.test = ContextOnlyDummy(num_nodes=n_nodes)
         self.params = {}
         self.params['n_nodes'] = n_nodes
         self.params['n_len'] = n_nodes
-        self.params['c_len'] = 1
+        self.params['c_len'] = self.train.context_length
 
     def get_train_loader(self):
         return DataLoader(self.train, num_workers=8, batch_size=1, collate_fn=self.train.collate_fn)
