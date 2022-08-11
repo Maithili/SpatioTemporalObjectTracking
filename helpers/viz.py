@@ -29,10 +29,18 @@ def method_color(name):
         return 'tab:blue'
     if name.startswith('ours'):
         return 'tab:red'
+    if name.startswith('timeSine'):
+        return 'tab:red'
+    if name.startswith('timeLinear'):
+        return 'tab:blue'
+    if name.startswith('diffContext'):
+        return 'tab:green'
+    if name.startswith('randomContext'):
+        return 'tab:gray'
     raise RuntimeError(f"Method color not defined for {name}")
 
 def method_marker(name):
-    if name.endswith('05epochs'):
+    if name.endswith('05epochs') or name.endswith('_5epochs'):
         return 's'
     if name.endswith('10epochs'):
         return '^'
@@ -42,29 +50,24 @@ def method_marker(name):
         return 'x'
     raise RuntimeError(f"Method marker not defined for {name}")
 
+def method_label(name):
+    parts = name.split('_')
+    name = parts[0]
+    if len(parts) > 0:
+        if parts[1].endswith('epochs'):
+            name += parts[1][:-6]
+    return name
 
-def get_method_labels(ablation = None):
+def include_for_ablation(name, ablation=None):
     if ablation.lower() == 'ablation_':
-        return {}
+        return False
     if ablation == '': 
-        return {'ours_05epochs':'Transf5',
-                'ours_10epochs':'Transf10',
-                'ours_15epochs':'Transf15',
-                'ours_20epochs':'Transf20',
-                'classOnly_05epochs':'ClassOnly5',
-                'classOnly_10epochs':'ClassOnly10',
-                'classOnly_15epochs':'ClassOnly15',
-                'classOnly_20epochs':'ClassOnly20',
-                'oneHotClassOnly_05epochs':'1HotClass5',
-                'oneHotClassOnly_10epochs':'1HotClass10',
-                'oneHotClassOnly_15epochs':'1HotClass15',
-                'oneHotClassOnly_20epochs':'1HotClass20'
-                }
+        return True
 
 filenames = ['recall_accuracy','precision','f1','precision_accuracy', 'precision_recall', 'recall_accuracy_norm', 'precision_norm', 'time_only_prediction', 'destination_accuracy', 'num_changes','destination_accuracy_line']
 
 
-def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method_labels('')):
+def visualize_eval_breakdowns(data, names, ablation=''):
     # fig, ax = plt.subplots(2,3)
     f1, ax_comp_t_tl = plt.subplots()
     f2, ax_prec = plt.subplots()
@@ -86,7 +89,7 @@ def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method
         p1, p2 = 1/(2/f-1/0.75), 1/(2/f-1/0.95)
         ax_comp_t_prec.text(0.68,p2,f'F-1 score = {f}', rotation=np.rad2deg(atan2(p2-p1, 0.2)), fontsize=30, backgroundcolor=[1,1,1,0.5])
 
-    method_labels = get_method_labels(ablation)
+    method_labels = {n:method_label(n) for n in names}
     lookahead_steps = None
 
     info = {}
@@ -113,7 +116,7 @@ def visualize_eval_breakdowns(data, names, ablation='', method_labels=get_method
         ax_num_changes.plot(np.arange(lookahead_steps)+1, [sum(qb) for qb in sample_data['precision_breakdown']], markersize = 20, marker=method_marker(names[sample_num]), label=method_labels[names[sample_num]], color=method_color(names[sample_num]), linewidth=3)
         precisions = [qb[0]/(sum(qb)+1e-8) for qb in sample_data['precision_breakdown']]
 
-       comp_steps = len(sample_data['completeness_breakdown']['by_lookahead'])
+        comp_steps = len(sample_data['completeness_breakdown']['by_lookahead'])
         assert quality_steps==comp_steps
 
         # if without_types:
@@ -309,7 +312,7 @@ def average_stats(stats_list):
     }
     avg['timeonly_breakdown_direct'] = {k:sum([sl['timeonly_breakdown_direct'][k] for sl in stats_list])/num_stats for k in ['correct','wrong']}
     avg['timeonly_breakdown_playahead'] = {k:sum([sl['timeonly_breakdown_playahead'][k] for sl in stats_list])/num_stats for k in ['correct','wrong']}
-    
+    print(avg)
     return avg
 
 def result_string_from_info(info):
@@ -353,7 +356,7 @@ def result_string_from_info(info):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--paths', type=str, default='logs/', help='')
+    parser.add_argument('--paths', type=str, default='logs/probing_context', help='')
     parser.add_argument('--combined_dir_out', type=str, help='Combining data from all dirs')
     args = parser.parse_args()
 
@@ -383,6 +386,8 @@ if __name__ == '__main__':
                     data.append(json.load(openfile))
                 names.append(f.split('/')[-2])
                 datasets.append(d)
+        all_combined_names = list(set([n[:-2] if n[-2]=='_' else n for n in names]))
+        all_combined_names.sort()
 
         if len(datasets) == 0:
             continue
@@ -393,6 +398,7 @@ if __name__ == '__main__':
         def get_combined_data(name, filter_dataset=lambda _: True):
             data_list = [(ds+'-'+n, d) for d,n,ds in zip(data, gen_names, datasets) if n==name and filter_dataset(ds)]
             cdata = average_stats([d[1] for d in data_list])
+            print(cdata)
             return cdata
 
         ## per dataset
@@ -400,14 +406,11 @@ if __name__ == '__main__':
         for dataset in set(datasets):
             print(dataset)
             ablation = ''
-            combined_names = []
-            combined_names = list(set([n[:-2] if n[-2]=='_' else n for n in names]))
-            combined_names = [n for n in combined_names if n in get_method_labels(ablation)]
-            combined_names.sort()
+            combined_names = [n for n in all_combined_names if include_for_ablation(n, ablation)]
             # print('For ',dataset,' plotting names ',combined_names)
             # print(combined_names)
             combined_data = [get_combined_data(name, lambda x: x==dataset) for name in combined_names]
-            figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=ablation, method_labels=get_method_labels(ablation))
+            figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=ablation)
             for i,fig in enumerate(figs):
                 fig.savefig(os.path.join(dir_out.replace('all',dataset),filenames[i]+'.jpg'))
             with open(os.path.join(dir_out.replace('all',dataset),'info.json'), 'w') as f:
@@ -419,12 +422,9 @@ if __name__ == '__main__':
         # for ablation in ['ablation_', '']:
         for ablation in ['']:
             print(ablation)
-            combined_names = []
-            combined_names = list(set([n[:-2] if n[-2]=='_' else n for n in names]))
-            combined_names = [n for n in combined_names if n in get_method_labels(ablation)]
-            combined_names.sort()
+            combined_names = [n for n in all_combined_names if include_for_ablation(n, ablation)]
             combined_data = [get_combined_data(name, lambda x: True) for name in combined_names]
-            figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=ablation, method_labels=get_method_labels(ablation))
+            figs, info = visualize_eval_breakdowns(combined_data, combined_names, ablation=ablation)
             for i,fig in enumerate(figs):
                 fig.savefig(os.path.join(dir_out,ablation+filenames[i]+'.jpg'))
             with open(os.path.join(dir_out,ablation+'info.json'), 'w') as f:
@@ -454,7 +454,7 @@ if __name__ == '__main__':
 
         print(master_combined_name)
 
-        labels = get_method_labels()
+        labels = [method_label(n) for n in all_combined_names]
         for m in info_averages:
             print(m)
             # print(master_combined_data[m])
