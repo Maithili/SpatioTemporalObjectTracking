@@ -10,7 +10,6 @@ import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-import wandb
 
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
@@ -27,10 +26,8 @@ nrandom.seed(23435)
 
 def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[], logs_dir='logs', finetune=False):
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags, mode='disabled', save_dir='wandb_logs')
 
     cfg['DATA_PARAM'] = data.params
-    wandb_logger.experiment.config.update(cfg)
 
 
     if read_ckpt:
@@ -109,16 +106,16 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
             os.makedirs(output_dir_new)
             if write_ckpt:
                 ckpt_callback = ModelCheckpoint(dirpath=output_dir_new)
-                trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch-done_epochs, logger=wandb_logger, log_every_n_steps=5, callbacks=[ckpt_callback])
+                trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch-done_epochs, log_every_n_steps=5, callbacks=[ckpt_callback])
 
             else:
-                trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch-done_epochs, logger=wandb_logger, log_every_n_steps=5)
+                trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch-done_epochs, log_every_n_steps=5)
 
             trainer.fit(model, data.get_train_loader())
             trainer.test(model, data.get_test_loader())
             done_epochs = epoch
 
-            # evaluation_summary = evaluate_applications(model, data, cfg, output_dir_new, logger=wandb_logger.experiment, print_importance=True)
+            # evaluation_summary = evaluate_applications(model, data, cfg, output_dir_new, print_importance=True)
             evaluation_summary = evaluate_applications_new(model, data, output_dir_new)
 
 
@@ -130,8 +127,6 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
             if write_ckpt:
                 torch.save(model.state_dict(), os.path.join(output_dir_new,'weights.pt'))
     
-    wandb.finish()
-
 
 
 def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False, tags=[], train_days=None, logs_dir='logs', finetune=False):
@@ -168,12 +163,8 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
                 output_dir = new_dir
             os.makedirs(output_dir)
 
-            wandb.init(name=baseline.__class__.__name__, dir=output_dir, group = group, tags=tags, mode='disabled')
-            cfg['NAME'] = wandb.run.name
-            wandb.config.update(cfg)
             for routine in data.test:
                 eval, details = baseline.step(data.test.collate_fn([routine]))
-            # wandb.log(baseline.log())
             # _ = evaluate_applications(baseline, data, cfg, output_dir)
             _ = evaluate_applications_new(baseline, data, output_dir)
 
@@ -182,7 +173,6 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
                 json.dump(cfg, f)
 
             print('Outputs saved at ',output_dir)
-            wandb.finish()
     else:
         run_model(data, group=group, checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags, logs_dir=logs_dir, finetune=finetune)
 
