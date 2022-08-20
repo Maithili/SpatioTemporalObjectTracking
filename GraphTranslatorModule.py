@@ -58,7 +58,8 @@ class GraphTranslatorModule(LightningModule):
                 learned_time_periods,
                 hidden_layer_size,
                 learn_node_embeddings,
-                preprocess_context):
+                preprocess_context,
+                move_factor):
         
         super().__init__()
 
@@ -70,6 +71,7 @@ class GraphTranslatorModule(LightningModule):
         self.learned_time_periods = learned_time_periods
         self.learn_node_embeddings = learn_node_embeddings
         self.preprocess_context = preprocess_context
+        self.move_factor = move_factor
 
         self.hidden_influence_dim = 20
 
@@ -114,6 +116,13 @@ class GraphTranslatorModule(LightningModule):
 
         # self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
         
+    def inference_location_comparative(self, probs, ref, thresh=0.2):
+        non_comp_inf = F.one_hot(self.inference_location(probs))
+        ref_onehot = F.one_hot(ref)
+        not_good_enough = ((probs[non_comp_inf] - probs[ref_onehot]) < thresh).sum(-1)
+        non_comp_inf[not_good_enough] = ref[not_good_enough]
+        return non_comp_inf
+
     def graph_step(self, edges, nodes, context):
 
         batch_size, num_nodes, node_feature_len = nodes.size()
@@ -217,7 +226,7 @@ class GraphTranslatorModule(LightningModule):
               'location':self.inference_location(y_edges)}
 
         losses = {'class':self.class_loss(output_probs['class'], gt['class']),
-                  'location':self.location_loss(edges_pred, gt['location'])}
+                  'location':self.location_loss(edges_pred, gt['location']) - self.move_factor * self.location_loss(edges_pred, input['location'])}
 
         output = {'class':self.inference_class(output_probs['class']),
                   'location':self.inference_location(edges_inferred)}

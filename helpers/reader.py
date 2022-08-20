@@ -1,3 +1,4 @@
+from ast import parse
 import json
 import os
 import shutil
@@ -83,7 +84,9 @@ class DataSplit():
         # for sample in data_list:
         #     moved_obj_mask = np.bitwise_or(torch.Tensor(moved_obj_mask), (sample['edges'] != sample['prev_edges'])).to(bool)
         # additional_info = {'moved_obj_mask':moved_obj_mask}
-        additional_info = {'timestamp':[time_external(sample['time']) for sample in data_list], 'obj_in_use':[sample['obj_in_use'] for sample in data_list], 'active_nodes':self.active_edges.sum(-1) > 0}
+        additional_info = {'timestamp':[time_external(sample['time']) for sample in data_list], 'active_nodes':self.active_edges.sum(-1) > 0}
+        if 'activity' in data_list[0].keys():
+            additional_info['activity'] = [sample['activity'] for sample in data_list]
         return samples, additional_info
     def __getitem__(self, idx: int):
         return self.get_routine(idx) if self.whole_routines else self.get_sample(idx)
@@ -97,6 +100,21 @@ class DataSplit():
     def sampler(self):
         return None
 
+class CombinedDataSplits():
+    def __init__(self, list_of_datasplits):
+        self.lengths = [len(ds) for ds in list_of_datasplits]
+        print(f'Combined data length {len(self)}')
+        self.list_of_datasplits = list_of_datasplits
+
+    def __len__(self):
+        return sum(self.lengths)
+
+    def __getitem__(self, idx:int):
+        for l,ds in zip(self.lengths, self.list_of_datasplits):
+            if idx < l:
+                return ds[idx]
+            idx -= l
+    
 
 
 
@@ -135,8 +153,8 @@ class RoutinesDataset():
         self.train = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['train_data_index_list'], max_num_files=max_routines[0])
         self.test = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['test_data_index_list'], max_num_files=max_routines[1])
         self.test_routines = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['test_data_index_list'], whole_routines=True)
-        print(len(self.train),' examples in train split.')
-        print(len(self.test),' examples in test split.')
+        print(len(self.train),' examples in train split from ',self.train.num_routines(),' routines')
+        print(len(self.test),' examples in test split from ',self.test.num_routines(),' routines')
 
         # Infer parameters for the model
         model_data = self.test.collate_fn([self.test[0]])
@@ -188,12 +206,12 @@ class ProcessDataset():
         output_train_path = os.path.join(output_path, 'train')
         output_test_path = os.path.join(output_path, 'test')
         if os.path.exists(output_train_path): 
-            overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
+            overwrite = input(f'Dataset seems to already exist at {output_path}!! Overwrite? (y/n)')
             if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
             shutil.rmtree(output_path)
         os.makedirs(output_train_path)
         if os.path.exists(output_test_path): 
-            overwrite = input('Dataset seems to already exist!! Overwrite? (y/n)')
+            overwrite = input(f'Dataset seems to already exist at {output_path}!! Overwrite? (y/n)')
             if overwrite != 'y': raise InterruptedError('Cancelling data processing...')
             shutil.rmtree(output_path)
         os.makedirs(output_test_path)
@@ -217,13 +235,15 @@ class ProcessDataset():
     def read_classes(self, classes_path):
         with open(classes_path, 'r') as f:
             classes = json.load(f)
-        self.common_data['node_ids'] = [n['id'] for n in classes['nodes']]
-        self.common_data['node_classes'] = [n['class_name'] for n in classes['nodes']]
-        self.common_data['node_categories'] = [n['category'] for n in classes['nodes']]
-        self.common_data['node_idx_from_id'] = {int(n['id']):i for i,n in enumerate(classes['nodes'])}
+        def ignore_node(node):
+            return node['class_name'].startswith('clothes_')
+        self.common_data['node_ids'] = [n['id'] for n in classes['nodes'] if not ignore_node(n)]
+        self.common_data['node_classes'] = [n['class_name'] for n in classes['nodes'] if not ignore_node(n)]
+        self.common_data['node_categories'] = [n['category'] for n in classes['nodes'] if not ignore_node(n)]
+        self.common_data['node_idx_from_id'] = {int(n):i for i,n in enumerate(self.common_data['node_ids'])}
 
         # Diagonal nodes are always irrelevant
-        self.nonstatic_edges = 1 - np.eye(len(classes['nodes']))
+        self.nonstatic_edges = 1 - np.eye(len(self.common_data['node_ids']))
         # Rooms, furniture and appliances nodes don't move
         self.nonstatic_edges[np.where(np.array(self.common_data['node_categories']) == "Rooms"),:] = 0
         self.nonstatic_edges[np.where(np.array(self.common_data['node_categories']) == "Furniture"),:] = 0
@@ -235,7 +255,7 @@ class ProcessDataset():
 
         self.common_data['edge_keys'] = classes['edges']
         static = lambda category : category in ["Furniture", "Room"]
-        self.common_data['static_nodes'] = [n['id'] for n in classes['nodes'] if static(n['category'])]
+        self.common_data['static_nodes'] = [n['id'] for n in classes['nodes'] if static(n['category']) and not ignore_node(n)]
 
 
     def read_data(self, data_dir, output_dir):
@@ -248,7 +268,8 @@ class ProcessDataset():
                 inp = 'n'
             viz = (inp == 'y')
             for f in files:
-                with open(os.path.join(root,f)) as f_in:
+                fpath = os.path.join(root,f)
+                with open(fpath) as f_in:
                     routine = json.load(f_in)
                 nodes, edges = self.read_graphs(routine["graphs"])
                 if viz:
@@ -260,7 +281,8 @@ class ProcessDataset():
                 times = torch.Tensor(routine["times"])
                 file_basename = os.path.splitext(f)[0]
                 f_out = os.path.join(output_dir,file_basename+'.pt')
-                samples = self.make_pairwise(nodes, edges, times)
+                activity_func = self.activity_from_time(fpath.replace('routines','scripts').replace('json','txt'))
+                samples = self.make_pairwise(nodes, edges, times, activity_func)
                 for i in range(len(samples)):
                     idx_map.append((file_basename, i))
                 torch.save(samples, f_out)
@@ -271,6 +293,25 @@ class ProcessDataset():
 
         return idx_map
         
+    def activity_from_time(self, script_file):
+        scr_header_lines = open(script_file).read().split('\n\n\n')[0].split('\n')
+        def parse_time(ts):
+            parts = [int(t) for t in ts.split(':')]
+            if len(parts) == 2:
+                return parts[0]*60 + parts[1]
+            if len(parts) == 3:
+                return (parts[0]*24 + parts[1])*60 + parts[2]
+            raise RuntimeError()
+        def parse_line(l):
+            activity = l[:l.index('(')-1].strip()
+            timerange = l[l.index('(')+1: l.index(')')]
+            timerange = timerange.replace('1day - ','01:')
+            start_time = parse_time(timerange.split('-')[0].strip())
+            end_time = parse_time(timerange.split('-')[1].strip())
+            return activity, lambda t: t>=start_time and t<end_time
+        activities = {parse_line(l)[0]:parse_line(l)[1] for l in scr_header_lines}
+        activity_func = lambda t : [a for a,fun in activities.items() if fun(t)]
+        return activity_func
 
     def read_graphs(self, graphs):
         num_nodes = len(self.common_data['node_ids'])
@@ -279,7 +320,7 @@ class ProcessDataset():
         for i,graph in enumerate(graphs):
             node_features[i,:,:num_nodes] = np.eye(num_nodes)
             for e in graph['edges']:
-                if e['relation_type'] in self.common_data['edge_keys']:
+                if e['relation_type'] in self.common_data['edge_keys'] and e['from_id'] in self.common_data['node_ids'] and e['to_id'] in self.common_data['node_ids']:
                     edge_features[i,self.common_data['node_idx_from_id'][e['from_id']],self.common_data['node_idx_from_id'][e['to_id']]] = 1
             original_edges = edge_features[i,:,:]
             edge_features[i,:,:] = _sparsify(edge_features[i,:,:])
@@ -290,7 +331,7 @@ class ProcessDataset():
             self.seen_edges[:,:] += edge_features[i,:,:]
         return torch.Tensor(node_features), torch.Tensor(edge_features)
 
-    def make_pairwise(self, nodes, edges, times):
+    def make_pairwise(self, nodes, edges, times, activity_func):
         pairwise_samples = []
         additional_data = []
         self.time_min = torch.Tensor([float("Inf")])
@@ -314,7 +355,11 @@ class ProcessDataset():
             if prev_edges is not None:
                 change_type = (np.absolute(edges[data_idx] - prev_edges)).sum(-1).to(int)
                 change_type += (self.home_graph * (edges[data_idx] - prev_edges)).sum(-1).to(int)
-                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'obj_in_use':[], 'change_type':change_type})
+                if len(activity_func(t)) > 0:
+                    act = activity_func(t)[0]
+                else:
+                    act = None
+                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'change_type':change_type, 'activity':act})
             prev_edges = edges[data_idx]
             prev_nodes = nodes[data_idx]
         return pairwise_samples

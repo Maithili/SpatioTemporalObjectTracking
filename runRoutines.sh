@@ -9,22 +9,40 @@ trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
 
 DATE_TIME=`date "+%m%d_%H%M"`
 
-logs_dir="logs"
+logs_dir="logs/CoRL_eval_"$DATE_TIME
 
-for train_days in 50
+for train_days in 50 40 30 20 10
 do
-    for dataset in $(find data/persona/ -mindepth 1 -maxdepth 1)
+    for dataset in $(find data/personaWithoutClothes/ -mindepth 1 -maxdepth 1)
+    do
+        echo $dataset
+        python3 ./run.py --path=$dataset --name=ours --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
+    done
+done
+
+train_days=50
+for dataset in $(find data/personaWithoutClothes/ -mindepth 1 -maxdepth 1)
+do
+    for config in allEdges timeLinear move2 move3
+    do
+        python3 ./run.py --cfg=$config --path=$dataset --name=ours_$config --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
+    done
+done
+
+for train_days in 50 40 30 20 10
+for dataset in $(find data/personaWithoutClothes/ -mindepth 1 -maxdepth 1)
     do
         echo $dataset
         python3 ./run.py --cfg=default --path=$dataset --baselines --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
-        for i in 1 2 3
-        do
-            python3 ./run.py --path=$dataset --name=ours --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
-            for config in allEdges timeLinear
-            do
-                python3 ./run.py --cfg=$config --path=$dataset --name=ours_$config --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
-            done
-        done
     done
-    python3 viz.py --paths=$logs_dir/$train_days
+done
+
+for train_days in 5 15 25 35 45
+do
+    for dataset in $(find data/personaWithoutClothes/ -mindepth 1 -maxdepth 1)
+    do
+        echo $dataset
+        python3 ./run.py --cfg=default --path=$dataset --baselines --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
+        python3 ./run.py --path=$dataset --name=ours --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt
+    done
 done

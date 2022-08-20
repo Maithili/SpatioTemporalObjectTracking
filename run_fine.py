@@ -16,8 +16,7 @@ from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
 from breakdown_evaluations import evaluate as evaluate_applications
-from breakdown_evaluations_human_centric import evaluate as evaluate_applications_new
-from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned, FremenStateConditioned2, FremenStateConditioned3, FremenStateConditioned4, LastSeenAndStaticSemantic2, LastSeenAndStaticSemantic3, LastSeenAndStaticSemantic4
+from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned
 from graph_visualizations import visualize_conditional_datapoint
 
 import random
@@ -34,6 +33,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
 
 
     if read_ckpt:
+        print(checkpoint_dir)
         checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
         model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
                                                             num_nodes=data.params['n_nodes'],
@@ -44,20 +44,13 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                                             learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                                             hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
                                                             learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
-                                                            preprocess_context=cfg['PREPROCESS_CONTEXT'],
-                                                            move_factor=cfg['MOVE_FACTOR'])
-        output_dir = os.path.join(logs_dir, group,cfg['NAME'])
+                                                            preprocess_context=cfg['PREPROCESS_CONTEXT'])
 
         # graph_visuals_out = os.path.join(output_dir, 'graph_visuals')
         # if not os.path.exists(graph_visuals_out):
         #     os.makedirs(graph_visuals_out)
         # visualize_conditional_datapoint(model, data.test, data.common_data['node_classes'], node_categories = data.common_data['node_categories'], use_output_nodes = False, save_fig_dir = graph_visuals_out, ask=False)
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        # evaluation_summary = evaluate_applications(model, data, cfg, output_dir, print_importance=True)
-        evaluation_summary = evaluate_applications_new(model, data, output_dir)
-
-        print('Outputs saved at ',output_dir)
+        evaluation_summary = evaluate_applications(model, data, cfg, checkpoint_dir, print_importance=True, lookahead_steps=60)
 
 
     else:
@@ -71,7 +64,6 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
             output_dir = new_dir
         os.makedirs(output_dir)
         if finetune:
-            print('Looking for model in ', checkpoint_dir)
             checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
             print(f'Finetuning model at {checkpoint_file}.................')
             model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
@@ -83,8 +75,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                                                 learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                                                 hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
                                                                 learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
-                                                                preprocess_context=cfg['PREPROCESS_CONTEXT'],
-                                                                move_factor=cfg['MOVE_FACTOR'])
+                                                                preprocess_context=cfg['PREPROCESS_CONTEXT'])
 
         else:
             model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
@@ -95,8 +86,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
                                 learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
                                 hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
                                 learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
-                                preprocess_context=cfg['PREPROCESS_CONTEXT'],
-                                move_factor=cfg['MOVE_FACTOR'])
+                                preprocess_context=cfg['PREPROCESS_CONTEXT'])
 
         epochs = cfg['EPOCHS'] if isinstance(cfg['EPOCHS'],list) else [cfg['EPOCHS']]
         done_epochs = 0
@@ -118,8 +108,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
             trainer.test(model, data.get_test_loader())
             done_epochs = epoch
 
-            # evaluation_summary = evaluate_applications(model, data, cfg, output_dir_new, logger=wandb_logger.experiment, print_importance=True)
-            evaluation_summary = evaluate_applications_new(model, data, output_dir_new)
+            evaluation_summary = evaluate_applications(model, data, cfg, output_dir_new, logger=wandb_logger.experiment, print_importance=True, lookahead_steps=60)
 
 
             with open (os.path.join(output_dir_new,'config.json'), 'w') as f:
@@ -139,13 +128,13 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     if cfg['NAME'] is None:
         cfg['NAME'] = os.path.basename(data_dir)+'_trial'
 
-    with open(os.path.join(data_dir, 'processed', 'common_data.json')) as f:
+    with open(os.path.join(data_dir, 'processed_fine', 'common_data.json')) as f:
         cfg['DATA_INFO'] = json.load(f)['info']
 
     time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
     time_encoding = time_options(cfg['TIME_ENCODING'])
 
-    data = RoutinesDataset(data_path=os.path.join(data_dir,'processed'), 
+    data = RoutinesDataset(data_path=os.path.join(data_dir,'processed_fine'), 
                            time_encoder=time_encoding, 
                            batch_size=cfg['BATCH_SIZE'],
                            only_seen_edges = cfg['ONLY_SEEN_EDGES'],
@@ -156,8 +145,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     if baselines:
         cf = get_cooccurence_frequency(data)
         spec = get_spectral_components(data, periods_mins=[float('inf'), 60*24, 60*24/2])
-        # for baseline in [Fremen(spec), LastSeenAndStaticSemantic(cf), FremenStateConditioned(spec, data.params['dt']), LastSeen(cf), StaticSemantic(cf)]:
-        for baseline in [LastSeenAndStaticSemantic4(cf), FremenStateConditioned2(spec, data.params['dt'])]:
+        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
             output_dir = os.path.join(logs_dir, group,baseline.__class__.__name__)
             if os.path.exists(output_dir):
                 n = 1
@@ -174,8 +162,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
             for routine in data.test:
                 eval, details = baseline.step(data.test.collate_fn([routine]))
             # wandb.log(baseline.log())
-            # _ = evaluate_applications(baseline, data, cfg, output_dir)
-            _ = evaluate_applications_new(baseline, data, output_dir)
+            _ = evaluate_applications(baseline, data, cfg, output_dir, lookahead_steps=60)
 
 
             with open (os.path.join(output_dir,'config.json'), 'w') as f:
@@ -194,9 +181,9 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/persona/persona1', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/0720/0720_breakfast', help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
-    parser.add_argument('--cfg', type=str, default='default', help='Name of config file.')
+    parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--train_days', type=int, help='Number of routines to train on.')
     parser.add_argument('--name', type=str, default='trial', help='Name of run.')
     parser.add_argument('--tags', type=str, help='Tags for the run separated by a comma \',\'')

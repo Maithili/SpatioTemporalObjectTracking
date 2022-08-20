@@ -1,5 +1,7 @@
 import os
+import shutil
 import json
+from unittest import result
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -17,6 +19,31 @@ white = np.array([1, 1, 1, 1])
 newcolors[:25, :] = white
 newcmp = ListedColormap(['white', 'tab:blue', 'tab:orange', 'tab:purple'])
 
+activity_list = [
+"brushing_teeth",
+"showering",
+"breakfast",
+"dinner",
+"computer_work",
+"lunch",
+"cleaning",
+"laundry",
+"leave_home",
+"come_home",
+"socializing",
+"taking_medication",
+"watching_tv",
+"vaccuum_cleaning",
+"reading",
+"going_to_the_bathroom",
+"getting_dressed",
+"kitchen_cleaning",
+"take_out_trash",
+"wash_dishes",
+"playing_music",
+"listening_to_music",
+None
+]
 
 
 def _erase_edges(edges, dyn_mask):
@@ -33,7 +60,11 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
     results = {'precision_breakdown':[[0,0] for _ in range(lookahead_steps)],
                'completeness_breakdown': {
                     'by_lookahead' : [[0,0,0] for _ in range(lookahead_steps)],
-                    'by_change_type' : [[0,0,0] for _ in range(num_change_types)]
+                    'by_change_type' : [[0,0,0] for _ in range(num_change_types)],
+                    'by_activity' : [[0,0,0] for _ in activity_list]
+                },
+                'optimistic_completeness_breakdown': {
+                    'by_lookahead' : [[0,0,0] for _ in range(lookahead_steps)]
                 },
                 'timeonly_breakdown_direct':{
                     'correct': 0,
@@ -54,6 +85,10 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
 
         routine_length = len(routine)
         num_nodes = additional_info['active_nodes'].sum()
+        if 'activity' in additional_info:
+            activities = additional_info['activity']
+        else:
+            activities = [None] * routine_length
         routine_inputs = torch.empty(routine_length, num_nodes)
         routine_outputs = torch.ones(routine_length, num_nodes).to(int) * -1
         routine_output_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
@@ -61,6 +96,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
         routine_ground_truth_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
         routine_futures = torch.ones(routine_length, num_nodes) * -1
         routine_change_types = torch.zeros(routine_length, num_nodes).to(int)
+        routine_activities = torch.ones(routine_length, num_nodes).to(int) * -1
 
         changes_output_all = torch.zeros(routine_length, num_nodes).to(bool)
         changes_gt_all = torch.zeros(routine_length, num_nodes).to(bool)
@@ -72,6 +108,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
 
         for step in range(routine_length):
             data_list = [test_routines.collate_fn([routine[j]]) for j in range(step, min(step+lookahead_steps, routine_length))]
+            activities_in_lookahead = [activity_list.index(activities[j]) for j in range(step, min(step+lookahead_steps, routine_length))]
 
             first_data = deepcopy(data_list[0])
 
@@ -88,7 +125,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
             play_forward_edges = evaluate_timeonly(play_forward_edges, results['timeonly_breakdown_playahead'])
             
 
-            for i,data in enumerate(data_list):
+            for i,(data, act) in enumerate(zip(data_list,activities_in_lookahead)):
                 assert i<lookahead_steps
                 if i>0:
                     data['edges'] = prev_edges
@@ -115,6 +152,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
                 routine_ground_truth_step[step, :][new_changes_gt] = i
                 assert all(data['change_type'].to(int)[details['evaluate_node']][new_changes_gt] > 0)
                 routine_change_types[step,:][new_changes_gt] = deepcopy(data['change_type'].to(int)[details['evaluate_node']])[new_changes_gt]
+                routine_activities[step,:][new_changes_gt] = act
                 changes_output_all[step,:] = deepcopy(np.bitwise_or(changes_output_all[step,:], new_changes_out)).to(bool)
                 changes_gt_all[step,:] = deepcopy(np.bitwise_or(changes_gt_all[step,:], new_changes_gt)).to(bool)
 
@@ -122,6 +160,26 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
                     prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1]).to(torch.float32)
                 else:
                     prev_edges = (details['output_probs']['location']).to(torch.float32)
+
+        gt_changes_list = np.argwhere((routine_ground_truth_step == 0))  # step, object
+        for gt_step, gt_obj in zip(gt_changes_list[0,:], gt_changes_list[1,:]):
+            gt_dest = routine_ground_truths[gt_step, gt_obj]
+            outputs_to_consider = np.array([routine_outputs[lb, gt_obj] for lb in range(gt_step, max(-1,gt_step-lookahead_steps), -1)])
+            outputs_steps_to_consider = np.array([routine_output_step[lb, gt_obj] for lb in range(gt_step, max(-1,gt_step-lookahead_steps), -1)])
+            assert gt_step < lookahead_steps or len(outputs_to_consider) == lookahead_steps
+            
+            for s in range(len(outputs_to_consider)):
+                outputs_for_lookahead = [out_dest for out_dest,pred_st in zip(outputs_to_consider[:s+1], outputs_steps_to_consider[:s+1]) if pred_st <= s]
+                if len(outputs_for_lookahead) > 0:
+                    assert max(outputs_for_lookahead) >= 0, f"Something smells fishy! {s} : {outputs_for_lookahead}\n{outputs_to_consider}\n{outputs_steps_to_consider}"
+                    if gt_dest in outputs_for_lookahead:
+                        results['optimistic_completeness_breakdown']['by_lookahead'][s][0] += 1
+                    else:
+                        results['optimistic_completeness_breakdown']['by_lookahead'][s][1] += 1
+                else:
+                    results['optimistic_completeness_breakdown']['by_lookahead'][s][2] += 1
+            
+
 
         if print_importance:
             fig_imp.set_size_inches(25,22)
@@ -168,6 +226,13 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
         # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][2] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][2]) == 0 , "missed changes don't add up!"
         # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][0] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][0]) == 0, "correct changes don't add up"
         # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][1] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][1]) == 0, "wrong changes don't add up"
+
+        for aidx in range(len(activity_list)):
+            a_mask = deepcopy(np.bitwise_and(changes_output_all, routine_activities == aidx))
+            results['completeness_breakdown']['by_activity'][aidx][0] += int((correct[a_mask]).sum())/routine_length
+            results['completeness_breakdown']['by_activity'][aidx][1] += int((wrong[a_mask]).sum())/routine_length
+            a_mask_missed = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_all), routine_activities == aidx))
+            results['completeness_breakdown']['by_activity'][aidx][2] += int(a_mask_missed.sum())/routine_length
 
         fig, axs = plt.subplots(1,5)
         fig.set_size_inches(30,20)
@@ -221,11 +286,16 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
 
         moves = {}
         for i,act_node in enumerate(labels):
-            changes = routine_ground_truths[:,i][routine_ground_truths[:,i]>0]
-            changes_predicted = routine_outputs[:,i][routine_outputs[:,i]>0]
-            node_changes = [node_names[c] for c in changes]
-            node_changes_predicted = [node_names[c] for c in changes_predicted]
-            moves[act_node] = {'actual':node_changes, 'predicted':node_changes_predicted}
+            # changes = torch.stack([routine_ground_truths[:,i][routine_ground_truths[:,i]>0], routine_outputs[:,i][routine_ground_truths[:,i]>0]], dim=-1)
+            # changes_predicted = torch.stack([routine_outputs[:,i][routine_outputs[:,i]>0], routine_ground_truths[:,i][routine_outputs[:,i]>0]], dim=-1)
+            # node_changes = [node_names[c] if c>=0 else None for c in changes]
+            # node_changes_predicted = [node_names[c] if c>=0 else None for c in changes_predicted]
+            any_changes = (routine_ground_truths[:,i]+routine_outputs[:,i])>0
+            def get_name(idx):
+                if idx>=0: return node_names[idx]
+                else: return 'No Change'
+            changes = [get_name(o)+'({})'.format(o_st)+ '  ' + get_name(gt)+'({})'.format(gt_st) for (o, o_st, gt, gt_st) in zip(routine_outputs[:,i][any_changes], routine_output_step[:,i][any_changes], routine_ground_truths[:,i][any_changes], routine_ground_truth_step[:,i][any_changes])]
+            moves[act_node] = {'pred/actual':changes}
 
         results['all_moves'].append(moves)
 
@@ -238,13 +308,15 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
     return results, raw_data, figures + figures_imp
 
 
-def evaluate(model, data, cfg, output_dir, logger=None, print_importance=False):
+def evaluate(model, data, cfg, output_dir, logger=None, print_importance=False, lookahead_steps=12):
     
-    info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.common_data['node_classes'], print_importance=print_importance)
+    info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.common_data['node_classes'], print_importance=print_importance, lookahead_steps=lookahead_steps)
     json.dump(info, open(os.path.join(output_dir, 'evaluation.json'), 'w'), indent=4)
 
     torch.save(raw_data, os.path.join(output_dir, 'raw_data.pt'))
 
+    if os.path.exists(os.path.join(output_dir,'figures')):
+        shutil.rmtree(os.path.join(output_dir,'figures'))
     os.makedirs(os.path.join(output_dir,'figures'))
     for i,fig  in enumerate(figures):
         fig.savefig(os.path.join(output_dir,'figures',str(i)+'.jpg'))
