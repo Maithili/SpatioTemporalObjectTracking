@@ -1,4 +1,3 @@
-from ast import parse
 import json
 import os
 import shutil
@@ -6,7 +5,6 @@ import argparse
 import numpy as np
 from math import ceil, floor
 import torch
-import random
 from encoders import time_external
 from torch.utils.data import DataLoader
 
@@ -36,6 +34,31 @@ def _sparsify(edges):
     remove = np.matmul(dense_edges, dense_edges)
     sparse_edges = dense_edges * (remove==0).astype(int)
     return sparse_edges
+
+
+def get_cooccurence_frequency(trainset):
+    # one-smoothing
+    all_edges = torch.ones_like(trainset[0][0])
+    for r in trainset:
+        all_edges = all_edges + r[0]
+    prior = all_edges/(all_edges.sum(dim=0))/(len(trainset) + 1)
+    print('Size of coccurence prior : ',prior.size())
+    return prior
+
+def get_spectral_components(trainset, periods_mins):
+    reals = [torch.zeros_like(trainset[0][0]) for _ in periods_mins]
+    imags = [torch.zeros_like(trainset[0][0]) for _ in periods_mins]
+    for idx in range(len(trainset)):
+        edges, time = trainset.get_edges_and_time(idx)
+        for harmonic, period in enumerate(periods_mins):
+            reals[harmonic] += edges * np.cos(2*np.pi*time/period)
+            imags[harmonic] += edges * np.sin(2*np.pi*time/period)
+    components = []
+    for r,i,p in zip(reals, imags, periods_mins):
+        components.append({'amplitude': (np.sqrt(np.square(r)+np.square(i))/len(trainset)), 'phase': (np.arctan2(i,r)), 'period': p})
+    print('Size of FreMeN prior : ',str([(comp['amplitude'].size(),comp['phase'].size()) for comp in components]))
+    return components
+
 
 class CollateToDict():
     def __init__(self, dict_labels):
@@ -84,7 +107,7 @@ class DataSplit():
         # for sample in data_list:
         #     moved_obj_mask = np.bitwise_or(torch.Tensor(moved_obj_mask), (sample['edges'] != sample['prev_edges'])).to(bool)
         # additional_info = {'moved_obj_mask':moved_obj_mask}
-        additional_info = {'timestamp':[time_external(sample['time']) for sample in data_list], 'active_nodes':self.active_edges.sum(-1) > 0}
+        additional_info = {'timestamp':[time_external(sample['time']) for sample in data_list], 'active_nodes':self.active_edges.sum(-1) > 0, 'total_nodes':self.active_edges.size()[-1]}
         if 'activity' in data_list[0].keys():
             additional_info['activity'] = [sample['activity'] for sample in data_list]
         return samples, additional_info
@@ -114,9 +137,19 @@ class CombinedDataSplits():
             if idx < l:
                 return ds[idx]
             idx -= l
+        raise IndexError(f'Invalid index {idx} for length {len(self)}')
+
+    def get_cooccurence_frequency(self):
+        return get_cooccurence_frequency(self)
     
+    def get_spectral_components(self, periods_mins):
+        return get_spectral_components(self, periods_mins)
 
-
+    def get_edges_and_time(self, idx:int):
+        for l,ds in zip(self.lengths, self.list_of_datasplits):
+            if idx < l:
+                return ds.get_edges_and_time(idx)
+            idx -= l
 
 class RoutinesDataset():
     def __init__(self, data_path, 
@@ -171,29 +204,11 @@ class RoutinesDataset():
     def get_single_example_test_loader(self):
         return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
     
+    def get_cooccurence_frequency(self):
+        return get_cooccurence_frequency(self.train)
 
-def get_cooccurence_frequency(routines_dataset):
-    # one-smoothing
-    all_edges = torch.ones_like(routines_dataset.train[0][0])
-    for r in routines_dataset.train:
-        all_edges = all_edges + r[0]
-    prior = all_edges/(all_edges.sum(dim=0))/(len(routines_dataset.train) + 1)
-    print('Size of coccurence prior : ',prior.size())
-    return prior
-
-def get_spectral_components(routines_dataset, periods_mins):
-    reals = [torch.zeros_like(routines_dataset.train[0][0]) for _ in periods_mins]
-    imags = [torch.zeros_like(routines_dataset.train[0][0]) for _ in periods_mins]
-    for idx in range(len(routines_dataset.train)):
-        edges, time = routines_dataset.train.get_edges_and_time(idx)
-        for harmonic, period in enumerate(periods_mins):
-            reals[harmonic] += edges * np.cos(2*np.pi*time/period)
-            imags[harmonic] += edges * np.sin(2*np.pi*time/period)
-    components = []
-    for r,i,p in zip(reals, imags, periods_mins):
-        components.append({'amplitude': (np.sqrt(np.square(r)+np.square(i))/len(routines_dataset.train)), 'phase': (np.arctan2(i,r)), 'period': p})
-    print('Size of FreMeN prior : ',str([(comp['amplitude'].size(),comp['phase'].size()) for comp in components]))
-    return components
+    def get_spectral_components(self, periods_mins):
+        return get_spectral_components(self.train, periods_mins)
 
 
 

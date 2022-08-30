@@ -8,16 +8,15 @@ import argparse
 from copy import deepcopy
 import torch
 from pytorch_lightning import Trainer
-from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
-from breakdown_evaluations import evaluate as evaluate_applications
+from breakdown_evaluations import evaluate as evaluate_applications_original
 from breakdown_evaluations_human_centric import evaluate as evaluate_applications_new
-from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned, FremenStateConditioned2, FremenStateConditioned3, FremenStateConditioned4, LastSeenAndStaticSemantic2, LastSeenAndStaticSemantic3, LastSeenAndStaticSemantic4
-from graph_visualizations import visualize_conditional_datapoint
+from breakdown_evaluations_human_centric_stepahead import evaluate as evaluate_applications_stepahead
+from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned, FremenStateConditioned1, FremenStateConditioned2, FremenStateConditioned3, FremenStateConditioned4, LastSeenAndStaticSemantic2, LastSeenAndStaticSemantic3, LastSeenAndStaticSemantic4, LastSeenAndStaticSemantic5
 
 import random
 random.seed(23435)
@@ -31,6 +30,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
 
 
     if read_ckpt:
+        print('Looking for checkpoint in ',checkpoint_dir)
         checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
         model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
                                                             num_nodes=data.params['n_nodes'],
@@ -51,8 +51,9 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
         # visualize_conditional_datapoint(model, data.test, data.common_data['node_classes'], node_categories = data.common_data['node_categories'], use_output_nodes = False, save_fig_dir = graph_visuals_out, ask=False)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        # evaluation_summary = evaluate_applications(model, data, cfg, output_dir, print_importance=True)
-        evaluation_summary = evaluate_applications_new(model, data, output_dir)
+        evaluation_summary = evaluate_applications_original(model, data, output_dir, learned_model=True, print_importance=False, confidences=cfg['ACTION_PROBABILITY_THRESHOLDS'])
+        # evaluation_summary = evaluate_applications_new(model, data, output_dir)
+        # evaluation_summary = evaluate_applications_stepahead(model, data, output_dir)
 
         print('Outputs saved at ',output_dir)
 
@@ -115,8 +116,9 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
             trainer.test(model, data.get_test_loader())
             done_epochs = epoch
 
-            # evaluation_summary = evaluate_applications(model, data, cfg, output_dir_new, print_importance=True)
-            evaluation_summary = evaluate_applications_new(model, data, output_dir_new)
+            evaluation_summary = evaluate_applications_original(model, data, output_dir_new, learned_model=True, print_importance=False, confidences=cfg['ACTION_PROBABILITY_THRESHOLDS'])
+            # evaluation_summary = evaluate_applications_new(model, data, output_dir_new)
+            # evaluation_summary = evaluate_applications_stepahead(model, data, output_dir)
 
 
             with open (os.path.join(output_dir_new,'config.json'), 'w') as f:
@@ -149,10 +151,10 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     group = os.path.basename(data_dir)
 
     if baselines:
-        cf = get_cooccurence_frequency(data)
-        spec = get_spectral_components(data, periods_mins=[float('inf'), 60*24, 60*24/2])
+        cf = data.get_cooccurence_frequency()
+        spec = data.get_spectral_components(periods_mins=[float('inf'), 60*24, 60*24/2])
         # for baseline in [Fremen(spec), LastSeenAndStaticSemantic(cf), FremenStateConditioned(spec, data.params['dt']), LastSeen(cf), StaticSemantic(cf)]:
-        for baseline in [LastSeenAndStaticSemantic4(cf), FremenStateConditioned2(spec, data.params['dt'])]:
+        for baseline in [LastSeenAndStaticSemantic(cf), FremenStateConditioned(spec, data.params['dt'])]:
             output_dir = os.path.join(logs_dir, group,baseline.__class__.__name__)
             if os.path.exists(output_dir):
                 n = 1
@@ -165,8 +167,9 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
             for routine in data.test:
                 eval, details = baseline.step(data.test.collate_fn([routine]))
-            # _ = evaluate_applications(baseline, data, cfg, output_dir)
-            _ = evaluate_applications_new(baseline, data, output_dir)
+            _ = evaluate_applications_original(baseline, data, output_dir, learned_model=False)
+            # _ = evaluate_applications_new(baseline, data, output_dir)
+            # evaluation_summary = evaluate_applications_stepahead(baseline, data, output_dir)
 
 
             with open (os.path.join(output_dir,'config.json'), 'w') as f:
@@ -198,6 +201,12 @@ if __name__ == '__main__':
     parser.add_argument('--logs_dir', type=str, default='logs_default', help='Path to store putputs.')
 
     args = parser.parse_args()
+    args.cfg='default'
+    args.path='data/personaWithoutClothesAllObj/persona0' 
+    args.name='trial_objeval' 
+    args.train_days=50
+    args.read_ckpt = True
+    args.ckpt_dir='logs/CoRL_eval_0820_2000_onestep_goon/50/persona0/ours_50epochs'
 
     with open('config/default.yaml') as f:
         cfg = yaml.safe_load(f)
