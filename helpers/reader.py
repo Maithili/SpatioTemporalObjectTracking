@@ -7,6 +7,7 @@ from math import ceil, floor
 import torch
 from encoders import time_external
 from torch.utils.data import DataLoader
+from breakdown_evaluations import activity_list
 
 from graph_visualizations import visualize_routine, visualize_parsed_routine
 
@@ -80,7 +81,7 @@ class DataSplit():
         self.idx_map = idx_map
         self.routines_dir = routines_dir
         self.whole_routines = whole_routines
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'time', 'change_type'])
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'context_time', 'context_activity', 'y_edges', 'y_nodes', 'dynamic_edges_mask', 'time', 'change_type'])
         self.files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(os.path.join(self.routines_dir, name))]
         self.files.sort()
         if max_num_files is not None:
@@ -99,10 +100,10 @@ class DataSplit():
         filename, sample_idx = self.idx_map[idx]
         data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
         sample = data_list[sample_idx]
-        return sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time']), (sample['change_type']).to(int)
+        return sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['activity'], sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time']), (sample['change_type']).to(int)
     def get_routine(self, idx: int):
         data_list = torch.load(os.path.join(self.routines_dir, self.files[idx])) #, map_location=lambda storage, loc: storage.cuda(1))
-        samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time']), (sample['change_type']).to(int)) for sample in data_list]
+        samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['time']), sample['activity'], sample['edges'], sample['nodes'], self.active_edges, torch.tensor(sample['time']), (sample['change_type']).to(int)) for sample in data_list]
         # moved_obj_mask = torch.zeros_like(data_list[0]['edges']).to(bool)
         # for sample in data_list:
         #     moved_obj_mask = np.bitwise_or(torch.Tensor(moved_obj_mask), (sample['edges'] != sample['prev_edges'])).to(bool)
@@ -155,7 +156,6 @@ class RoutinesDataset():
     def __init__(self, data_path, 
                  time_encoder = time_external, 
                  batch_size = 1,
-                 only_seen_edges = False,
                  max_routines = (None, None)):
 
         with open(os.path.join(data_path, 'common_data.json')) as f:
@@ -167,10 +167,7 @@ class RoutinesDataset():
         self.params['dt'] = self.common_data['info']['dt']
         self.params['batch_size'] = batch_size
 
-        if only_seen_edges:
-            self.active_edges = torch.load(os.path.join(data_path, 'seen_edges.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
-        else:
-            self.active_edges = torch.load(os.path.join(data_path, 'nonstatic_edges.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
+        self.active_edges = torch.load(os.path.join(data_path, 'nonstatic_edges.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
         
         self.home_graph = torch.load(os.path.join(data_path, 'home_graph.pt'))
 
@@ -184,6 +181,7 @@ class RoutinesDataset():
             
         # Generate train and test loaders
         self.train = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['train_data_index_list'], max_num_files=max_routines[0])
+        self.train_routines = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['train_data_index_list'], max_num_files=max_routines[0], whole_routines=True)
         self.test = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['test_data_index_list'], max_num_files=max_routines[1])
         self.test_routines = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['test_data_index_list'], whole_routines=True)
         print(len(self.train),' examples in train split from ',self.train.num_routines(),' routines')
@@ -193,7 +191,9 @@ class RoutinesDataset():
         model_data = self.test.collate_fn([self.test[0]])
         self.params['n_nodes'] = model_data['edges'].size()[1]
         self.params['n_len'] = model_data['nodes'].size()[-1]
-        self.params['c_len'] = model_data['context'].size()[-1]
+        self.params['c_len'] = model_data['context_time'].size()[-1]
+        print(self.common_data['activities'], len(self.common_data['activities']))
+        self.params['n_activities'] = len(self.common_data['activities'])
 
     def get_train_loader(self):
         return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
@@ -256,6 +256,8 @@ class ProcessDataset():
         self.common_data['node_classes'] = [n['class_name'] for n in classes['nodes'] if not ignore_node(n)]
         self.common_data['node_categories'] = [n['category'] for n in classes['nodes'] if not ignore_node(n)]
         self.common_data['node_idx_from_id'] = {int(n):i for i,n in enumerate(self.common_data['node_ids'])}
+        self.common_data['activities'] = activity_list
+        self.common_data['actions'] = []
 
         # Diagonal nodes are always irrelevant
         self.nonstatic_edges = 1 - np.eye(len(self.common_data['node_ids']))
@@ -287,6 +289,8 @@ class ProcessDataset():
                 with open(fpath) as f_in:
                     routine = json.load(f_in)
                 nodes, edges = self.read_graphs(routine["graphs"])
+                # actions = self.read_actions(routine["actions"])
+                # activities =self.read_activities(routine["activity"])
                 if viz:
                     visualize_routine(routine)
                     visualize_parsed_routine(edges, nodes, self.common_data['node_classes'])
@@ -325,7 +329,12 @@ class ProcessDataset():
             end_time = parse_time(timerange.split('-')[1].strip())
             return activity, lambda t: t>=start_time and t<end_time
         activities = {parse_line(l)[0]:parse_line(l)[1] for l in scr_header_lines}
-        activity_func = lambda t : [a for a,fun in activities.items() if fun(t)]
+        def activity_func(t):
+            options = [self.common_data['activities'].index(a) for a,fun in activities.items() if fun(t)]
+            if len(options) > 0:
+                return options[0]
+            else:
+                return self.common_data['activities'].index(None)
         return activity_func
 
     def read_graphs(self, graphs):
@@ -345,6 +354,31 @@ class ProcessDataset():
             assert (edge_features[i,:,:].sum(axis=-1)).max() == 1, f"Matrix {i} not really a tree \n{edge_features[i,:,:]}"
             self.seen_edges[:,:] += edge_features[i,:,:]
         return torch.Tensor(node_features), torch.Tensor(edge_features)
+
+    # def read_actions(self, actions_list):
+    #     encoded_action_list = []
+    #     for actions in actions_list:
+    #         encoded_action_list.append([])
+    #         for i,action in enumerate(actions):
+    #             if action[0] not in self.common_data['actions']:
+    #                 self.common_data['actions'].append(action[0])
+    #             action_idx = self.common_data['actions'].index(action[0])
+    #             new_action = [(i, 0, action_idx)]
+    #             if len(action) > 1:
+    #                 for a in action[1:]:
+    #                     if a not in self.common_data['node_idx_from_id'].keys():
+    #                         print(f'Object {a} in {action} not found')
+    #                         continue
+    #                     new_action.append((i, 1, self.common_data['node_idx_from_id'][a]))
+    #             encoded_action_list[-1] += new_action
+    #     return encoded_action_list
+
+    # def read_activities(self, activities_list):
+    #     for activity in activities_list:
+    #         if activity not in self.common_data['activities']:
+    #             self.common_data['activities'].append(activity)
+    #     return torch.Tensor([self.common_data['activities'].index(activity) for activity in activities_list]).to(int)
+    
 
     def make_pairwise(self, nodes, edges, times, activity_func):
         pairwise_samples = []
@@ -370,11 +404,7 @@ class ProcessDataset():
             if prev_edges is not None:
                 change_type = (np.absolute(edges[data_idx] - prev_edges)).sum(-1).to(int)
                 change_type += (self.home_graph * (edges[data_idx] - prev_edges)).sum(-1).to(int)
-                if len(activity_func(t)) > 0:
-                    act = activity_func(t)[0]
-                else:
-                    act = None
-                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'change_type':change_type, 'activity':act})
+                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'change_type':change_type, 'activity':torch.Tensor([activity_func(t)])})
             prev_edges = edges[data_idx]
             prev_nodes = nodes[data_idx]
         return pairwise_samples
@@ -382,7 +412,7 @@ class ProcessDataset():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/differentBreakfasts0202', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/personaWithoutClothesAllObj/persona0', help='Path where the data lives. Must contain routines, info and classes json files.')
     args = parser.parse_args()
 
 

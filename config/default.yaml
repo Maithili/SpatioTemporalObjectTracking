@@ -1,18 +1,16 @@
-NAME: null
-TIME_ENCODING: sine_informed
-EPOCHS: [50]
-BATCH_SIZE: 1
-ONLY_SEEN_EDGES: False
-DATA_INFO: null
-LEARN_NODES: False
-EDGE_DROPOUT_PROB: 0.0
-SEARCH_LOOKAHEAD_STEPS: 5
-PROACTIVE_LOOKAHEAD_STEPS: 5
-ACTION_PROBABILITY_THRESHOLDS: [0.0,0.0]
-TN_LOSS_WEIGHT: null
-LEARNED_TIME_PERIODS: False
-LEARN_NODE_EMBEDDINGS: False
-PREPROCESS_CONTEXT: False
-EDGE_IMPORTANCE: predicted
-HIDDEN_LAYER_SIZE: 20
-MOVE_FACTOR: 0.0
+name: null
+time_encoding: sine_informed
+epochs: [50]
+batch_size: 1
+learn_nodes: False
+context_dropout_probs:
+  time: 0.0
+  activity: 1.0
+reset_prob: 0.0
+search_lookahead_steps: 5
+proactive_lookahead_steps: 5
+action_probability_thresholds: [0.0,0.0]
+learned_time_periods: False
+preprocess_context: True
+edge_importance: predicted
+hidden_layer_size: 20

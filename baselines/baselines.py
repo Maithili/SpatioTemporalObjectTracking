@@ -14,11 +14,10 @@ class Baseline():
         self.static_nodes_mask = (torch.unsqueeze(self.dynamic_edges.sum(-1) == 0, dim=-1)).expand(-1,-1,self.evaluate_node.size(1))
         self.edges = batch['edges']
         self.nodes = batch['nodes']
-        self.context = batch['context']
         self.gt = batch['y_edges']
         self.time = batch['time']
     
-    def step(self, batch):
+    def step(self, batch, prev_context=None):
         self.extract(batch)
         result = deepcopy(self.run())
         result[self.dynamic_edges == 0] = self.edges[self.dynamic_edges == 0]
@@ -30,7 +29,7 @@ class Baseline():
             'losses':{'location': None}, 
             'output':{'class':self.nodes.argmax(-1), 'location': result.squeeze(-1).argmax(-1)}, 
             'evaluate_node':self.evaluate_node}
-        return None, details
+        return None, details, None
 
 
 

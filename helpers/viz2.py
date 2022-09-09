@@ -1,10 +1,12 @@
 from copy import deepcopy
+from lib2to3.pgen2.literals import simple_escapes
 from math import atan2, ceil
 import os
 import shutil
 import argparse
 import random
 import json
+from sqlite3 import SQLITE_CREATE_TEMP_TABLE
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import ttest_ind
@@ -16,10 +18,12 @@ PLOT_CONFIDENCES = False
 
 red = np.array([164,22,35])/256
 green = np.array([20,89,29])/256
-neutral = np.array([245,226,200])/256
+neutral = np.array([245,226,200])/256*0.7
 
 redder = red-neutral
 greener = green-neutral
+
+num_routines = 10
 
 change_colors = ['tab:blue', 'tab:orange', 'tab:purple']
 change_names = ['taking out', 'other', 'putting away']
@@ -29,6 +33,14 @@ OUR_METHODS = ['Ours','Scratch']
 def method_color(name):
     if name.startswith('Last'):
         return 'tab:green'
+    if name.startswith('ours_activity25'):
+        return 'tab:purple'
+    if name.startswith('ours_activity50'):
+        return 'tab:blue'
+    if name.startswith('ours_activity75'):
+        return 'tab:green'
+    if name.startswith('ours_activity100'):
+        return 'tab:olive'
     if name.startswith('Fremen'):
         return 'tab:blue'
     if name.startswith('ourspt0_'):
@@ -48,6 +60,14 @@ def method_color(name):
 def method_marker(name):
     if name.startswith('Last'):
         return 'o'
+    if name.startswith('ours_activity25'):
+        return 'o'
+    if name.startswith('ours_activity50'):
+        return 'x'
+    if name.startswith('ours_activity75'):
+        return '^'
+    if name.startswith('ours_activity100'):
+        return 's'
     if name.startswith('Fremen'):
         return 's'
     if name.startswith('ourspt0_'):
@@ -65,6 +85,11 @@ def method_marker(name):
     else:
         return '.'
 
+def get_activity_difficulty(dataset_name, persona_name):
+    stats_file = os.path.join('data',dataset_name, persona_name, 'activity_stats.json')
+    probabilities = json.load(open(stats_file))["prob_days"]
+    probabilities[None] = 0
+    return probabilities
 
 def method_label(name, ablation='default'):
     all_name_dict = {}
@@ -79,18 +104,22 @@ def method_label(name, ablation='default'):
             'ourspt0_50epochs':'PreTr0only',
             'ours_50epochs':'Scratch',
             }
-    all_name_dict['ablation'] = {
+    all_name_dict['ablations'] = {
             'ours_50epochs':'Ours',
+            'ours_activity25_50epochs':'Activity 25',
+            'ours_activity50_50epochs':'Activity 50',
+            'ours_activity75_50epochs':'Activity 75',
+            'ours_activity100_50epochs':'Activity 100',
             'ours_allEdges_50epochs':'w/o Attn',
             'ours_timeLinear_50epochs':'w/o Time'
             }
     name_dict = all_name_dict[ablation]
     return name_dict[name]
 
-filenames = ['recall_accuracy','precision','ObjOnly_F1','IncDest_PrecRec', 'ObjOnly_PrecRec', 'recall_accuracy_norm', 'precision_norm', 'time_only_prediction', 'destination_accuracy', 'num_changes','destination_accuracy_line', 'optimistic', 'recall_by_type', 'recall_by_activity', 'recall_line', 'TrendOnlyObjectss', 'TrendWithDestination', 'ObjOnly_PrecRecAgg', 'IncDest_PrecRecAgg', 'IncDest_F1', 'Split']
+filenames = ['recall_accuracy','precision','ObjOnly_F1','IncDest_PrecRec', 'ObjOnly_PrecRec', 'recall_accuracy_norm', 'precision_norm', 'time_only_prediction', 'destination_accuracy', 'num_changes','destination_accuracy_line', 'optimistic', 'recall_by_type', 'recall_by_activity', 'recall_line', 'TrendOnlyObjectss', 'TrendWithDestination', 'ObjOnly_PrecRecAgg', 'IncDest_PrecRecAgg', 'IncDest_F1', 'Split', 'Error_Analysis', 'Error_Analysis_Too', 'Oracle_Analysis', 'Unmoved', 'Moved']
 
 
-def visualize_eval_breakdowns(data, names, colors, markers):
+def visualize_eval_breakdowns(data, names, colors, markers, activity_difficulty=None):
     # fig, ax = plt.subplots(2,3)
     f1, ax_comp_t_tl = plt.subplots()
     f2, ax_prec = plt.subplots()
@@ -113,7 +142,12 @@ def visualize_eval_breakdowns(data, names, colors, markers):
     f19, ax_avg_prec_rec_hard = plt.subplots()
     f20, ax_f1_harder = plt.subplots()
     f21, ax_split = plt.subplots()
-    figs =[f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21]
+    f22, ax_error_analysis = plt.subplots()
+    f23, ax_error_analysis2 = plt.subplots()
+    f24, ax_oracle_analysis = plt.subplots()
+    f25, ax_succes_on_unmoved = plt.subplots(1,3)
+    f26, ax_breakdown_on_moved = plt.subplots(1,2)
+    figs =[f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26]
 
     for ax in [ax_comp_tl_prec, ax_comp_t_prec, ax_avg_prec_rec, ax_avg_prec_rec_hard]:
         for f in [0.2, 0.4, 0.6]:
@@ -140,14 +174,59 @@ def visualize_eval_breakdowns(data, names, colors, markers):
     for sample_num, sample_data in enumerate(data):
         lookahead_steps = len(sample_data['precision_breakdown'])
         quality_steps = len(sample_data['precision_breakdown'])
+
+        # breakdown_steps = len(sample_data['breakdown']['correct'])
+        # success_on_unmoved = np.array(sample_data['breakdown']['tn'])/(np.array(sample_data['breakdown']['tn']) + np.array(sample_data['breakdown']['fp']))
+        # ax_succes_on_unmoved.plot(np.arange(breakdown_steps), success_on_unmoved, markersize = 20, marker=(markers[sample_num]), label=(names[sample_num]), color=colors[sample_num], linewidth=3)
+        # for step in range(breakdown_steps):
+        #     if sample_num == 0 and step == 0:
+        #         labels_brkdwn = ['Correct','Missed','Wrong']
+        #     ax_breakdown_on_moved.bar(sample_num + offsets[step], sample_data['breakdown']['correct'][step], color=green, width=width, label=labels_brkdwn[0])
+        #     ax_breakdown_on_moved.bar(sample_num + offsets[step], sample_data['breakdown']['missed'][step], bottom=sample_data['breakdown']['correct'][step], color=neutral, width=width, label=labels_brkdwn[1])
+        #     ax_breakdown_on_moved.bar(sample_num + offsets[step], sample_data['breakdown']['wrong'][step], bottom=sample_data['breakdown']['missed'][step]+sample_data['breakdown']['correct'][step], color=red, width=width, label=labels_brkdwn[2])
+        #     labels_brkdwn = [None, None, None]
+
+        sample_data['tn'] = [87*num_routines - sample_data['precision_breakdown'][step][0] - sample_data['precision_breakdown'][step][1] - sample_data['completeness_breakdown']['by_lookahead'][step][2] for step in range(lookahead_steps)]
+        success_on_unmoved = [sample_data['tn'][step]/ (sample_data['tn'][step] + sample_data['precision_breakdown'][step][1]) for step in range(lookahead_steps)]
+        ax_succes_on_unmoved[0].plot(np.arange(lookahead_steps), success_on_unmoved, markersize = 20, marker=(markers[sample_num]), label=(names[sample_num]), color=colors[sample_num], linewidth=3)
+        ax_succes_on_unmoved[1].bar([sample_num + o for o in offsets], sample_data['tn'], color=green, width=width)
+        ax_succes_on_unmoved[1].bar([sample_num + o for o in offsets], [sample_data['precision_breakdown'][step][1] for step in range(lookahead_steps)], bottom=sample_data['tn'], color=red, width=width)
+        overall_success = sum(sample_data['tn'])/ (sum(sample_data['tn']) + sum([sample_data['precision_breakdown'][step][1] for step in range(lookahead_steps)]))
+        overall_success = int(round(overall_success*1000))/1000
+        ps = ax_succes_on_unmoved[2].bar(sample_num, 1-overall_success, bottom=overall_success, color=red)
+        pf = ax_succes_on_unmoved[2].bar(sample_num, overall_success, color=green)
+        ax_succes_on_unmoved[2].bar_label(ps, label_type='center', fontsize=30)
+        ax_succes_on_unmoved[2].bar_label(pf, label_type='center', fontsize=30)
+        if sample_num == 0:
+            labels_brkdwn = ['Correct','Missed','Wrong']
+        correct = sum([a for a in [sample_data['completeness_breakdown']['by_lookahead'][step][0] for step in range(lookahead_steps)]])/num_routines
+        wrong = sum([a for a in [sample_data['completeness_breakdown']['by_lookahead'][step][1] for step in range(lookahead_steps)]])/num_routines
+        missed = sum([a for a in [sample_data['completeness_breakdown']['by_lookahead'][step][2] for step in range(lookahead_steps)]])/num_routines
+        total = correct+wrong+missed
+        correct = int(round(correct/total*1000))/1000
+        wrong = int(round(wrong/total*1000))/1000
+        missed = int(round(missed/total*1000))/1000
+        pc = ax_breakdown_on_moved[1].bar(sample_num, correct, color=green, label=labels_brkdwn[0])
+        pm = ax_breakdown_on_moved[1].bar(sample_num, missed, bottom=correct, color=neutral, label=labels_brkdwn[1])
+        pw = ax_breakdown_on_moved[1].bar(sample_num, wrong, bottom=missed+correct, color=red, label=labels_brkdwn[2])
+        ax_breakdown_on_moved[1].bar_label(pc, label_type='center', fontsize=30)
+        ax_breakdown_on_moved[1].bar_label(pm, label_type='center', fontsize=30)
+        ax_breakdown_on_moved[1].bar_label(pw, label_type='center', fontsize=30)
+        for step in range(lookahead_steps):
+            correct, wrong, missed = [a/num_routines for a in sample_data['completeness_breakdown']['by_lookahead'][step]]
+            ax_breakdown_on_moved[0].bar(sample_num + offsets[step], correct, color=green, width=width, label=labels_brkdwn[0])
+            ax_breakdown_on_moved[0].bar(sample_num + offsets[step], missed, bottom=correct, color=neutral, width=width, label=labels_brkdwn[1])
+            ax_breakdown_on_moved[0].bar(sample_num + offsets[step], wrong, bottom=missed+correct, color=red, width=width, label=labels_brkdwn[2])
+            labels_brkdwn = [None, None, None]
+
         for step in range(quality_steps-1, -1, -1):
             if sample_num == 0 and step == 0:
-                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step]), color=red-redder*0.3, width=width, label='False Positives')
-                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0], color=green, width=width, label='Correct Time')
+                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step])/num_routines, color=red-redder*0.3, width=width, label='False Positives')
+                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/num_routines, color=green, width=width, label='Correct Time')
                 ax_prec_norm.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/(sum(sample_data['precision_breakdown'][step])+1e-8), color=green-greener*0.2, width=width, label='Precision')
             else:
-                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step]), color=red-redder*0.3, width=width)
-                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0], color=green, width=width)
+                ax_prec.bar(sample_num + offsets[step], sum(sample_data['precision_breakdown'][step])/num_routines, color=red-redder*0.3, width=width)
+                ax_prec.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/num_routines, color=green, width=width)
                 ax_prec_norm.bar(sample_num + offsets[step], sample_data['precision_breakdown'][step][0]/(sum(sample_data['precision_breakdown'][step])+1e-8), color=green-greener*0.2, width=width)
         ax_num_changes.plot(np.arange(lookahead_steps)+1, [sum(qb)/10 for qb in sample_data['precision_breakdown']], markersize = 20, marker=(markers[sample_num]), label=(names[sample_num]), color=colors[sample_num], linewidth=3)
         precisions = [qb[0]/(sum(qb)+1e-8) for qb in sample_data['precision_breakdown']]
@@ -158,28 +237,35 @@ def visualize_eval_breakdowns(data, names, colors, markers):
         # if without_types:
         for step in range(comp_steps-1, -1, -1):
             if sample_num == 0 and step == 0:
-                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=red-redder*0.3, width=width, label='Wrong Time')
-                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1]), color=green-greener*0.3, width=width, label='Correct Time')
-                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0], color=green, width=width, label='Correct Time \n+ Destination')
-                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.5, width=width, label='Recall')
-                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.0, width=width, label='Destination\nAccuracy')
-                ax_dest_acc_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.2, width=width, label='Destination\nAccuracy')
+                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_routines, color=red-redder*0.3, width=width, label='Wrong Time')
+                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/num_routines, color=green-greener*0.3, width=width, label='Correct Time')
+                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/num_routines, color=green, width=width, label='Correct Time \n+ Destination')
+                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_routines, color=green-greener*0.5, width=width, label='Recall')
+                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_routines, color=green-greener*0.0, width=width, label='Destination\nAccuracy')
+                ax_dest_acc_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_routines, color=green-greener*0.2, width=width, label='Destination\nAccuracy')
         
             else:
-                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=red-redder*0.3, width=width)
-                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1]), color=green-greener*0.3, width=width)
-                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0], color=green, width=width)
-                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.5, width=width)
-                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.0, width=width)
-                ax_dest_acc_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step]), color=green-greener*0.2, width=width)
+                ax_comp_t_tl.bar(sample_num + offsets[step], sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_routines, color=red-redder*0.3, width=width)
+                ax_comp_t_tl.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/num_routines, color=green-greener*0.3, width=width)
+                ax_comp_t_tl.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/num_routines, color=green, width=width)
+                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], (sample_data['completeness_breakdown']['by_lookahead'][step][0]+sample_data['completeness_breakdown']['by_lookahead'][step][1])/sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_routines, color=green-greener*0.5, width=width)
+                ax_dest_acc_recl_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_routines, color=green-greener*0.0, width=width)
+                ax_dest_acc_norm.bar(sample_num + offsets[step], sample_data['completeness_breakdown']['by_lookahead'][step][0]/sum(sample_data['completeness_breakdown']['by_lookahead'][step])/num_routines, color=green-greener*0.2, width=width)
         
         if 'by_change_type' in sample_data['completeness_breakdown'].keys():
             ax_recl_by_changetype.plot([1,2,3], [(sample_data['completeness_breakdown']['by_change_type'][ci][0]+sample_data['completeness_breakdown']['by_change_type'][ci][1])/sum(sample_data['completeness_breakdown']['by_change_type'][ci]) for ci in range(3)], linewidth=3, linestyle='dashed', marker=markers[sample_num], color=colors[sample_num], markersize = 20)
             ax_recl_by_changetype.plot([1,2,3], [(sample_data['completeness_breakdown']['by_change_type'][ci][0])/sum(sample_data['completeness_breakdown']['by_change_type'][ci]) for ci in range(3)], linewidth=3, label=(names[sample_num]), marker=markers[sample_num], color=colors[sample_num], markersize = 20)
 
         if 'by_activity' in sample_data['completeness_breakdown'].keys():
-            ax_recl_by_activity.plot(np.arange(len(activity_list)), [(sample_data['completeness_breakdown']['by_activity'][ci][0]+sample_data['completeness_breakdown']['by_activity'][ci][1])/(sum(sample_data['completeness_breakdown']['by_activity'][ci])+1e-8) for ci in range(len(activity_list))], linewidth=3, label=(names[sample_num]), marker=markers[sample_num], color=colors[sample_num], markersize = 20)
-            ax_recl_by_activity.plot(np.arange(len(activity_list)), [(sample_data['completeness_breakdown']['by_activity'][ci][0])/(sum(sample_data['completeness_breakdown']['by_activity'][ci])+1e-8) for ci in range(len(activity_list))], linewidth=3, marker=markers[sample_num], color=colors[sample_num], markersize = 20, linestyle='dashed')
+            if activity_difficulty is None:
+                ax_recl_by_activity.plot(np.arange(len(activity_list)), [(sample_data['completeness_breakdown']['by_activity'][ci][0]+sample_data['completeness_breakdown']['by_activity'][ci][1])/(sum(sample_data['completeness_breakdown']['by_activity'][ci])+1e-8) for ci in range(len(activity_list))], linewidth=3, label=(names[sample_num]), marker=markers[sample_num], color=colors[sample_num], markersize = 20)
+                ax_recl_by_activity.plot(np.arange(len(activity_list)), [(sample_data['completeness_breakdown']['by_activity'][ci][0])/(sum(sample_data['completeness_breakdown']['by_activity'][ci])+1e-8) for ci in range(len(activity_list))], linewidth=3, marker=markers[sample_num], color=colors[sample_num], markersize = 20, linestyle='dashed')
+                ax_recl_by_activity.set_xticks(np.arange(len(activity_list)))
+            else:
+                # ax_recl_by_activity.scatter([activity_difficulty[a] for a in activity_list], [(sample_data['completeness_breakdown']['by_activity'][ci][0]+sample_data['completeness_breakdown']['by_activity'][ci][1])/(sum(sample_data['completeness_breakdown']['by_activity'][ci])+1e-8) for ci in range(len(activity_list))], label=(names[sample_num]), marker=markers[sample_num], color=colors[sample_num], markersize = 20)
+                ax_recl_by_activity.scatter([activity_difficulty[a] for a in activity_list], [(sample_data['completeness_breakdown']['by_activity'][ci][0])/(sum(sample_data['completeness_breakdown']['by_activity'][ci])+1e-8) for ci in range(len(activity_list))], marker=markers[sample_num], color=colors[sample_num]) #, markersize = 20)
+                ax_recl_by_activity.set_xticks([activity_difficulty[a] for a in activity_list])
+
 
         ax_dest_acc_norm2.plot(np.arange(lookahead_steps)+1, [cb[0]/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']], markersize = 20, marker=markers[sample_num], color=colors[sample_num], linewidth=3, label=(names[sample_num]))
         completeness_tl = [cb[0]/(sum(cb)+1e-8) for cb in sample_data['completeness_breakdown']['by_lookahead']]
@@ -208,15 +294,42 @@ def visualize_eval_breakdowns(data, names, colors, markers):
         left += sample_data['completeness_breakdown']['by_lookahead'][-1][0]
         p2 = ax_split.barh(sample_num, sample_data['completeness_breakdown']['by_lookahead'][-1][1], left=left, label='wrong', color='tab:red')
         left += sample_data['completeness_breakdown']['by_lookahead'][-1][1]
-        p3 = ax_split.barh(sample_num, sample_data['precision_breakdown'][-1][1], left=left, label='extra', color='tab:orange')
-        left += sample_data['precision_breakdown'][-1][1]
         p4 = ax_split.barh(sample_num, sample_data['completeness_breakdown']['by_lookahead'][-1][2], left=left, label='missed', color='tab:grey')
         left += sample_data['completeness_breakdown']['by_lookahead'][-1][2]
+        p3 = ax_split.barh(sample_num, -sample_data['precision_breakdown'][-1][1], left=0, label='extra', color='tab:orange')
+        # left += sample_data['precision_breakdown'][-1][1]
         
-        ax_split.bar_label(p1, label_type='center')
-        ax_split.bar_label(p2, label_type='center')
-        ax_split.bar_label(p3, label_type='center')
-        ax_split.bar_label(p4, label_type='center')
+        ax_split.bar_label(p1, label_type='center', fontsize=40, fmt="%.2f")
+        ax_split.bar_label(p2, label_type='center', fontsize=40, fmt="%.2f")
+        ax_split.bar_label(p3, label_type='center', fontsize=40, fmt="%.2f")
+        ax_split.bar_label(p4, label_type='center', fontsize=40, fmt="%.2f")
+
+        precision_harder_without_fp = [cb[0]/((qb[0])+1e-8) for cb,qb in zip(sample_data['completeness_breakdown']['by_lookahead'],sample_data['precision_breakdown'])]
+        f1_harder_without_fp = [2*p*r/(p+r+1e-8) for p,r in zip(precision_harder_without_fp, completeness_tl)]
+        f1_without_fp = [2*r/(1+r+1e-8) for r in completeness_t]
+        f1_without_missed = [2*p/(1+p+1e-8) for p in precisions]
+
+
+        if sample_num==0:
+            labels = ['Missed Oracle', 'False Object Oracle', 'Destination Oracle', 'Original']
+        ax_error_analysis.bar(sample_num, 1, color='tab:grey', label=labels[0])
+        ax_error_analysis.bar(sample_num, np.mean(f1_without_fp), color='tab:cyan', label=labels[2])
+        ax_error_analysis.bar(sample_num, np.mean(f1_harder_without_fp), color='tab:blue', label=labels[1])
+        ax_error_analysis.bar(sample_num, np.mean(f1_harder), color='tab:green', label=labels[3])
+        
+        ax_error_analysis2.bar(sample_num, 1, color='tab:grey', label=labels[0])
+        # f1_without_missed = [2*p/(1+p+1) for p in precisions]
+        # ax_error_analysis.bar(sample_nu, np.mean(f1_without_missed),  colors='tab:blue')        
+        ax_error_analysis2.bar(sample_num, np.mean(f1_without_fp), color='tab:blue', label=labels[1])
+        ax_error_analysis2.bar(sample_num, np.mean(f1), color='tab:cyan', label=labels[2])
+        ax_error_analysis2.bar(sample_num, np.mean(f1_harder), color='tab:green', label=labels[3])
+        labels = [None, None, None, None]
+
+        if 'with_oracle' in sample_data.keys():
+            if sample_num==0:
+                labels = ['With Oracle', 'Without Oracle']
+            ax_oracle_analysis.bar(sample_num, sample_data['with_oracle']['correct']/(sample_data['with_oracle']['correct']+sample_data['with_oracle']['wrong']), color='tab:green', label=label[0])
+            ax_oracle_analysis.bar(sample_num, sample_data['without_oracle']['correct']/(sample_data['without_oracle']['correct']+sample_data['without_oracle']['wrong']), color='tab:blue', label=label[1])
 
         alphas = np.linspace(1,0.2,quality_steps)
         for i in range(quality_steps):
@@ -234,6 +347,11 @@ def visualize_eval_breakdowns(data, names, colors, markers):
         info[names[sample_num]]['IncDest_precision'] = precision_harder
         info[names[sample_num]]['IncDest_recall'] = completeness_tl
         info[names[sample_num]]['IncDest_f1_score'] = f1_harder
+        info[names[sample_num]]['Correct'] = [sample_data['completeness_breakdown']['by_lookahead'][s][0]/num_routines for s in range(lookahead_steps)]
+        info[names[sample_num]]['Wrong'] = [sample_data['completeness_breakdown']['by_lookahead'][s][1]/num_routines for s in range(lookahead_steps)]
+        info[names[sample_num]]['Missed'] = [sample_data['completeness_breakdown']['by_lookahead'][s][2]/num_routines for s in range(lookahead_steps)]
+        info[names[sample_num]]['FP'] = [sample_data['precision_breakdown'][s][1]/num_routines for s in range(lookahead_steps)]
+        info[names[sample_num]]['TN'] = [sample_data['tn'][s]/num_routines for s in range(lookahead_steps)]
 
  
 
@@ -314,6 +432,18 @@ def visualize_eval_breakdowns(data, names, colors, markers):
     # ax_prec.set_title('Correct fraction of predictions', fontsize=30)
     # ax_prec.set_ylim([0,10])
 
+    ax_breakdown_on_moved[0].legend(fontsize=40)
+    ax_breakdown_on_moved[0].set_xticks(np.arange(len(names)))
+    ax_breakdown_on_moved[0].set_ylabel('Num. changes', fontsize=35)
+    ax_breakdown_on_moved[0].set_xticklabels([(n) for n in names], fontsize=45)
+    ax_breakdown_on_moved[0].tick_params(axis = 'y', labelsize=30)
+
+    # ax_breakdown_on_moved[1].legend(fontsize=40)
+    ax_breakdown_on_moved[1].set_xticks(np.arange(len(names)))
+    ax_breakdown_on_moved[1].set_ylabel("Used Objects", fontsize=35)
+    ax_breakdown_on_moved[1].set_xticklabels([(n) for n in names], fontsize=45)
+    ax_breakdown_on_moved[1].tick_params(axis = 'y', labelsize=30)
+
     ax_prec_norm.legend(fontsize=40)
     ax_prec_norm.set_xticks(np.arange(len(names)))
     ax_prec_norm.set_xticklabels([(n) for n in names], fontsize=45)
@@ -350,10 +480,9 @@ def visualize_eval_breakdowns(data, names, colors, markers):
     ax_recl_by_changetype.set_ylim([ax_dest_acc_recl_norm.get_ylim()[0], ax_dest_acc_recl_norm.get_ylim()[1]+0.12])
     ax_recl_by_changetype.set_title('recall and destination accuracy')
 
-    ax_recl_by_activity.legend(fontsize=40)
-    ax_recl_by_activity.set_xticks(np.arange(len(activity_list)))
-    ax_recl_by_activity.set_xticklabels(activity_list, fontsize=45, rotation=90)
-    ax_recl_by_activity.tick_params(axis = 'y', labelsize=30)
+    ax_recl_by_activity.legend(fontsize=10)
+    ax_recl_by_activity.set_xticklabels(activity_list, fontsize=10, rotation=90)
+    ax_recl_by_activity.tick_params(axis = 'y', labelsize=10)
     ax_recl_by_activity.set_ylim([ax_dest_acc_recl_norm.get_ylim()[0], ax_dest_acc_recl_norm.get_ylim()[1]+0.12])
     ax_recl_by_activity.set_title('recall & destination accuracy')
 
@@ -370,6 +499,25 @@ def visualize_eval_breakdowns(data, names, colors, markers):
     ax_num_changes.set_xlabel('Num. proactivity steps', fontsize=35)
     ax_num_changes.tick_params(axis = 'y', labelsize=40)
     ax_num_changes.tick_params(axis = 'x', labelsize=40)
+
+    ax_succes_on_unmoved[0].legend(fontsize=40)
+    ax_succes_on_unmoved[0].set_xticks(np.arange(lookahead_steps)+1)
+    ax_succes_on_unmoved[0].set_ylabel('Success Rate on Unused Objects', fontsize=35)
+    ax_succes_on_unmoved[0].set_xlabel('Num. proactivity steps', fontsize=35)
+    ax_succes_on_unmoved[0].tick_params(axis = 'y', labelsize=40)
+    ax_succes_on_unmoved[0].tick_params(axis = 'x', labelsize=40)
+  
+    # ax_succes_on_unmoved[1].legend(fontsize=40)
+    ax_succes_on_unmoved[1].set_xticks(np.arange(len(names)))
+    ax_succes_on_unmoved[1].set_ylabel('Success Rate on Unused Objects', fontsize=35)
+    ax_succes_on_unmoved[1].set_xticklabels([(n) for n in names], fontsize=45)
+    ax_succes_on_unmoved[1].tick_params(axis = 'y', labelsize=30)
+
+    ax_succes_on_unmoved[2].legend(fontsize=40)
+    ax_succes_on_unmoved[2].set_xticks(np.arange(len(names)))
+    ax_succes_on_unmoved[2].set_ylabel('Success Rate on Unused Objects', fontsize=35)
+    ax_succes_on_unmoved[2].set_xticklabels([(n) for n in names], fontsize=45)
+    ax_succes_on_unmoved[2].tick_params(axis = 'y', labelsize=30)
 
 
     ax_dest_acc_norm2.legend(fontsize=40)
@@ -401,6 +549,24 @@ def visualize_eval_breakdowns(data, names, colors, markers):
     ax_optimistic_da_recl.tick_params(axis = 'y', labelsize=40)
     ax_optimistic_da_recl.tick_params(axis = 'x', labelsize=40)
 
+    ax_error_analysis.legend(fontsize=40)
+    ax_error_analysis.set_xticks(np.arange(len(names)))
+    ax_error_analysis.set_xticklabels([(n) for n in names], fontsize=45)
+    ax_error_analysis.tick_params(axis = 'y', labelsize=30)
+    ax_error_analysis.set_ylabel('F-1 Score', fontsize=35)
+
+    ax_error_analysis2.legend(fontsize=40)
+    ax_error_analysis2.set_xticks(np.arange(len(names)))
+    ax_error_analysis2.set_xticklabels([(n) for n in names], fontsize=45)
+    ax_error_analysis2.tick_params(axis = 'y', labelsize=30)
+    ax_error_analysis2.set_ylabel('F-1 Score', fontsize=35)
+
+    ax_oracle_analysis.legend(fontsize=40)
+    ax_oracle_analysis.set_xticks(np.arange(len(names)))
+    ax_oracle_analysis.set_xticklabels([(n) for n in names], fontsize=45)
+    ax_oracle_analysis.tick_params(axis = 'y', labelsize=30)
+    
+
     for fig in figs:
         fig.set_size_inches(30,15)
         fig.tight_layout()
@@ -424,8 +590,12 @@ def visualize_eval_breakdowns(data, names, colors, markers):
     f11.tight_layout()
     f13.set_size_inches(15,10)
     f13.tight_layout()
-    f14.set_size_inches(30,20)
+    f14.set_size_inches(10,10)
     f14.tight_layout()
+    f22.set_size_inches(15,10)
+    f22.tight_layout()
+    f23.set_size_inches(15,10)
+    f23.tight_layout()
     
         # for fig in figs:
         #     fig.set_size_inches(8,10)
@@ -457,6 +627,8 @@ def average_stats(stats_list):
     if num_stats == 1:
         return stats_list[0]
     lookahead_steps = min(MAX_LOOKAHEAD, len(stats_list[0]['precision_breakdown']))
+    if 'breakdown' in stats_list[0].keys():
+        avg['breakdown'] = {k:np.sum([sl['breakdown'][k] for sl in stats_list]) for k in stats_list[0]['breakdown'].keys()}
     avg['precision_breakdown'] = [[ sum([sl['precision_breakdown'][s][c] for sl in stats_list])/num_stats for c in range(2)]for s in range(lookahead_steps)]
     avg['completeness_breakdown'] = {}
     if 'by_lookahead' in stats_list[0]['completeness_breakdown']:
@@ -470,8 +642,7 @@ def average_stats(stats_list):
     if 'optimistic_completeness_breakdown' in stats_list[0].keys():
         avg['optimistic_completeness_breakdown'] = {
             'by_lookahead' : [[ sum([sl['optimistic_completeness_breakdown']['by_lookahead'][s][c] for sl in stats_list])/num_stats for c in range(3)]for s in range(lookahead_steps)]
-        }    
-    
+        }        
 
     return avg
 
@@ -480,13 +651,31 @@ def result_string_from_info(info):
     info_mins = {kk:{k:min(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()}
     info_maxs = {kk:{k:max(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()}
     info_stds = {kk:{k:np.std(v) for k,v in vv.items() if k != 'time_only_accuracy'} for kk,vv in info.items()}
-    
+    methods = list(info.keys())
+
     string = ''
+    simple_results = [k for k in info_averages[methods[0]].keys() if '_' not in k]
+    string += ('\n{} : {}'.format(' '*(40), ','.join(simple_results)))
+    for m in methods:
+        reses = ', '.join(['{:.4f}'.format(info_averages[m][r]) for r in simple_results])
+        string += ('\n{} : {}'.format(m+' '*(40-len(m)), reses))
+    
+    string += '\n\n'
+
+    string += ('\n{} : {}'.format(' '*(40), ','.join(simple_results)))
+    for m in methods:
+        denom1 = sum([info_averages[m][r] for r in simple_results[:3]])
+        reses1 = ', '.join(['{:.2f}'.format(info_averages[m][r]/denom1*100) for r in simple_results[:3]])
+        denom2 = sum([info_averages[m][r] for r in simple_results[3:]])
+        reses2 = ', '.join(['{:.2f}'.format(info_averages[m][r]/denom2*100) for r in simple_results[3:]])
+        string += ('\n{} : {}, {}'.format(m+' '*(40-len(m)), reses1, reses2))
+
+    string += '\n\n\n\n'
+
 
     for result_type in ['IncDest', 'ObjOnly']:
         metrics = [result_type+'_'+x for x in ['f1_score', 'precision', 'recall']]
         string += ('\n\n\n\n---------- '+ result_type +' ----------')
-        methods = info.keys()
         for res in metrics:
             string += ('\n----- '+ res +' -----')
             for m in methods:
@@ -528,18 +717,19 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
 
-    training_days = [int(t) for t in os.listdir(args.path) if not t.startswith('visual')]
-    training_days.sort()
-    dirs = [os.path.join(args.path,str(p)) for p in training_days]
+    all_training_days = [int(t) for t in os.listdir(args.path) if not t.startswith('visual')]
+    all_training_days.sort(reverse=True)
+    dirs = [os.path.join(args.path,str(p)) for p in all_training_days]
 
     datasets = os.listdir(dirs[0])
 
+
     if PLOT_CONFIDENCES:
-        confidences = [float(k) for k in json.load(open(os.path.join(dirs[-1],datasets[0],'oursconf6_50epochs','evaluation.json')))["with_confidence"].keys()]
+        confidences = [float(k) for k in json.load(open(os.path.join(dirs[0],datasets[0],'oursconf6_50epochs','evaluation.json')))["with_confidence"].keys()]
         confidences.sort()
         confidences = confidences[:-1]
         confidences = [c for c in confidences if c > 0.4]
-        data = [average_stats([json.load(open(os.path.join(dirs[-1],dataset,'oursconf6_50epochs','evaluation.json')))["with_confidence"][str(conf)] for dataset in datasets]) for conf in confidences]
+        data = [average_stats([json.load(open(os.path.join(dirs[0],dataset,'oursconf6_50epochs','evaluation.json')))["with_confidence"][str(conf)] for dataset in datasets]) for conf in confidences]
 
 
         dir_out = os.path.join(args.path,'visuals','confidence')
@@ -556,14 +746,23 @@ if __name__ == '__main__':
     all_methods = {
         'baselines' : ['FremenStateConditioned', 'LastSeenAndStaticSemantic', 'ours_50epochs'],
         'pretrain' : ['ourspt_50epochs', 'ours_50epochs'],
-        'ablations' : ['ours_50epochs', 'ours_allEdges_50epochs', 'ours_timeLinear_50epochs']
+        'ablations' : ['ours_50epochs','ours_allEdges_50epochs','ours_timeLinear_50epochs']
     }
 
 
-    # for typ in ['baselines','pretrain','ablations']:
-    for typ in ['baselines']:
+    for typ in [
+        'baselines', 
+        'ablations', 
+        'pretrain',
+        ]:
 
-        if typ == 'ablations': training_days = [50]
+
+        if typ == 'ablations':
+            training_days = [max(all_training_days)]
+        else:
+            training_days = all_training_days
+
+
         dirs = [os.path.join(args.path,str(p)) for p in training_days]
 
         methods = all_methods[typ]
@@ -577,6 +776,27 @@ if __name__ == '__main__':
             dir_out = os.path.join(args.path,'visuals',typ,os.path.basename(dir))
             if not os.path.exists(dir_out): os.makedirs(dir_out)
             data = []
+
+            # if os.path.basename(dir) == '50':
+            #     for dataset in datasets:
+            #         for method in methods:
+            #             data.append(json.load(open(os.path.join(dir,dataset,method,'evaluation.json'))))
+                    
+            #         dataset_dir_out = os.path.join(dir_out,dataset)
+            #         if not os.path.exists(dataset_dir_out): os.makedirs(dataset_dir_out)
+
+            #         names = [method_label(m,ablation=typ) for m in methods]
+            #         markers = [method_marker(m) for m in methods]
+            #         colors = [method_color(m) for m in methods]
+            #         figs, info = visualize_eval_breakdowns(data, names, colors, markers, activity_difficulty=get_activity_difficulty(dataset_name='personaWithoutClothesAllObj', persona_name=dataset))
+            #         for i,fig in enumerate(figs):
+            #             fig.savefig(os.path.join(os.path.join(dataset_dir_out,filenames[i]+'.jpg')))
+            #         with open(os.path.join(dataset_dir_out,'info.json'), 'w') as f:
+            #             json.dump(info, f)
+            #         with open(os.path.join(dataset_dir_out,'result.txt'), 'w') as f:
+            #             f.write(result_string_from_info(info))
+            #         data = []
+
             for method in methods:
                 data.append(average_stats([json.load(open(os.path.join(dir,dataset,method,'evaluation.json'))) for dataset in datasets]))
 

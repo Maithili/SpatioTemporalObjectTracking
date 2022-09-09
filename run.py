@@ -5,6 +5,7 @@ import json
 import os
 import glob
 import argparse
+from adict import adict
 from copy import deepcopy
 import torch
 from pytorch_lightning import Trainer
@@ -23,26 +24,17 @@ random.seed(23435)
 from numpy import random as nrandom
 nrandom.seed(23435)
 
-def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[], logs_dir='logs', finetune=False):
+def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[], logs_dir='logs', finetune=False):
 
 
-    cfg['DATA_PARAM'] = data.params
-
+    cfg.update(data.params)
+    model_configs = adict(cfg)
 
     if read_ckpt:
         print('Looking for checkpoint in ',checkpoint_dir)
         checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
         model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
-                                                            num_nodes=data.params['n_nodes'],
-                                                            node_feature_len=data.params['n_len'],
-                                                            context_len=data.params['c_len'],
-                                                            edge_importance=cfg['EDGE_IMPORTANCE'],
-                                                            edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
-                                                            learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
-                                                            hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
-                                                            learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
-                                                            preprocess_context=cfg['PREPROCESS_CONTEXT'],
-                                                            move_factor=cfg['MOVE_FACTOR'])
+                                                           model_configs = model_configs)
         output_dir = os.path.join(logs_dir, group,cfg['NAME'])
 
         # graph_visuals_out = os.path.join(output_dir, 'graph_visuals')
@@ -51,7 +43,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
         # visualize_conditional_datapoint(model, data.test, data.common_data['node_classes'], node_categories = data.common_data['node_categories'], use_output_nodes = False, save_fig_dir = graph_visuals_out, ask=False)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        evaluation_summary = evaluate_applications_original(model, data, output_dir, learned_model=True, print_importance=False, confidences=cfg['ACTION_PROBABILITY_THRESHOLDS'])
+        evaluation_summary = evaluate_applications_original(model, data, output_dir, learned_model=True, print_importance=False, confidences=cfg['action_probability_thresholds'])
         # evaluation_summary = evaluate_applications_new(model, data, output_dir)
         # evaluation_summary = evaluate_applications_stepahead(model, data, output_dir)
 
@@ -73,30 +65,12 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
             checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
             print(f'Finetuning model at {checkpoint_file}.................')
             model = GraphTranslatorModule.load_from_checkpoint(checkpoint_file, 
-                                                                num_nodes=data.params['n_nodes'],
-                                                                node_feature_len=data.params['n_len'],
-                                                                context_len=data.params['c_len'],
-                                                                edge_importance=cfg['EDGE_IMPORTANCE'],
-                                                                edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
-                                                                learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
-                                                                hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
-                                                                learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
-                                                                preprocess_context=cfg['PREPROCESS_CONTEXT'],
-                                                                move_factor=cfg['MOVE_FACTOR'])
+                                                               model_configs = model_configs)
 
         else:
-            model = GraphTranslatorModule(num_nodes=data.params['n_nodes'],
-                                node_feature_len=data.params['n_len'],
-                                context_len=data.params['c_len'],
-                                edge_importance=cfg['EDGE_IMPORTANCE'],
-                                edge_dropout_prob = cfg['EDGE_DROPOUT_PROB'],
-                                learned_time_periods=cfg['LEARNED_TIME_PERIODS'],
-                                hidden_layer_size=cfg['HIDDEN_LAYER_SIZE'],
-                                learn_node_embeddings=cfg['LEARN_NODE_EMBEDDINGS'],
-                                preprocess_context=cfg['PREPROCESS_CONTEXT'],
-                                move_factor=cfg['MOVE_FACTOR'])
+            model = GraphTranslatorModule(model_configs = model_configs)
 
-        epochs = cfg['EPOCHS'] if isinstance(cfg['EPOCHS'],list) else [cfg['EPOCHS']]
+        epochs = cfg['epochs'] if isinstance(cfg['epochs'],list) else [cfg['epochs']]
         done_epochs = 0
 
         for epoch in epochs:
@@ -116,7 +90,7 @@ def run_model(data, group, checkpoint_dir=None, read_ckpt=False, write_ckpt=Fals
             trainer.test(model, data.get_test_loader())
             done_epochs = epoch
 
-            evaluation_summary = evaluate_applications_original(model, data, output_dir_new, learned_model=True, print_importance=False, confidences=cfg['ACTION_PROBABILITY_THRESHOLDS'])
+            evaluation_summary = evaluate_applications_original(model, data, output_dir_new, learned_model=True, print_importance=False, confidences=cfg['action_probability_thresholds'])
             # evaluation_summary = evaluate_applications_new(model, data, output_dir_new)
             # evaluation_summary = evaluate_applications_stepahead(model, data, output_dir)
 
@@ -140,12 +114,11 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
         cfg['DATA_INFO'] = json.load(f)['info']
 
     time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
-    time_encoding = time_options(cfg['TIME_ENCODING'])
+    time_encoding = time_options(cfg['time_encoding'])
 
     data = RoutinesDataset(data_path=os.path.join(data_dir,'processed'), 
                            time_encoder=time_encoding, 
-                           batch_size=cfg['BATCH_SIZE'],
-                           only_seen_edges = cfg['ONLY_SEEN_EDGES'],
+                           batch_size=cfg['batch_size'],
                            max_routines = (train_days, None))
     
     group = os.path.basename(data_dir)
@@ -153,8 +126,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     if baselines:
         cf = data.get_cooccurence_frequency()
         spec = data.get_spectral_components(periods_mins=[float('inf'), 60*24, 60*24/2])
-        # for baseline in [Fremen(spec), LastSeenAndStaticSemantic(cf), FremenStateConditioned(spec, data.params['dt']), LastSeen(cf), StaticSemantic(cf)]:
-        for baseline in [LastSeenAndStaticSemantic(cf), FremenStateConditioned(spec, data.params['dt'])]:
+        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
             output_dir = os.path.join(logs_dir, group,baseline.__class__.__name__)
             if os.path.exists(output_dir):
                 n = 1
@@ -165,8 +137,8 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
                 output_dir = new_dir
             os.makedirs(output_dir)
 
-            for routine in data.test:
-                eval, details = baseline.step(data.test.collate_fn([routine]))
+            # for routine in data.test:
+            #     eval, details, _ = baseline.step(data.test.collate_fn([routine]))
             _ = evaluate_applications_original(baseline, data, output_dir, learned_model=False)
             # _ = evaluate_applications_new(baseline, data, output_dir)
             # evaluation_summary = evaluate_applications_stepahead(baseline, data, output_dir)
@@ -177,7 +149,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
             print('Outputs saved at ',output_dir)
     else:
-        run_model(data, group=group, checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags, logs_dir=logs_dir, finetune=finetune)
+        run_model(data, group=group, cfg = cfg, checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags, logs_dir=logs_dir, finetune=finetune)
 
 
 
@@ -187,9 +159,8 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/persona/persona1', help='Path where the data lives. Must contain routines, info and classes json files.')
-    parser.add_argument('--architecture_cfg', type=str, help='Name of config file.')
-    parser.add_argument('--cfg', type=str, default='default', help='Name of config file.')
+    parser.add_argument('--path', type=str, default='data/personaWithoutClothesAllObj/persona0', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--train_days', type=int, help='Number of routines to train on.')
     parser.add_argument('--name', type=str, default='trial', help='Name of run.')
     parser.add_argument('--tags', type=str, help='Tags for the run separated by a comma \',\'')
@@ -201,19 +172,9 @@ if __name__ == '__main__':
     parser.add_argument('--logs_dir', type=str, default='logs_default', help='Path to store putputs.')
 
     args = parser.parse_args()
-    args.cfg='default'
-    args.path='data/personaWithoutClothesAllObj/persona0' 
-    args.name='trial_objeval' 
-    args.train_days=50
-    args.read_ckpt = True
-    args.ckpt_dir='logs/CoRL_eval_0820_2000_onestep_goon/50/persona0/ours_50epochs'
 
     with open('config/default.yaml') as f:
         cfg = yaml.safe_load(f)
-
-    if args.architecture_cfg is not None:
-        with open(os.path.join('config',args.architecture_cfg)+'.yaml') as f:
-            cfg.update(yaml.safe_load(f))
 
     if args.cfg is not None:
         with open(os.path.join('config',args.cfg)+'.yaml') as f:

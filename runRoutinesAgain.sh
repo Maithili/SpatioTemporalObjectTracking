@@ -9,24 +9,32 @@ trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
 
 DATE_TIME=`date "+%m%d_%H%M"`
 
-logs_dir="logs/CoRL_eval_0819_2204"
-checkpoints_source="logs_archived/logs_persons0509"
+logs_dir="logs/"$DATE_TIME"_CoRL_final"
+checkpoints_source="logs/CoRL_eval_0820_2000_onestep_goon"
 
-for train_days in 5 10 15 20 25 30 35 40 45 50
+train_days=50
+for dataset in $(find data/personaWithoutClothesAllObj/ -mindepth 1 -maxdepth 1)
 do
-    for dataset in $(find data/persona/ -mindepth 1 -maxdepth 1)
+    dataset_name=$(basename $dataset)
+    echo $dataset": default"
+    python3 ./run.py --cfg=confidence --path=$dataset --name=ours --train_days=$train_days --logs_dir=$logs_dir/$train_days --read_ckpt --ckpt_dir=$checkpoints_source/$train_days/$dataset_name/ours"_50epochs"
+    echo $dataset": baselines"
+    python3 ./run.py --cfg=default --path=$dataset --baselines --train_days=$train_days --logs_dir=$logs_dir/$train_days
+    for config in allEdges timeLinear
     do
-        echo $dataset
+        echo $dataset": "$config
+        python3 ./run.py --cfg=$config --path=$dataset --name=ours_$config --train_days=$train_days --logs_dir=$logs_dir/$train_days --read_ckpt --ckpt_dir=$checkpoints_source/$train_days/$dataset_name/ours"_"$config"_50epochs"
+    done
+done
+
+for train_days in 40 30 20 10 5 15 25 35 45
+do
+    for dataset in $(find data/personaWithoutClothesAllObj/ -mindepth 1 -maxdepth 1)
+    do
         dataset_name=$(basename $dataset)
+        echo $dataset": default"
+        python3 ./run.py --path=$dataset --name=ours --train_days=$train_days --logs_dir=$logs_dir/$train_days --read_ckpt --ckpt_dir=$checkpoints_source/$train_days/$dataset_name/ours"_50epochs"
+        echo $dataset": baselines"
         python3 ./run.py --cfg=default --path=$dataset --baselines --train_days=$train_days --logs_dir=$logs_dir/$train_days
-        # python3 ./run.py --path=$dataset --name=ours_50epochs --train_days=$train_days --logs_dir=$logs_dir/$train_days --read_ckpt --ckpt_dir=$checkpoints_source/$train_days/$dataset_name/ours_50epochs
-        # for i in 1 2
-        # do
-        #     python3 ./run.py --path=$dataset --name=ours_50epochs_$i --train_days=$train_days --logs_dir=$logs_dir/$train_days --read_ckpt --ckpt_dir=$checkpoints_source/$train_days/$dataset_name/ours_50epochs_$i
-            # for config in allEdges timeLinear
-            # do
-                # python3 ./run.py --cfg=$config --path=$dataset --name=ours_$config"_50epochs" --train_days=$train_days --logs_dir=$logs_dir/$train_days --read_ckpt --ckpt_dir=$checkpoints_source/$train_days/$dataset_name/ours_$config"_50epochs"
-            # done
-        done
     done
 done
