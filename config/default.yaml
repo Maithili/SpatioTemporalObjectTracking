@@ -9,7 +9,7 @@ context_dropout_probs:
 reset_prob: 0.0
 search_lookahead_steps: 5
 proactive_lookahead_steps: 5
-action_probability_thresholds: [0.0,0.0]
+action_probability_thresholds: [0.0]
 learned_time_periods: False
 preprocess_context: True
 edge_importance: predicted

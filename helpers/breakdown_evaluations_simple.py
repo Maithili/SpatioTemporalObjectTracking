@@ -64,14 +64,14 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
                             'wrong':[0 for _ in range(lookahead_steps)], 
                             'missed':[0 for _ in range(lookahead_steps)]},
                  'unmoved':{'fp':[0 for _ in range(lookahead_steps)], 
-                            'tn':[0 for _ in range(lookahead_steps)]},
-                 'moved_change_type' : {'correct':[0 for _ in range(num_change_types)], 
-                                        'wrong':[0 for _ in range(num_change_types)], 
-                                        'missed':[0 for _ in range(num_change_types)]},
-                 'moved_activity' : {'correct':[0 for _ in activity_list], 
-                                        'wrong':[0 for _ in activity_list], 
-                                        'missed':[0 for _ in activity_list]}
+                            'tn':[0 for _ in range(lookahead_steps)]}
                 } for conf in confidences}
+    results_other = {'moved_change_type' : {'correct':[0 for _ in range(num_change_types)], 
+                                            'wrong':[0 for _ in range(num_change_types)], 
+                                            'missed':[0 for _ in range(num_change_types)]},
+                     'moved_activity' : {'correct':[0 for _ in activity_list], 
+                                         'wrong':[0 for _ in activity_list], 
+                                         'missed':[0 for _ in activity_list]}}
     results_by_obj = [{'correct':[], 'wrong':[], 'missed':[], 'fp':[]} for _ in range(lookahead_steps)]
     object_stats = []
     figures = []
@@ -183,11 +183,11 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
                 changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
                 changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
                 changes_not_output_and_gt = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))
-                results['moved']['correct'][ls] += int((correct[conf][changes_output_and_gt]).sum())
-                results['moved']['wrong'][ls] += int((wrong[conf][changes_output_and_gt]).sum())
-                results['moved']['missed'][ls] += int((changes_not_output_and_gt).sum())
-                results['unmoved']['fp'][ls] += int(changes_output_and_not_gt.sum())
-                results['unmoved']['tn'][ls] += int(deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step))).sum())
+                results[conf]['moved']['correct'][ls] += int((correct[conf][changes_output_and_gt]).sum())
+                results[conf]['moved']['wrong'][ls] += int((wrong[conf][changes_output_and_gt]).sum())
+                results[conf]['moved']['missed'][ls] += int((changes_not_output_and_gt).sum())
+                results[conf]['unmoved']['fp'][ls] += int(changes_output_and_not_gt.sum())
+                results[conf]['unmoved']['tn'][ls] += int(deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step))).sum())
                 
 
         correct = deepcopy(routine_outputs == routine_ground_truths).to(int)
@@ -214,10 +214,10 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
         # changes_output_and_gt_all = deepcopy(np.bitwise_and(changes_output_all, changes_gt))
         for ct in range(num_change_types):
             ct_mask = deepcopy(np.bitwise_and(changes_output_all, routine_change_types == (ct+1)))
-            results['moved_change_type']['correct'][ct] += int((correct[ct_mask]).sum())
-            results['moved_change_type']['wrong'][ct] += int((wrong[ct_mask]).sum())
+            results_other['moved_change_type']['correct'][ct] += int((correct[ct_mask]).sum())
+            results_other['moved_change_type']['wrong'][ct] += int((wrong[ct_mask]).sum())
             ct_mask_missed = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_all), routine_change_types == (ct+1)))
-            results['moved_change_type']['missed'][ct] += int(ct_mask_missed.sum())
+            results_other['moved_change_type']['missed'][ct] += int(ct_mask_missed.sum())
         # print (routine_change_types.unique())
         # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][2] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][2]) == 0 , "missed changes don't add up!"
         # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][0] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][0]) == 0, "correct changes don't add up"
@@ -225,10 +225,10 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
 
         for aidx in range(len(activity_list)):
             a_mask = deepcopy(np.bitwise_and(changes_output_all, routine_activities == aidx))
-            results['moved_activity']['correct'][aidx] += int((correct[a_mask]).sum())
-            results['moved_activity']['wrong'][aidx] += int((wrong[a_mask]).sum())
+            results_other['moved_activity']['correct'][aidx] += int((correct[a_mask]).sum())
+            results_other['moved_activity']['wrong'][aidx] += int((wrong[a_mask]).sum())
             a_mask_missed = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_all), routine_activities == aidx))
-            results['moved_activity']['missed'][aidx] += int(a_mask_missed.sum())
+            results_other['moved_activity']['missed'][aidx] += int(a_mask_missed.sum())
 
         
         fig, axs = plt.subplots(1,5)

@@ -169,6 +169,9 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
                 new_changes_out = deepcopy(np.bitwise_and(output_tensor != input_tensor , np.bitwise_not(changes_output_all[step,:]))).to(bool)
                 new_changes_gt = deepcopy(np.bitwise_and(gt_tensor != routine_inputs[step,:] , np.bitwise_not(changes_gt_all[step,:]))).to(bool)
                 
+                if new_changes_out.max() > 0:
+                    print('No!!')
+
                 if i == 0:
                     moved_output_probs = details['output_probs']['location'].cpu().detach().numpy()
                     moved_output_probs -= np.eye(moved_output_probs.shape[-1])

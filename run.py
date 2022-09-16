@@ -14,7 +14,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
-from breakdown_evaluations import evaluate as evaluate_applications_original
+from breakdown_evaluations_simple import evaluate as evaluate_applications_original
 from breakdown_evaluations_human_centric import evaluate as evaluate_applications_new
 from breakdown_evaluations_human_centric_stepahead import evaluate as evaluate_applications_stepahead
 from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned, FremenStateConditioned1, FremenStateConditioned2, FremenStateConditioned3, FremenStateConditioned4, LastSeenAndStaticSemantic2, LastSeenAndStaticSemantic3, LastSeenAndStaticSemantic4, LastSeenAndStaticSemantic5
@@ -125,7 +125,8 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     if baselines:
         cf = data.get_cooccurence_frequency()
         spec = data.get_spectral_components(periods_mins=[float('inf'), 60*24, 60*24/2])
-        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
+        for baseline in [LastSeen(), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
+        # for baseline in [LastSeen()]:
             output_dir = os.path.join(logs_dir, group,baseline.__class__.__name__)
             if os.path.exists(output_dir):
                 n = 1
@@ -138,7 +139,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
             # for routine in data.test:
             #     eval, details, _ = baseline.step(data.test.collate_fn([routine]))
-            _ = evaluate_applications_original(baseline, data, output_dir, learned_model=False)
+            _ = evaluate_applications_original(baseline, data, output_dir, learned_model=False, confidences=cfg['action_probability_thresholds'])
             # _ = evaluate_applications_new(baseline, data, output_dir)
             # evaluation_summary = evaluate_applications_stepahead(baseline, data, output_dir)
 
