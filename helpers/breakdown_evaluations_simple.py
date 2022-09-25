@@ -115,7 +115,7 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
 
             first_data = deepcopy(data_list[0])
 
-            context_pred = None
+            activity_probs = None
             for i,(data, act) in enumerate(zip(data_list,activities_in_lookahead)):
                 assert i<lookahead_steps
                 if i>0:
@@ -126,7 +126,7 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
                     for k in data.keys():
                         data[k] = data[k].to('cuda')
                         
-                _, details, context_pred = model.step(data, prev_context=context_pred)
+                _, details, activity_probs = model.step(data, prev_activity_probs=activity_probs)
                 
                 if i==0 and print_importance:
                     axs_imp[step].imshow(details['importance_weights'].squeeze(0))
@@ -341,6 +341,8 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
 
 def evaluate(model, data, output_dir, print_importance=False, lookahead_steps=12, confidences=[], learned_model=False):
     
+    model.evaluate = True
+
     info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.common_data['node_classes'], print_importance=print_importance, lookahead_steps=lookahead_steps, confidences=confidences, learned_model=learned_model, activity_list=data.common_data['activities'])
     json.dump(info, open(os.path.join(output_dir, 'evaluation.json'), 'w'), indent=4)
 

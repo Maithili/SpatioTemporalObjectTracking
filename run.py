@@ -1,3 +1,4 @@
+import shutil
 import sys
 sys.path.append('helpers')
 import yaml
@@ -10,6 +11,7 @@ from copy import deepcopy
 import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 
 from GraphTranslatorModule import GraphTranslatorModule
 from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
@@ -48,6 +50,9 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
         # evaluation_summary = evaluate_applications_stepahead(model, data, output_dir)
 
         print('Outputs saved at ',output_dir)
+    
+        if write_ckpt:
+            shutil.copyfile(checkpoint_file, os.path.join(output_dir, os.path.basename(checkpoint_file)))
 
 
     else:
@@ -60,6 +65,10 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
                 new_dir = output_dir + "_"+str(n)
             output_dir = new_dir
         os.makedirs(output_dir)
+
+        wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags)
+        wandb_logger.experiment.config.update(cfg)
+
         if finetune:
             print('Looking for model in ', checkpoint_dir)
             checkpoint_file = max(glob.glob(checkpoint_dir+'/*.ckpt'), key=os.path.getctime)
@@ -81,10 +90,12 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
             os.makedirs(output_dir_new)
             if write_ckpt:
                 ckpt_callback = ModelCheckpoint(dirpath=output_dir_new)
-                trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch-done_epochs, log_every_n_steps=5, callbacks=[ckpt_callback])
+                trainer = Trainer(gpus = torch.cuda.device_count(), logger=wandb_logger, max_epochs=epoch-done_epochs, log_every_n_steps=5, callbacks=[ckpt_callback])
 
             else:
-                trainer = Trainer(gpus = torch.cuda.device_count(), max_epochs=epoch-done_epochs, log_every_n_steps=5)
+                trainer = Trainer(gpus = torch.cuda.device_count(), logger=wandb_logger, max_epochs=epoch-done_epochs, log_every_n_steps=5)
+
+            wandb_logger.watch(model, log='gradients', log_freq=20)
 
             trainer.fit(model, data.get_train_loader())
             trainer.test(model, data.get_test_loader())

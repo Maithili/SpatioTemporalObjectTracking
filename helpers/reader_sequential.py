@@ -37,28 +37,28 @@ def _sparsify(edges):
     return sparse_edges
 
 
-def get_cooccurence_frequency(trainset):
-    # one-smoothing
-    all_edges = torch.ones_like(trainset[0][0])
-    for r in trainset:
-        all_edges = all_edges + r[0]
-    prior = all_edges/(all_edges.sum(dim=0))/(len(trainset) + 1)
-    print('Size of coccurence prior : ',prior.size())
-    return prior
+# def get_cooccurence_frequency(trainset):
+#     # one-smoothing
+#     all_edges = torch.ones_like(trainset[0][0])
+#     for r in trainset:
+#         all_edges = all_edges + r[0]
+#     prior = all_edges/(all_edges.sum(dim=0))/(len(trainset) + 1)
+#     print('Size of coccurence prior : ',prior.size())
+#     return prior
 
-def get_spectral_components(trainset, periods_mins):
-    reals = [torch.zeros_like(trainset[0][0]) for _ in periods_mins]
-    imags = [torch.zeros_like(trainset[0][0]) for _ in periods_mins]
-    for idx in range(len(trainset)):
-        edges, time = trainset.get_edges_and_time(idx)
-        for harmonic, period in enumerate(periods_mins):
-            reals[harmonic] += edges * np.cos(2*np.pi*time/period)
-            imags[harmonic] += edges * np.sin(2*np.pi*time/period)
-    components = []
-    for r,i,p in zip(reals, imags, periods_mins):
-        components.append({'amplitude': (np.sqrt(np.square(r)+np.square(i))/len(trainset)), 'phase': (np.arctan2(i,r)), 'period': p})
-    print('Size of FreMeN prior : ',str([(comp['amplitude'].size(),comp['phase'].size()) for comp in components]))
-    return components
+# def get_spectral_components(trainset, periods_mins):
+#     reals = [torch.zeros_like(trainset[0][0]) for _ in periods_mins]
+#     imags = [torch.zeros_like(trainset[0][0]) for _ in periods_mins]
+#     for idx in range(len(trainset)):
+#         edges, time = trainset.get_edges_and_time(idx)
+#         for harmonic, period in enumerate(periods_mins):
+#             reals[harmonic] += edges * np.cos(2*np.pi*time/period)
+#             imags[harmonic] += edges * np.sin(2*np.pi*time/period)
+#     components = []
+#     for r,i,p in zip(reals, imags, periods_mins):
+#         components.append({'amplitude': (np.sqrt(np.square(r)+np.square(i))/len(trainset)), 'phase': (np.arctan2(i,r)), 'period': p})
+#     print('Size of FreMeN prior : ',str([(comp['amplitude'].size(),comp['phase'].size()) for comp in components]))
+#     return components
 
 
 class CollateToDict():
@@ -67,90 +67,35 @@ class CollateToDict():
 
     def __call__(self, tensor_tuple):
         data = {label:torch.Tensor() for label in self.dict_labels}
-        for tensors in tensor_tuple:
-            assert len(tensors) == len(self.dict_labels), f"Wrong number of labels provided to the collate function! {len(self.dict_labels)} labels for {len(tensors)} tensors"
-            for label, tensor in zip(self.dict_labels, tensors):
-                data[label]=torch.cat([data[label], tensor.unsqueeze(0)], dim=0)
+        max_sequence_len = max([tensor[0] for tensor in tensor_tuple])
+        def pad_tensor(t):
+            zeros_size = list(t.size())
+            zeros_size[0] = max_sequence_len - t.size(0)
+            t = torch.cat([t,torch.zeros(torch.Size(zeros_size))], dim=0)
+            return t.unsqueeze(0)
+        for i,label in enumerate(self.dict_labels):
+            data[label]=torch.cat([pad_tensor(tensors[i+1]) for tensors in tensor_tuple], dim=0)
+
         return data
 
 class DataSplit():
-    def __init__(self, routines_dir, time_encoder, dt, active_edges, idx_map, whole_routines=False, max_num_files=None):
+    def __init__(self, routines_dir, time_encoder, active_edges, max_num_files=None):
         self.time_encoder = time_encoder
-        self.dt = dt
         self.active_edges = active_edges
-        self.idx_map = idx_map
         self.routines_dir = routines_dir
-        self.whole_routines = whole_routines
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'context_time', 'activity', 'y_edges', 'y_nodes', 'y_context_time', 'y_activity', 'dynamic_edges_mask', 'time', 'change_type'])
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'activity', 'time', 'context_time'])
         self.files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(os.path.join(self.routines_dir, name))]
         self.files.sort()
-        if max_num_files is not None:
-            assert max_num_files <= len(self.files)
-            self.files = self.files[:max_num_files]
-            self.idx_map = [(f,i) for f,i in self.idx_map if f+'.pt' in self.files]
+        self.max_num_files = min(max_num_files,len(self.files)) if max_num_files is not None else len(self.files)
 
-    def num_samples(self):
-        return len(self.idx_map)
-    def num_routines(self):
-        return len(self.files)
     def __len__(self):
-        return self.num_routines() if self.whole_routines else self.num_samples()
+        return self.max_num_files
 
-    def get_sample(self, idx: int):
-        filename, sample_idx = self.idx_map[idx]
-        data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
-        sample = data_list[sample_idx]
-        return sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['prev_time']), sample['prev_activity'], sample['edges'], sample['nodes'], self.time_encoder(sample['time']), sample['activity'], self.active_edges, torch.tensor(sample['prev_time']), (sample['change_type']).to(int)
-    def get_routine(self, idx: int):
-        data_list = torch.load(os.path.join(self.routines_dir, self.files[idx])) #, map_location=lambda storage, loc: storage.cuda(1))
-        samples = [(sample['prev_edges'], sample['prev_nodes'], self.time_encoder(sample['prev_time']), sample['prev_activity'], sample['edges'], sample['nodes'], self.time_encoder(sample['time']), sample['activity'], self.active_edges, torch.tensor(sample['prev_time']), (sample['change_type']).to(int)) for sample in data_list]
-        # moved_obj_mask = torch.zeros_like(data_list[0]['edges']).to(bool)
-        # for sample in data_list:
-        #     moved_obj_mask = np.bitwise_or(torch.Tensor(moved_obj_mask), (sample['edges'] != sample['prev_edges'])).to(bool)
-        # additional_info = {'moved_obj_mask':moved_obj_mask}
-        additional_info = {'timestamp':[time_external(sample['time']) for sample in data_list], 'active_nodes':self.active_edges.sum(-1) > 0, 'total_nodes':self.active_edges.size()[-1]}
-        if 'activity' in data_list[0].keys():
-            additional_info['activity'] = [sample['activity'] for sample in data_list]
-        return samples, additional_info
     def __getitem__(self, idx: int):
-        return self.get_routine(idx) if self.whole_routines else self.get_sample(idx)
+        data = torch.load(os.path.join(self.routines_dir, self.files[idx]))
+        stacked_edges, stacked_nodes, stacked_activities, stacked_times = data
+        return stacked_times.size()[0], stacked_edges, stacked_nodes, stacked_activities, stacked_times, self.time_encoder(stacked_times)
 
-    def get_edges_and_time(self, idx:int):
-        filename, sample_idx = self.idx_map[idx]
-        data_list = torch.load(os.path.join(self.routines_dir, filename+'.pt')) #, map_location=lambda storage, loc: storage.cuda(1))
-        sample = data_list[sample_idx]
-        return sample['edges'], sample['time']
-    
-    def sampler(self):
-        return None
-
-class CombinedDataSplits():
-    def __init__(self, list_of_datasplits):
-        self.lengths = [len(ds) for ds in list_of_datasplits]
-        print(f'Combined data length {len(self)}')
-        self.list_of_datasplits = list_of_datasplits
-
-    def __len__(self):
-        return sum(self.lengths)
-
-    def __getitem__(self, idx:int):
-        for l,ds in zip(self.lengths, self.list_of_datasplits):
-            if idx < l:
-                return ds[idx]
-            idx -= l
-        raise IndexError(f'Invalid index {idx} for length {len(self)}')
-
-    def get_cooccurence_frequency(self):
-        return get_cooccurence_frequency(self)
-    
-    def get_spectral_components(self, periods_mins):
-        return get_spectral_components(self, periods_mins)
-
-    def get_edges_and_time(self, idx:int):
-        for l,ds in zip(self.lengths, self.list_of_datasplits):
-            if idx < l:
-                return ds.get_edges_and_time(idx)
-            idx -= l
 
 class RoutinesDataset():
     def __init__(self, data_path, 
@@ -180,35 +125,33 @@ class RoutinesDataset():
         
             
         # Generate train and test loaders
-        self.train = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['train_data_index_list'], max_num_files=max_routines[0])
-        self.train_routines = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['train_data_index_list'], max_num_files=max_routines[0], whole_routines=True)
-        self.test = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['test_data_index_list'], max_num_files=max_routines[1])
-        self.test_routines = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.params['dt'], self.active_edges, self.common_data['test_data_index_list'], whole_routines=True)
-        print(len(self.train),' examples in train split from ',self.train.num_routines(),' routines')
-        print(len(self.test),' examples in test split from ',self.test.num_routines(),' routines')
+        self.train = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.active_edges, max_num_files=max_routines[0])
+        self.test = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.active_edges, max_num_files=max_routines[1])
+        print('Train split has ',len(self.train),' routines')
+        print('Test split has ',len(self.test),' routines')
 
         # Infer parameters for the model
         model_data = self.test.collate_fn([self.test[0]])
-        self.params['n_nodes'] = model_data['edges'].size()[1]
+        self.params['n_nodes'] = model_data['nodes'].size()[-2]
         self.params['n_len'] = model_data['nodes'].size()[-1]
         self.params['c_len'] = model_data['context_time'].size()[-1]
         print(self.common_data['activities'], len(self.common_data['activities']))
         self.params['n_activities'] = len(self.common_data['activities'])
 
     def get_train_loader(self):
-        return DataLoader(self.train, num_workers=8, batch_size=self.params['batch_size'], sampler=self.train.sampler(), collate_fn=self.train.collate_fn)
+        return DataLoader(self.train, num_workers=1, batch_size=self.params['batch_size'], collate_fn=self.train.collate_fn)
 
     def get_test_loader(self):
-        return DataLoader(self.test, num_workers=8, batch_size=self.params['batch_size'], sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
+        return DataLoader(self.test, num_workers=1, batch_size=self.params['batch_size'], collate_fn=self.test.collate_fn)
 
     def get_single_example_test_loader(self):
-        return DataLoader(self.test, num_workers=8, batch_size=1, sampler=self.test.sampler(), collate_fn=self.test.collate_fn)
+        return DataLoader(self.test, num_workers=1, batch_size=1, collate_fn=self.test.collate_fn)
     
-    def get_cooccurence_frequency(self):
-        return get_cooccurence_frequency(self.train)
+    # def get_cooccurence_frequency(self):
+    #     return get_cooccurence_frequency(self.train)
 
-    def get_spectral_components(self, periods_mins):
-        return get_spectral_components(self.train, periods_mins)
+    # def get_spectral_components(self, periods_mins):
+    #     return get_spectral_components(self.train, periods_mins)
 
 
 
@@ -301,10 +244,9 @@ class ProcessDataset():
                 file_basename = os.path.splitext(f)[0]
                 f_out = os.path.join(output_dir,file_basename+'.pt')
                 activity_func = self.activity_from_time(fpath.replace('routines','scripts').replace('json','txt'))
-                samples = self.make_pairwise(nodes, edges, times, activity_func)
-                for i in range(len(samples)):
-                    idx_map.append((file_basename, i))
-                torch.save(samples, f_out)
+                stacked_edges, stacked_nodes, stacked_activities, stacked_times = self.stack_routine(nodes, edges, times, activity_func)
+                idx_map.append((file_basename, len(stacked_times)))
+                torch.save([stacked_edges, stacked_nodes, stacked_activities, stacked_times], f_out)
 
         self.seen_edges[self.nonstatic_edges == 0] = 0
         self.seen_edges = torch.Tensor(self.seen_edges)
@@ -380,12 +322,9 @@ class ProcessDataset():
     #     return torch.Tensor([self.common_data['activities'].index(activity) for activity in activities_list]).to(int)
     
 
-    def make_pairwise(self, nodes, edges, times, activity_func):
-        pairwise_samples = []
-        additional_data = []
+    def stack_routine(self, nodes, edges, times, activity_func):
         self.time_min = torch.Tensor([float("Inf")])
         self.time_max = -torch.Tensor([float("Inf")])
-    
         assert times[0]==min(times), 'Times need to be monotonically increasing. First element should be min.'
         assert times[-1]==max(times), 'Times need to be monotonically increasing. Last element should be max.'
         time_min = floor(times[0]/self.dt)*self.dt
@@ -393,22 +332,26 @@ class ProcessDataset():
         if time_min < self.time_min: self.time_min = time_min
         if time_max > self.time_max: self.time_max = time_max
         times = torch.cat([times,torch.Tensor([float("Inf")])], dim=-1)
+        
         data_idx = -1
-        prev_edges = None
+        all_nodes = []
+        all_edges = []
+        all_activities = []
+        all_times = []
         for t in range(time_min, time_max, self.dt):
             while t >= times[data_idx+1]:
                 data_idx += 1
             if data_idx < 0:
                 continue
-            # 3 = to home state; 1 = from home state; 2 = neither; 0 = no change
-            if prev_edges is not None:
-                change_type = (np.absolute(edges[data_idx] - prev_edges)).sum(-1).to(int)
-                change_type += (self.home_graph * (edges[data_idx] - prev_edges)).sum(-1).to(int)
-                pairwise_samples.append({'prev_edges': prev_edges, 'prev_nodes': prev_nodes, 'prev_time': prev_t, 'prev_activity':torch.Tensor([activity_func(prev_t)]), 'time': t, 'edges': edges[data_idx], 'nodes': nodes[data_idx], 'change_type':change_type, 'activity':torch.Tensor([activity_func(t)])})
-            prev_edges = edges[data_idx]
-            prev_nodes = nodes[data_idx]
-            prev_t = t
-        return pairwise_samples
+            all_edges.append(edges[data_idx].unsqueeze(0))
+            all_nodes.append(nodes[data_idx].unsqueeze(0))
+            all_activities.append(torch.Tensor([activity_func(t)]))
+            all_times.append(torch.Tensor([t]))
+        stacked_edges = torch.cat(all_edges)
+        stacked_nodes = torch.cat(all_nodes)
+        stacked_activities = torch.cat(all_activities)
+        stacked_times = torch.cat(all_times)
+        return stacked_edges, stacked_nodes, stacked_activities, stacked_times
 
 
 if __name__ == '__main__':
@@ -423,4 +366,4 @@ if __name__ == '__main__':
     classes_path = os.path.join(args.path, 'classes.json')
     info_path = os.path.join(args.path, 'info.json')
 
-    ProcessDataset(data_path=data_path, classes_path=classes_path, info_path=info_path, output_path=os.path.join(args.path, 'processed'))
+    ProcessDataset(data_path=data_path, classes_path=classes_path, info_path=info_path, output_path=os.path.join(args.path, 'processed_seq'))

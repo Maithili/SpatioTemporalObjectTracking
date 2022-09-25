@@ -64,3 +64,12 @@ class DummyDataset():
     def get_test_loader(self):
         return DataLoader(self.test, num_workers=8, batch_size=1, collate_fn=self.test.collate_fn)
 
+class Atensor():
+    def __init__(self, length=10):
+       self.len = length
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx: int):
+        return torch.randint(10,(5,))

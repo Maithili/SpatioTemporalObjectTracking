@@ -15,11 +15,8 @@ def time_sine_uninformed(t):
 def time_sine_informed(t):
     # T_freq = [60, 60*12, 60*24]
     T_freq = [10, 30, 60, 60*3, 60*6, 60*12, 60*24]
-    omegas = [2*np.pi/t_freq for t_freq in T_freq]
-    enc = []
-    for om in omegas:
-        enc = enc + [np.sin(om*t), np.cos(om*t)]
-    return torch.Tensor(enc)
+    omegas = torch.Tensor([2*np.pi/t_freq for t_freq in T_freq])
+    return torch.cat([torch.sin((om*t).unsqueeze(-1)) for om in omegas]+[torch.cos((om*t).unsqueeze(-1)) for om in omegas], dim=-1)
 
 
 def time_sine_informed_few(t):

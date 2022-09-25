@@ -1,11 +1,12 @@
 name: null
 time_encoding: sine_informed
-epochs: [50]
+epochs: [30]
 batch_size: 1
 learn_nodes: False
 context_dropout_probs:
-  time: 0.0
+  time: 0.2
   activity: 1.0
+  diff: 0.8
 reset_prob: 0.0
 search_lookahead_steps: 5
 proactive_lookahead_steps: 5
@@ -14,3 +15,4 @@ learned_time_periods: False
 preprocess_context: True
 edge_importance: predicted
 hidden_layer_size: 20
+finetune: True
