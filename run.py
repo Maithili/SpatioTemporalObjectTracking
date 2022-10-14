@@ -12,7 +12,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from GraphTranslatorModule import GraphTranslatorModule
-from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
+from reader import RoutinesDataset, CombinedDataSplits, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
 from breakdown_evaluations_simple import evaluate as evaluate_applications_original
 from breakdown_evaluations_human_centric import evaluate as evaluate_applications_new
@@ -109,25 +109,41 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     if cfg['NAME'] is None:
         cfg['NAME'] = os.path.basename(data_dir)+'_trial'
 
-    with open(os.path.join(data_dir, 'processed', 'common_data.json')) as f:
+    with open(os.path.join(data_dir, 'processedCorl', 'common_data.json')) as f:
         cfg['DATA_INFO'] = json.load(f)['info']
 
     time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
     time_encoding = time_options(cfg['time_encoding'])
 
-    data = RoutinesDataset(data_path=os.path.join(data_dir,'processed'), 
+    data = RoutinesDataset(data_path=os.path.join(data_dir,'processedCorl'), 
                            time_encoder=time_encoding, 
                            batch_size=cfg['batch_size'],
                            max_routines = (train_days, None))
     
+    # data_root, this_dataset = os.path.split(data_dir)
+    # other_data = os.listdir(data_root)
+    # other_data.remove(this_dataset)
+    # other_pretraining_data = [RoutinesDataset(data_path=os.path.join(data_root, d, 'processedCorl'), 
+    #                                             time_encoder=time_encoding, 
+    #                                             batch_size=cfg['batch_size'],
+    #                                             max_routines = (train_days, None)).train for d in other_data] +  [
+    #                           RoutinesDataset(data_path=os.path.join(data_root, d, 'processedCorl'), 
+    #                                             time_encoder=time_encoding, 
+    #                                             batch_size=cfg['batch_size'],
+    #                                             max_routines = (train_days, None)).test for d in other_data]                            
+
+    # pretrained_train_data = CombinedDataSplits([data.train] + other_pretraining_data)
+
     group = os.path.basename(data_dir)
 
     if baselines:
         cf = data.get_cooccurence_frequency()
         spec = data.get_spectral_components(periods_mins=[float('inf'), 60*24, 60*24/2])
+        # cf = pretrained_train_data.get_cooccurence_frequency()
+        # spec = pretrained_train_data.get_spectral_components(periods_mins=[float('inf'), 60*24, 60*24/2])
         for baseline in [LastSeen(), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
         # for baseline in [LastSeen()]:
-            output_dir = os.path.join(logs_dir, group,baseline.__class__.__name__)
+            output_dir = os.path.join(logs_dir, group, baseline.__class__.__name__) #+"PreTr")
             if os.path.exists(output_dir):
                 n = 1
                 new_dir = output_dir + "_"+str(n)
