@@ -65,17 +65,23 @@ class CollateToDict():
     def __init__(self, dict_labels):
         self.dict_labels = dict_labels
 
-    def __call__(self, tensor_tuple):
+    def __call__(self, tensor_tuple, remove=None):
         data = {label:torch.Tensor() for label in self.dict_labels}
-        max_sequence_len = max([tensor[0] for tensor in tensor_tuple])
+        if len(tensor_tuple) > 1:
+            max_sequence_len = max([tensor[0] for tensor in tensor_tuple])
+            assert remove is None, "'remove' argument not supported for batches >1"
+        else:
+            max_sequence_len = tensor_tuple[0][0]
         def pad_tensor(t):
             zeros_size = list(t.size())
             zeros_size[0] = max_sequence_len - t.size(0)
             t = torch.cat([t,torch.zeros(torch.Size(zeros_size))], dim=0)
             return t.unsqueeze(0)
         for i,label in enumerate(self.dict_labels):
-            data[label]=torch.cat([pad_tensor(tensors[i+1]) for tensors in tensor_tuple], dim=0)
-
+            if remove is not None:
+                data[label] = pad_tensor(tensor_tuple[0][i+1][remove[0]:remove[1]])
+            else:
+                data[label] = torch.cat([pad_tensor(tensors[i+1]) for tensors in tensor_tuple], dim=0)
         return data
 
 class DataSplit():
@@ -143,6 +149,9 @@ class RoutinesDataset():
 
     def get_test_loader(self):
         return DataLoader(self.test, num_workers=1, batch_size=self.params['batch_size'], collate_fn=self.test.collate_fn)
+
+    def get_test_split(self):
+        return self.test
 
     def get_single_example_test_loader(self):
         return DataLoader(self.test, num_workers=1, batch_size=1, collate_fn=self.test.collate_fn)

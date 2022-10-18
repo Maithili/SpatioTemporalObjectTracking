@@ -1,10 +1,10 @@
 name: null
 time_encoding: sine_informed
-epochs: [30]
+epochs: [50]
 batch_size: 1
 learn_nodes: False
 context_dropout_probs:
-  time: 0.2
+  time: 0.0
   activity: 1.0
   diff: 0.8
 reset_prob: 0.0

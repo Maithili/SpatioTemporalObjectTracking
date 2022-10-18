@@ -143,16 +143,16 @@ class GraphTranslatorModule(LightningModule):
     def context_loss(self, xc, yc):
         batch_size = xc.size()[0]
         xgrid, ygrid = torch.meshgrid(torch.arange(batch_size), torch.arange(batch_size), indexing='ij')
-        same = (((xgrid==ygrid).to(int).reshape(-1)*2)-1).to('cuda')
-        return torch.nn.CosineEmbeddingLoss(reduction='mean')(xc[xgrid.reshape(-1),:], yc[ygrid.reshape(-1),:], same)
+        same = (((xgrid==ygrid).to(int).view(-1)*2)-1).to('cuda')
+        return torch.nn.CosineEmbeddingLoss(reduction='mean')(xc[xgrid.view(-1),:], yc[ygrid.view(-1),:], same)
 
 
     def graph_transition_encoder(self, nodes, edges, y_nodes, y_edges):
         batch_size, num_nodes, _ = nodes.size()
-        mat2idx = lambda e_mat: (torch.argwhere(e_mat.reshape(batch_size*num_nodes, -1) == 1)).transpose(1,0)
-        batch = torch.arange(batch_size).repeat(num_nodes,1).transpose(1,0).reshape(-1).to(int).to('cuda')
-        graphs_in = geom_nn.global_mean_pool(self.graph_encoder(nodes.reshape(batch_size*num_nodes, -1), mat2idx(edges)), batch=batch)
-        graphs_out = geom_nn.global_mean_pool(self.graph_encoder(y_nodes.reshape(batch_size*num_nodes, -1), mat2idx(y_edges)), batch=batch)
+        mat2idx = lambda e_mat: (torch.argwhere(e_mat.view(batch_size*num_nodes, -1) == 1)).transpose(1,0)
+        batch = torch.arange(batch_size).repeat(num_nodes,1).transpose(1,0).view(-1).to(int).to('cuda')
+        graphs_in = geom_nn.global_mean_pool(self.graph_encoder(nodes.view(batch_size*num_nodes, -1), mat2idx(edges)), batch=batch)
+        graphs_out = geom_nn.global_mean_pool(self.graph_encoder(y_nodes.view(batch_size*num_nodes, -1), mat2idx(y_edges)), batch=batch)
         context_diff = self.context_from_graph_encodings(graphs_out - graphs_in)
         assert context_diff.size()[0] == batch_size
         assert context_diff.size()[1] == self.c_len
@@ -190,10 +190,27 @@ class GraphTranslatorModule(LightningModule):
         
         time_context = self.mlp_context(time_context)
 
-        return time_context.reshape(-1, self.c_len)
+        return time_context.view(-1, self.c_len)
 
-    def graph_step(self, edges, nodes, context):
+    def forward(self, edges, nodes, context):
+        """
+        Args:
+            adjacency: batch_size x from_nodes x to_nodes x 1
+            edge_features: batch_size x from_nodes x to_nodes x edge_feature_len
+            nodes: batch_size x num_nodes x node_feature_len
+            context_curr: batch_size x context_len
+            context_query: batch_size x context_len
+        """
 
+        batch_size, num_nodes, node_feature_len = nodes.size()
+        batch_size_e, num_f_nodes, num_t_nodes = edges.size()
+        
+        # Sanity check input dimensions
+        assert batch_size == batch_size_e, "Different edge and node batch sizes"
+        assert self.n_len == node_feature_len, (str(self.n_len) +'!='+ str(node_feature_len))
+        assert self.n_nodes == num_nodes, (str(self.n_nodes) +'!='+ str(num_nodes))
+        assert self.n_nodes == num_f_nodes, (str(self.n_nodes) +'!='+ str(num_f_nodes))
+        assert self.n_nodes == num_t_nodes, (str(self.n_nodes) +'!='+ str(num_t_nodes))
         batch_size, num_nodes, node_feature_len = nodes.size()
 
         context = context.view(size=[batch_size, self.c_len])
@@ -231,7 +248,7 @@ class GraphTranslatorModule(LightningModule):
         
         ## context prediction
         xpool = xe.sum(dim=2).sum(dim=1)
-        con = self.mlp_predict_context(xpool).view(size=[batch_size, self.c_len])
+        context = self.mlp_predict_context(xpool).view(size=[batch_size, self.c_len])
 
         ## edge update
         xe = xe.view(
@@ -239,8 +256,7 @@ class GraphTranslatorModule(LightningModule):
                 self.edges_update_input_dim])
         xe = self.mlp_update_edges(xe).view(size=[batch_size, 
                                                 self.n_nodes, 
-                                                self.n_nodes,
-                                                1])
+                                                self.n_nodes])
 
 
         # ## node update
@@ -253,32 +269,11 @@ class GraphTranslatorModule(LightningModule):
         #                                 self.num_nodes,
         #                                 1])
         
-        return xe, nodes, con, imp.view(size=[batch_size, self.n_nodes, self.n_nodes])
+        imp = imp.view(size=[batch_size, self.n_nodes, self.n_nodes])
 
-    def forward(self, edges, nodes, context):
-        """
-        Args:
-            adjacency: batch_size x from_nodes x to_nodes x 1
-            edge_features: batch_size x from_nodes x to_nodes x edge_feature_len
-            nodes: batch_size x num_nodes x node_feature_len
-            context_curr: batch_size x context_len
-            context_query: batch_size x context_len
-        """
+        edges_inferred = F.softmax(xe, dim=-1)
 
-        batch_size, num_nodes, node_feature_len = nodes.size()
-        batch_size_e, num_f_nodes, num_t_nodes = edges.size()
-        
-        # Sanity check input dimensions
-        assert batch_size == batch_size_e, "Different edge and node batch sizes"
-        assert self.n_len == node_feature_len, (str(self.n_len) +'!='+ str(node_feature_len))
-        assert self.n_nodes == num_nodes, (str(self.n_nodes) +'!='+ str(num_nodes))
-        assert self.n_nodes == num_f_nodes, (str(self.n_nodes) +'!='+ str(num_f_nodes))
-        assert self.n_nodes == num_t_nodes, (str(self.n_nodes) +'!='+ str(num_t_nodes))
-
-        # for step in range(len(self.edge_feature_len)-1):
-        edges, nodes, context, imp = self.graph_step(edges, nodes, context)
-
-        return edges.squeeze(-1), nodes, context, imp
+        return edges_inferred, nodes, context, imp
 
 
     def step(self, batch, prev_activity_probs=None):
@@ -290,7 +285,7 @@ class GraphTranslatorModule(LightningModule):
         batch_size = nodes.size()[0]
         
         time_context = self.get_time_context(batch['time'], batch['context_time'])
-        activity_context = self.embed_single_activity(batch['activity'].to(int)).reshape(time_context.size())
+        activity_context = self.embed_single_activity(batch['activity'].to(int)).view(time_context.size())
         diff_context = self.graph_transition_encoder(nodes, edges, y_nodes, y_edges)
         
         context = time_context * 0
@@ -298,7 +293,7 @@ class GraphTranslatorModule(LightningModule):
             if 'time' in self.contexts:
                 context += time_context
             if prev_activity_probs is not None:
-                context += self.embed_context_activity(prev_activity_probs).reshape(time_context.size())
+                context += self.embed_context_activity(prev_activity_probs).view(time_context.size())
             elif 'activity' in self.contexts and random() > self.cfg.context_dropout_probs['activity']:
                 context += activity_context
         else:

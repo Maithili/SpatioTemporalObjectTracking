@@ -13,6 +13,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
 from ObjectActivityCoembedding import ObjectActivityCoembeddingModule
+from breakdown_evaluations_simple import evaluate as evaluate_applications_original
 from reader_sequential import RoutinesDataset
 from encoders import TimeEncodingOptions
 
@@ -65,7 +66,7 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
         trainer.test(model, data.get_test_loader())
         done_epochs = epoch
 
-        # evaluation_summary = evaluate_applications_original(model, data, output_dir_new, learned_model=True, print_importance=False, confidences=cfg['action_probability_thresholds'])
+        evaluation_summary = evaluate_applications_original(model, data, output_dir_new, learned_model=True, print_importance=False, confidences=[])
         # evaluation_summary = evaluate_applications_new(model, data, output_dir_new)
         # evaluation_summary = evaluate_applications_stepahead(model, data, output_dir)
 
