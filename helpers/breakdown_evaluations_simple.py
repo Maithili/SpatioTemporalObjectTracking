@@ -9,7 +9,6 @@ from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from math import isnan, floor, ceil, sqrt
 import torch
 import torch.nn.functional as F
-import wandb
 from copy import deepcopy
 from encoders import human_readable_from_external
 
@@ -46,20 +45,19 @@ None
 ]
 
 
-def evaluate_all_breakdowns(model, test_routines, lookahead_steps=1, deterministic_input_loop=False, node_names=[], print_importance=False, confidences=[], learned_model=False):
+def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, deterministic_input_loop=False, node_names=[], print_importance=False, confidences=[], learned_model=False):
     
     use_cuda = torch.cuda.is_available() and learned_model
     if use_cuda: model.to('cuda')
     else: print(f'Learned Model {learned_model} NOT USING CUDA. THIS WILL TAKE AGESSSSS!!!!!!!!!!!!')
 
     # raw_data = {'inputs':[], 'outputs':[], 'ground_truths':[], 'futures':[]}
-    results = {conf: 
-                {'moved':{'correct':[0 for _ in range(lookahead_steps)], 
+    results = {'moved':{'correct':[0 for _ in range(lookahead_steps)], 
                             'wrong':[0 for _ in range(lookahead_steps)], 
                             'missed':[0 for _ in range(lookahead_steps)]},
                  'unmoved':{'fp':[0 for _ in range(lookahead_steps)], 
                             'tn':[0 for _ in range(lookahead_steps)]}
-                } for conf in confidences}
+                }
 
     figures = []
     figures_imp = []
@@ -69,7 +67,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=1, determinist
 
     for routine in test_routines:
 
-        routine_length = routine[0]-3
+        routine_length = routine[0]-3-lookahead_steps
         num_nodes = routine[1].size()[-2]
 
         routine_inputs = torch.empty(routine_length, num_nodes)
@@ -77,9 +75,6 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=1, determinist
         routine_output_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
         routine_ground_truths = torch.ones(routine_length, num_nodes).to(int) * -1
         routine_ground_truth_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
-        routine_futures = torch.ones(routine_length, num_nodes) * -1
-        routine_change_types = torch.zeros(routine_length, num_nodes).to(int)
-        routine_outputs_conf = {c:{'output':torch.ones(routine_length, num_nodes).to(int) * -1, 'step':torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)} for c in confidences}
 
         changes_output_all = torch.zeros(routine_length, num_nodes).to(bool)
         changes_gt_all = torch.zeros(routine_length, num_nodes).to(bool)
@@ -92,60 +87,38 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=1, determinist
             for k in data.keys():
                 data[k] = data[k].to('cuda')
                     
-        results = model.evaluate_prediction(data, num_steps=lookahead_steps)
+        model_results = model.evaluate_prediction(data, num_steps=lookahead_steps)
 
-        for step, result in enumerate(results['object']):
-            input_tensor = data['edges'][:,2:-1-step,:,:].argmax(-1).squeeze(0).cpu()
-            gt_tensor = data['edges'][:,3+step:,:,:].argmax(-1).squeeze(0).cpu()
-            output_probs = result[:,:-1,:,:].squeeze(0).cpu()
-            output_tensor = result[:,:-1,:,:].argmax(-1).squeeze(0).cpu()
+        routine_inputs = data['edges'][:,2:-1-lookahead_steps,:,:].argmax(-1).squeeze(0).cpu()
+        for step, result in enumerate(model_results['object']):
+            gt_tensor = data['edges'][:,3+step:-lookahead_steps+step,:,:].argmax(-1).squeeze(0).cpu()
+            output_probs = result[:,:routine_inputs.size()[0],:,:].squeeze(0).cpu()
+            output_tensor = result[:,:routine_inputs.size()[0],:,:].argmax(-1).squeeze(0).cpu()
             
-            routine_inputs = input_tensor
-            new_changes_out = deepcopy(np.bitwise_and(output_tensor != input_tensor , np.bitwise_not(changes_output_all))).to(bool)
-            new_changes_gt = deepcopy(np.bitwise_and(gt_tensor != routine_inputs[step,:] , np.bitwise_not(changes_gt_all[step,:]))).to(bool)
+            new_changes_out = deepcopy(np.bitwise_and(output_tensor != routine_inputs, np.bitwise_not(changes_output_all))).to(bool)
+            new_changes_gt = deepcopy(np.bitwise_and(gt_tensor != routine_inputs, np.bitwise_not(changes_gt_all[step,:]))).to(bool)
             
             routine_outputs[new_changes_out] = output_tensor[new_changes_out]
             routine_output_step[new_changes_out] = step
             routine_ground_truths[new_changes_gt] = gt_tensor[new_changes_gt]
             routine_ground_truth_step[new_changes_gt] = step
 
-            output_conf = (output_probs*(F.one_hot(output_tensor, num_classes=output_probs.size()[-1]))).sum(-1)*(routine_inputs[step,:]!=output_tensor).to(float)
-            
-            for conf in confidences:
-                new_changes_conf = np.bitwise_and((output_conf > conf), np.bitwise_not(routine_outputs_conf[conf]['step']<lookahead_steps)).to(bool)
-                routine_outputs_conf[conf]['output'][new_changes_conf] = output_tensor[new_changes_conf]
-                routine_outputs_conf[conf]['step'][new_changes_conf] = step
-            
-
-        correct = {conf:deepcopy(routine_outputs_conf[conf]['output'] == routine_ground_truths).to(int) for conf in confidences}
-        wrong = {conf:deepcopy(routine_outputs_conf[conf]['output'] != routine_ground_truths).to(int) for conf in confidences}
-        
-        for conf in confidences:
-            for ls in range(lookahead_steps):
-                changes_output_for_step = deepcopy(routine_outputs_conf[conf]['step']  <= ls)
-                changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
-                changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
-                changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
-                changes_not_output_and_gt = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))
-                results[conf]['moved']['correct'][ls] += int((correct[conf][changes_output_and_gt]).sum())
-                results[conf]['moved']['wrong'][ls] += int((wrong[conf][changes_output_and_gt]).sum())
-                results[conf]['moved']['missed'][ls] += int((changes_not_output_and_gt).sum())
-                results[conf]['unmoved']['fp'][ls] += int(changes_output_and_not_gt.sum())
-                results[conf]['unmoved']['tn'][ls] += int(deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step))).sum())
-                
-
         correct = deepcopy(routine_outputs == routine_ground_truths).to(int)
         wrong = deepcopy(routine_outputs != routine_ground_truths).to(int)
-
-        # assert np.equal((routine_ground_truths >= 0), changes_gt)
+        
         for ls in range(lookahead_steps):
             changes_output_for_step = deepcopy(routine_output_step  <= ls)
             changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
-            # results['num_changes'][ls].append(list(changes_gt_for_step.sum(-1).reshape(-1)))
             changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
             changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
             changes_not_output_and_gt = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))
-            
+            results['moved']['correct'][ls] += int((correct[changes_output_and_gt]).sum())
+            results['moved']['wrong'][ls] += int((wrong[changes_output_and_gt]).sum())
+            results['moved']['missed'][ls] += int((changes_not_output_and_gt).sum())
+            results['unmoved']['fp'][ls] += int(changes_output_and_not_gt.sum())
+            results['unmoved']['tn'][ls] += int(deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step))).sum())
+                    
+
         fig, axs = plt.subplots(1,5)
         fig.set_size_inches(30,20)
 
@@ -199,12 +172,13 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=1, determinist
         # raw_data['inputs'].append(routine_inputs)
         # raw_data['outputs'].append(routine_outputs)
         # raw_data['ground_truths'].append(routine_ground_truths)
-        # raw_data['futures'].append(routine_futures)
+
+        del data
     
-    return results, None, figures + figures_imp
+    return results, None, figures
 
 
-def evaluate(model, data, output_dir, print_importance=False, lookahead_steps=12, confidences=[], learned_model=False):
+def evaluate(model, data, output_dir, print_importance=False, lookahead_steps=6, confidences=[], learned_model=False):
     
     model.evaluate = True
 

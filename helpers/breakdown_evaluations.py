@@ -9,7 +9,6 @@ from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from math import isnan, floor, ceil, sqrt
 import torch
 from torch.nn.functional import one_hot
-import wandb
 from copy import deepcopy
 from encoders import human_readable_from_external
 

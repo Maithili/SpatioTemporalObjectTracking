@@ -9,7 +9,7 @@ from encoders import time_external
 from torch.utils.data import DataLoader
 from breakdown_evaluations import activity_list
 
-from graph_visualizations import visualize_routine, visualize_parsed_routine
+# from graph_visualizations import visualize_routine, visualize_parsed_routine
 
 INTERACTIVE = False
 
@@ -243,11 +243,11 @@ class ProcessDataset():
                 nodes, edges = self.read_graphs(routine["graphs"])
                 # actions = self.read_actions(routine["actions"])
                 # activities =self.read_activities(routine["activity"])
-                if viz:
-                    visualize_routine(routine)
-                    visualize_parsed_routine(edges, nodes, self.common_data['node_classes'])
-                    inp = input(f'Do you want to visualize the next routine?')
-                    viz = (inp == 'y')
+                # if viz:
+                #     visualize_routine(routine)
+                #     visualize_parsed_routine(edges, nodes, self.common_data['node_classes'])
+                #     inp = input(f'Do you want to visualize the next routine?')
+                #     viz = (inp == 'y')
                 self.home_graph = edges[0,:,:]
                 times = torch.Tensor(routine["times"])
                 file_basename = os.path.splitext(f)[0]

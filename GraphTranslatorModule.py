@@ -5,6 +5,7 @@ import json
 import sys
 sys.path.append('helpers')
 from random import random
+import dill as pickle
 import numpy as np
 import torch
 from torch.nn import functional as F

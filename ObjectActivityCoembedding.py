@@ -24,7 +24,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
         self.cfg = model_configs
         self.embedding_size = self.cfg.c_len
-
+        self.train_prediction = False
 
         ## Object Transition Encoder
         self.graph_cnn = geom_nn.Sequential('x, edge_index',
@@ -268,21 +268,28 @@ class ObjectActivityCoembeddingModule(LightningModule):
         latents = F.normalize(graph_latents + activity_latents)
 
         ## Prediction
-        input_nodes_forward = graph_seq_nodes[:,1:-1,:,:]
-        input_edges_forward = graph_seq_edges[:,1:-1,:,:]
-        output_edges_forward = graph_seq_edges[:,2:,:,:]
+        if self.train_prediction:
+            input_nodes_forward = graph_seq_nodes[:,1:-1,:,:]
+            input_edges_forward = graph_seq_edges[:,1:-1,:,:]
+            output_edges_forward = graph_seq_edges[:,2:,:,:]
 
-        output_activity_forward =  F.one_hot(activity_seq[:,1:].to(int), num_classes=self.cfg.n_activities).to(torch.float32)
-        
-        pred_latents, latent_predictive_loss = self.predict(latents[:,:-1], 
-                                                            time_context[:,:-1], 
-                                                            latents_expected=latents[:,1:])
+            output_activity_forward =  F.one_hot(activity_seq[:,1:].to(int), num_classes=self.cfg.n_activities).to(torch.float32)
+            
+            pred_latents, latent_predictive_loss = self.predict(latents[:,:-1], 
+                                                                time_context[:,:-1], 
+                                                                latents_expected=latents[:,1:])
 
-        pred_edges, pred_activity, graph_pred_loss, activity_pred_loss = self.decode(latents=pred_latents, 
-                                                                                    input_nodes=input_nodes_forward,
-                                                                                    input_edges=input_edges_forward,
-                                                                                    output_edges=output_edges_forward,
-                                                                                    output_activity=output_activity_forward)
+            pred_edges, pred_activity, graph_pred_loss, activity_pred_loss = self.decode(latents=pred_latents, 
+                                                                                        input_nodes=input_nodes_forward,
+                                                                                        input_edges=input_edges_forward,
+                                                                                        output_edges=output_edges_forward,
+                                                                                        output_activity=output_activity_forward)
+        else:
+            graph_pred_loss = 0
+            activity_pred_loss = 0
+            latent_predictive_loss = 0
+            pred_edges = None
+            pred_activity = None
 
         results = {
             'output' : {
@@ -316,11 +323,13 @@ class ObjectActivityCoembeddingModule(LightningModule):
         self.obj_seq_decoder.evaluate = True
 
         graph_latents, _ = self.encode_graph(graph_seq_nodes, graph_seq_edges)
-        latents = F.normalize(graph_latents)
+        latents = graph_latents
 
         if activity_seq is not None:
             activity_latents, _ = self.encode_activity(activity_seq)
-            latents = F.normalize(graph_latents + activity_latents)
+            latents = graph_latents + activity_latents
+
+        latents = F.normalize(latents)
 
         ## Prediction
         input_nodes_forward = graph_seq_nodes[:,1:-1,:,:]

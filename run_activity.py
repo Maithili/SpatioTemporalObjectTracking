@@ -6,6 +6,8 @@ import json
 import os
 import glob
 import argparse
+
+import dill as pickle
 from adict import adict
 import torch
 from pytorch_lightning import Trainer
@@ -39,7 +41,8 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
         output_dir = new_dir
     os.makedirs(output_dir)
 
-    wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags)
+    # wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags)
+    wandb_logger = WandbLogger(name=cfg['NAME'], group = group, tags = tags, offline=True)
     wandb_logger.experiment.config.update(cfg)
 
     model = ObjectActivityCoembeddingModule(model_configs = model_configs)
@@ -55,18 +58,21 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
         os.makedirs(output_dir_new)
         if write_ckpt:
             ckpt_callback = ModelCheckpoint(dirpath=output_dir_new)
-            trainer = Trainer(gpus = torch.cuda.device_count(), logger=wandb_logger, max_epochs=epoch-done_epochs, log_every_n_steps=5, callbacks=[ckpt_callback])
+            trainer = Trainer(accelerator='gpu', devices = torch.cuda.device_count(), logger=wandb_logger, max_epochs=epoch-done_epochs, log_every_n_steps=5, callbacks=[ckpt_callback])
 
         else:
-            trainer = Trainer(gpus = torch.cuda.device_count(), logger=wandb_logger, max_epochs=epoch-done_epochs, log_every_n_steps=5)
+            trainer = Trainer(accelerator='gpu', devices= torch.cuda.device_count(), logger=wandb_logger, max_epochs=epoch-done_epochs, log_every_n_steps=5)
 
         wandb_logger.watch(model, log='gradients', log_freq=20)
 
         trainer.fit(model, data.get_train_loader())
+        model.train_prediction = True
+        trainer.fit(model, data.get_train_loader())
+
+
         trainer.test(model, data.get_test_loader())
         done_epochs = epoch
-
-        evaluation_summary = evaluate_applications_original(model, data, output_dir_new, learned_model=True, print_importance=False, confidences=[])
+        evaluation_summary = evaluate_applications_original(model, data, output_dir_new, learned_model=True, print_importance=False, confidences=cfg['action_probability_thresholds'])
         # evaluation_summary = evaluate_applications_new(model, data, output_dir_new)
         # evaluation_summary = evaluate_applications_stepahead(model, data, output_dir)
 
