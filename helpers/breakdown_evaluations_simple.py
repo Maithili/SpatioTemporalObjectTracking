@@ -49,9 +49,9 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
     
     use_cuda = torch.cuda.is_available() and learned_model
     if use_cuda: model.to('cuda')
-    else: print(f'Learned Model {learned_model} NOT USING CUDA. THIS WILL TAKE AGESSSSS!!!!!!!!!!!!')
+    elif learned_model: print(f'Learned Model NOT USING CUDA. THIS WILL TAKE AGESSSSS!!!!!!!!!!!!')
 
-    # raw_data = {'inputs':[], 'outputs':[], 'ground_truths':[], 'futures':[]}
+    raw_data = {'inputs':[], 'outputs':[], 'ground_truths':[], 'futures':[]}
     results = {'moved':{'correct':[0 for _ in range(lookahead_steps)], 
                             'wrong':[0 for _ in range(lookahead_steps)], 
                             'missed':[0 for _ in range(lookahead_steps)]},
@@ -60,7 +60,6 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
                 }
 
     figures = []
-    figures_imp = []
 
     results['all_moves'] = []
     results['num_changes'] = [[] for _ in range(lookahead_steps)]
@@ -119,7 +118,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
             results['unmoved']['tn'][ls] += int(deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step))).sum())
                     
 
-        fig, axs = plt.subplots(1,5)
+        fig, axs = plt.subplots(1,4)
         fig.set_size_inches(30,20)
 
         labels = []
@@ -159,23 +158,23 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
         ax.set_xticks(np.arange(num_nodes))
         ax.set_xticklabels(labels, rotation=90)
 
-        ax = axs[4]
-        img_ct = routine_change_types
-        ax.imshow(img_ct, cmap=newcmp, vmin=0, vmax=3, aspect='auto')
-        ax.set_title('Ground Truths\n w/ Change Types')
-        ax.set_xticks(np.arange(num_nodes))
-        ax.set_xticklabels(labels, rotation=90)
+        # ax = axs[4]
+        # img_ct = routine_change_types
+        # ax.imshow(img_ct, cmap=newcmp, vmin=0, vmax=3, aspect='auto')
+        # ax.set_title('Ground Truths\n w/ Change Types')
+        # ax.set_xticks(np.arange(num_nodes))
+        # ax.set_xticklabels(labels, rotation=90)
 
         fig.tight_layout()
         figures.append(fig)
 
-        # raw_data['inputs'].append(routine_inputs)
-        # raw_data['outputs'].append(routine_outputs)
-        # raw_data['ground_truths'].append(routine_ground_truths)
+        raw_data['inputs'].append(routine_inputs)
+        raw_data['outputs'].append(routine_outputs)
+        raw_data['ground_truths'].append(routine_ground_truths)
 
         del data
     
-    return results, None, figures
+    return results, raw_data, figures
 
 
 def evaluate(model, data, output_dir, print_importance=False, lookahead_steps=6, confidences=[], learned_model=False):

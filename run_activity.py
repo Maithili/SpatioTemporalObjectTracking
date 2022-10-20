@@ -42,7 +42,7 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
     os.makedirs(output_dir)
 
     # wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags)
-    wandb_logger = WandbLogger(name=cfg['NAME'], group = group, tags = tags, offline=True)
+    wandb_logger = WandbLogger(name=cfg['NAME'], group = group, tags = tags)
     wandb_logger.experiment.config.update(cfg)
 
     model = ObjectActivityCoembeddingModule(model_configs = model_configs)
@@ -127,6 +127,8 @@ if __name__ == '__main__':
     parser.add_argument('--logs_dir', type=str, default='logs_default', help='Path to store putputs.')
 
     args = parser.parse_args()
+    
+    torch.cuda.empty_cache()
 
     with open('config/default.yaml') as f:
         cfg = yaml.safe_load(f)
