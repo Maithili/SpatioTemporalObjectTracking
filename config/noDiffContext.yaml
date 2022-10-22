@@ -1,5 +1,0 @@
-context_dropout_probs:
-  time: 0.2
-  activity: 1.0
-  diff: 1.0
-epochs: [50]

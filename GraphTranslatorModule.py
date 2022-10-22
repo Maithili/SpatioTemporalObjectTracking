@@ -64,7 +64,6 @@ class GraphTranslatorModule(LightningModule):
         self.n_len = model_configs.n_len
         self.c_len = model_configs.c_len
         self.edge_importance = model_configs.edge_importance
-        self.context_dropout_probs = model_configs.context_dropout_probs ## change to context_dropout_probs
         self.learned_time_periods = model_configs.learned_time_periods
         self.preprocess_context = model_configs.preprocess_context
 

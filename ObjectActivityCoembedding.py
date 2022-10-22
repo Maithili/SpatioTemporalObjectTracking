@@ -265,7 +265,9 @@ class ObjectActivityCoembeddingModule(LightningModule):
         #     latent_similarity_loss += self.latent_similarity_loss(graph_latents, time_latents)
         #     context = F.normalize(graph_latents + activity_latents + time_latents, dim=-1)
         # else:
-        latents = F.normalize(graph_latents + activity_latents, dim=-1)
+
+        keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
+        latents = F.normalize(graph_latents + (activity_latents * keep_activity_mask), dim=-1)
 
         ## Prediction
         # if self.train_prediction:
@@ -337,7 +339,8 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
         if activity_seq is not None:
             activity_latents, _ = self.encode_activity(activity_seq)
-            latents = graph_latents + activity_latents
+            keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
+            latents = graph_latents + (activity_latents * keep_activity_mask)
 
         latents = F.normalize(latents, dim=-1)
 
