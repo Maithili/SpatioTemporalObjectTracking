@@ -272,7 +272,8 @@ class GraphTranslatorModule(LightningModule):
         
         imp = imp.view(size=[batch_size, self.n_nodes, self.n_nodes])
 
-        edges_inferred = F.softmax(xe, dim=-1)
+        # edges_inferred = F.softmax(xe, dim=-1)
+        edges_inferred = xe
 
         return edges_inferred, nodes, context, imp
 

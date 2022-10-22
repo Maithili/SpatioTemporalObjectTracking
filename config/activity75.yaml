@@ -1,4 +1,4 @@
 context_dropout_probs:
-  time: 0.2
+  time: 0.0
   activity: 0.25
   diff: 0.8

@@ -1,6 +1,6 @@
 name: null
 time_encoding: sine_informed
-epochs: [25]
+epochs: [50]
 batch_size: 1
 learn_nodes: False
 context_dropout_probs:

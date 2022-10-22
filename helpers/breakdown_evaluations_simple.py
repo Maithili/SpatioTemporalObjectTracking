@@ -1,7 +1,6 @@
 import os
 import shutil
 import json
-from unittest import result
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -55,8 +54,10 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
     results = {'moved':{'correct':[0 for _ in range(lookahead_steps)], 
                             'wrong':[0 for _ in range(lookahead_steps)], 
                             'missed':[0 for _ in range(lookahead_steps)]},
-                 'unmoved':{'fp':[0 for _ in range(lookahead_steps)], 
-                            'tn':[0 for _ in range(lookahead_steps)]}
+                'unmoved':{'fp':[0 for _ in range(lookahead_steps)], 
+                            'tn':[0 for _ in range(lookahead_steps)]},
+                'activity':{'correct':[0 for _ in range(lookahead_steps)], 
+                            'wrong':[0 for _ in range(lookahead_steps)]}
                 }
 
     figures = []
@@ -66,7 +67,7 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
 
     for routine in test_routines:
 
-        routine_length = routine[0]-3-lookahead_steps
+        routine_length = routine[0]-2-lookahead_steps
         num_nodes = routine[1].size()[-2]
 
         routine_inputs = torch.empty(routine_length, num_nodes)
@@ -74,6 +75,8 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
         routine_output_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
         routine_ground_truths = torch.ones(routine_length, num_nodes).to(int) * -1
         routine_ground_truth_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
+        activities_output = torch.zeros(routine_length).to(int)
+        activities_gt = torch.zeros(routine_length).to(int)
 
         changes_output_all = torch.zeros(routine_length, num_nodes).to(bool)
         changes_gt_all = torch.zeros(routine_length, num_nodes).to(bool)
@@ -88,19 +91,28 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=6, determinist
                     
         model_results = model.evaluate_prediction(data, num_steps=lookahead_steps)
 
-        routine_inputs = data['edges'][:,2:-1-lookahead_steps,:,:].argmax(-1).squeeze(0).cpu()
-        for step, result in enumerate(model_results['object']):
-            gt_tensor = data['edges'][:,3+step:-lookahead_steps+step,:,:].argmax(-1).squeeze(0).cpu()
-            output_probs = result[:,:routine_inputs.size()[0],:,:].squeeze(0).cpu()
-            output_tensor = result[:,:routine_inputs.size()[0],:,:].argmax(-1).squeeze(0).cpu()
+        routine_inputs = data['edges'][:,1:-1-lookahead_steps,:,:].argmax(-1).squeeze(0).cpu()
+
+        for step, (result_obj, result_act) in enumerate(zip(model_results['object'], model_results['activity'])):
+            gt_tensor = data['edges'][:,2+step:-lookahead_steps+step,:,:].argmax(-1).squeeze(0).cpu()
+            # output_probs = result_obj[:,:routine_inputs.size()[0],:,:].squeeze(0).cpu()
+            output_tensor = result_obj[:,:-1].argmax(-1).squeeze(0).cpu()
+            activities_output = result_act.argmax(-1).squeeze(0).cpu()
+            activities_gt = data['activity'][:,1+step:-lookahead_steps+step].squeeze(0).cpu()
+
+            results['activity']['correct'][step] += int((activities_output == activities_gt).sum())
+            results['activity']['wrong'][step] += int((activities_output != activities_gt).sum())
             
             new_changes_out = deepcopy(np.bitwise_and(output_tensor != routine_inputs, np.bitwise_not(changes_output_all))).to(bool)
-            new_changes_gt = deepcopy(np.bitwise_and(gt_tensor != routine_inputs, np.bitwise_not(changes_gt_all[step,:]))).to(bool)
+            new_changes_gt = deepcopy(np.bitwise_and(gt_tensor != routine_inputs, np.bitwise_not(changes_gt_all))).to(bool)
             
             routine_outputs[new_changes_out] = output_tensor[new_changes_out]
             routine_output_step[new_changes_out] = step
             routine_ground_truths[new_changes_gt] = gt_tensor[new_changes_gt]
             routine_ground_truth_step[new_changes_gt] = step
+
+            changes_output_all = np.bitwise_or(changes_output_all, new_changes_out)
+            changes_gt_all = np.bitwise_or(changes_output_all, new_changes_gt)
 
         correct = deepcopy(routine_outputs == routine_ground_truths).to(int)
         wrong = deepcopy(routine_outputs != routine_ground_truths).to(int)

@@ -359,6 +359,8 @@ def average_stats(stats_list):
     # if num_stats == 1:
     #     return stats_list[0]
     for kk in stats_list[0].keys():
+        if kk not in ['moved','unmoved']:
+            continue
         aggregate[kk] = {}
         for k in stats_list[0][kk].keys():
             aggregate[kk][k] = sum([np.array(s[kk][k]) for s in stats_list])
@@ -474,10 +476,10 @@ if __name__ == '__main__':
 
 
     for typ in [
-        # 'ablations_activity', 
-        'baselines', 
-        'ablations', 
-        'pretrain',
+        'ablations_activity', 
+        # 'baselines', 
+        # 'ablations', 
+        # 'pretrain',
         # 'custom'
         ]:
 
@@ -523,7 +525,7 @@ if __name__ == '__main__':
             #         data = []
 
             for method in methods:
-                data.append(average_stats([json.load(open(os.path.join(dir,dataset,method,'evaluation.json')))['0.0'] for dataset in datasets]))
+                data.append(average_stats([json.load(open(os.path.join(dir,dataset,method,'evaluation.json'))) for dataset in datasets]))
 
             names = [method_label(m,ablation=typ) for m in methods]
             markers = [method_marker(m) for m in methods]

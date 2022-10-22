@@ -65,8 +65,8 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
 
         wandb_logger.watch(model, log='gradients', log_freq=20)
 
-        trainer.fit(model, data.get_train_loader())
-        model.train_prediction = True
+        # trainer.fit(model, data.get_train_loader())
+        # model.train_prediction = True
         trainer.fit(model, data.get_train_loader())
 
 
