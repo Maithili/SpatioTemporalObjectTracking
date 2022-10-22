@@ -182,7 +182,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
         output_edges = graph_seq_edges[:,1:,:,:]
         batch_size, sequence_len, _, _ = input_nodes.size()
 
-        edges_inferred, _, _, _ = self.obj_seq_decoder(input_edges.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_nodes), 
+        edges_inferred, _, _ = self.obj_seq_decoder(input_edges.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_nodes), 
                                                    input_nodes.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_len), 
                                                    graph_latents.view(batch_size*sequence_len, self.embedding_size))
         # dyn_edges_flat = graph_seq_dyn_edges.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_nodes, 1)
@@ -211,7 +211,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
     def decode(self, latents, input_nodes, input_edges, output_edges=None, output_activity=None):
         batch_size, sequence_len, _, _ = input_edges.size()
 
-        pred_edges, _, _, _ = self.obj_seq_decoder(input_edges.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_nodes), 
+        pred_edges, _, _ = self.obj_seq_decoder(input_edges.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_nodes), 
                                                    input_nodes.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_len), 
                                                    latents.view(batch_size*(sequence_len), self.embedding_size))
 

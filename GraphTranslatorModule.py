@@ -59,18 +59,14 @@ class GraphTranslatorModule(LightningModule):
         
         super().__init__()
 
-        self.evaluate = False
-
         self.cfg = model_configs
         self.n_nodes  = model_configs.n_nodes 
         self.n_len = model_configs.n_len
         self.c_len = model_configs.c_len
-        self.n_activities = model_configs.n_activities
         self.edge_importance = model_configs.edge_importance
         self.context_dropout_probs = model_configs.context_dropout_probs ## change to context_dropout_probs
         self.learned_time_periods = model_configs.learned_time_periods
         self.preprocess_context = model_configs.preprocess_context
-        self.contexts = list(self.context_dropout_probs.keys())
 
         self.hidden_influence_dim = 20
 
@@ -86,9 +82,6 @@ class GraphTranslatorModule(LightningModule):
                                              nn.ReLU(),
                                              nn.Linear(self.c_len, self.c_len),
                                              )
-
-        self.embed_context_activity = nn.Linear(self.n_activities, self.c_len)
-        self.embed_single_activity = lambda x: self.embed_context_activity(F.one_hot(x, num_classes=self.n_activities).to(torch.float32))
 
 
         mlp_hidden = model_configs.hidden_layer_size
@@ -108,71 +101,14 @@ class GraphTranslatorModule(LightningModule):
                                                     nn.Linear(self.hidden_influence_dim, 1)
                                                     )
 
-        self.mlp_predict_context = nn.Sequential(nn.Linear(self.edges_update_input_dim, self.hidden_influence_dim),
-                                                    nn.ReLU(),
-                                                    nn.Linear(self.hidden_influence_dim, self.c_len)
-                                                    )
-
-
-        self.mlp_update_nodes = nn.Sequential(nn.Linear(self.nodes_update_input_dim, self.hidden_influence_dim),
-                                                    nn.ReLU(),
-                                                    nn.Linear(self.hidden_influence_dim, 1)
-                                                    )
-        
+    
         self.location_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.squeeze(-1).permute(0,2,1), y.squeeze(-1).long()))
         self.inference_location = lambda x: x.squeeze(-1).argmax(-1)
 
         self.class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.long())
         self.inference_class = lambda xc: xc.argmax(-1)
 
-        # self.context_loss = lambda xc, yc: torch.nn.CosineEmbeddingLoss()(xc, yc, torch.Tensor([1]).to('cuda'))
-        self.activity_prediction_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.double(), yc.squeeze(-1).to(torch.long))
 
-        # self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
-
-        ## transition encoder-decoder
-        self.graph_encoder = geom_nn.Sequential('x, edge_index',
-                                                [(geom_nn.GCNConv(self.n_len, self.c_len*4), 'x, edge_index -> x'),
-                                                nn.ReLU(inplace=True),
-                                                (geom_nn.GCNConv(self.c_len*4, self.c_len*2), 'x, edge_index -> x'),
-                                                ])
-        self.context_from_graph_encodings = nn.Sequential(nn.Linear(self.c_len*2, self.c_len*2),
-                                                          nn.ReLU(),
-                                                          nn.Linear(self.c_len*2, self.c_len)
-                                                          )
-
-    def context_loss(self, xc, yc):
-        batch_size = xc.size()[0]
-        xgrid, ygrid = torch.meshgrid(torch.arange(batch_size), torch.arange(batch_size), indexing='ij')
-        same = (((xgrid==ygrid).to(int).view(-1)*2)-1).to('cuda')
-        return torch.nn.CosineEmbeddingLoss(reduction='mean')(xc[xgrid.view(-1),:], yc[ygrid.view(-1),:], same)
-
-
-    def graph_transition_encoder(self, nodes, edges, y_nodes, y_edges):
-        batch_size, num_nodes, _ = nodes.size()
-        mat2idx = lambda e_mat: (torch.argwhere(e_mat.view(batch_size*num_nodes, -1) == 1)).transpose(1,0)
-        batch = torch.arange(batch_size).repeat(num_nodes,1).transpose(1,0).view(-1).to(int).to('cuda')
-        graphs_in = geom_nn.global_mean_pool(self.graph_encoder(nodes.view(batch_size*num_nodes, -1), mat2idx(edges)), batch=batch)
-        graphs_out = geom_nn.global_mean_pool(self.graph_encoder(y_nodes.view(batch_size*num_nodes, -1), mat2idx(y_edges)), batch=batch)
-        context_diff = self.context_from_graph_encodings(graphs_out - graphs_in)
-        assert context_diff.size()[0] == batch_size
-        assert context_diff.size()[1] == self.c_len
-        return context_diff
-
-    def activity_encoder(self, activity):
-        return self.embed_context_activity(F.one_hot(activity, num_classes=self.n_activities).to(torch.float32))
-
-    def activity_decoder(self, latent_vector, ground_truth=None):
-        activity_embeddings = self.embed_context_activity.weight
-        assert activity_embeddings.size()[0] == self.c_len
-        assert activity_embeddings.size()[1] == self.n_activities
-        output_activity = torch.nn.CosineSimilarity(dim=1)(activity_embeddings.unsqueeze(0), latent_vector.unsqueeze(-1))
-        if ground_truth is not None:
-            activity_pred_loss = self.activity_prediction_loss(output_activity, ground_truth)
-        else:
-            activity_pred_loss = None
-        output_activity = F.softmax(output_activity, dim=-1)
-        return output_activity, activity_pred_loss
 
     def inference_location_comparative(self, probs, ref, thresh=0.2):
         non_comp_inf = F.one_hot(self.inference_location(probs))
@@ -247,10 +183,6 @@ class GraphTranslatorModule(LightningModule):
         ## edge message passing
         xe = self.message_collection_edges(x, imp, context)
         
-        ## context prediction
-        xpool = xe.sum(dim=2).sum(dim=1)
-        context = self.mlp_predict_context(xpool).view(size=[batch_size, self.c_len])
-
         ## edge update
         xe = xe.view(
             size=[batch_size * self.n_nodes * self.n_nodes, 
@@ -275,10 +207,10 @@ class GraphTranslatorModule(LightningModule):
         # edges_inferred = F.softmax(xe, dim=-1)
         edges_inferred = xe
 
-        return edges_inferred, nodes, context, imp
+        return edges_inferred, nodes, imp
 
 
-    def step(self, batch, prev_activity_probs=None):
+    def step(self, batch):
         edges = batch['edges']
         nodes = batch['nodes']
         y_edges = batch['y_edges']
@@ -287,28 +219,10 @@ class GraphTranslatorModule(LightningModule):
         batch_size = nodes.size()[0]
         
         time_context = self.get_time_context(batch['time'], batch['context_time'])
-        activity_context = self.embed_single_activity(batch['activity'].to(int)).view(time_context.size())
-        diff_context = self.graph_transition_encoder(nodes, edges, y_nodes, y_edges)
         
-        context = time_context * 0
-        if self.evaluate:
-            if 'time' in self.contexts:
-                context += time_context
-            if prev_activity_probs is not None:
-                context += self.embed_context_activity(prev_activity_probs).view(time_context.size())
-            elif 'activity' in self.contexts and random() > self.cfg.context_dropout_probs['activity']:
-                context += activity_context
-        else:
-            if 'time' in self.contexts and random() > self.cfg.context_dropout_probs['time']:
-                context += time_context
-            if 'activity' in self.contexts and random() > self.cfg.context_dropout_probs['activity']:
-                context += activity_context
-            if 'diff' in self.contexts and  random() > self.cfg.context_dropout_probs['diff']:
-                context += diff_context
-                
-        context = torch.nn.functional.normalize(context)
-  
-        edges_pred, nodes_pred, context_pred, imp = self(edges, nodes, context)
+        context = time_context
+ 
+        edges_pred, nodes_pred, imp = self(edges, nodes, context)
 
         assert edges_pred.size() == dyn_edges.size(), f'Size mismatch in edges {edges_pred.size()} and dynamic mask {dyn_edges.size()}'
         edges_pred[dyn_edges == 0] = -float('inf')
@@ -327,25 +241,9 @@ class GraphTranslatorModule(LightningModule):
         gt = {'class':self.inference_class(y_nodes), 
               'location':self.inference_location(y_edges)}
 
-        perc_time_contex_similarity = torch.nn.CosineSimilarity(dim=1)(time_context,diff_context)
-        perc_act_contex_similarity = torch.nn.CosineSimilarity(dim=1)(activity_context, diff_context)
-        perc_context_pred_similarity = torch.nn.CosineSimilarity(dim=1)(context_pred,activity_context)
-        output_activity, activity_pred_loss = self.activity_decoder(context_pred, ground_truth = batch['y_activity'])
-
-        logs = {'context time processing similarity': perc_time_contex_similarity,
-                'context act processing similarity': perc_act_contex_similarity,
-                'context prediction similarity': perc_context_pred_similarity,
-                'processed activity context norm': torch.linalg.norm(activity_context),
-                'processed time context norm': torch.linalg.norm(time_context),
-                'processed diff norm': torch.linalg.norm(diff_context),
-                'predicted context norm': torch.linalg.norm(context_pred),
-                'Activity prediction accuracy': (output_activity.argmax(-1)==batch['y_activity']).sum()/len(batch['y_activity'])}
-
         losses = {'class':self.class_loss(output_probs['class'], gt['class']),
                   'location':self.location_loss(edges_pred, gt['location']),
-                  'context_process':self.context_loss(time_context, diff_context) + self.context_loss(activity_context, diff_context),
-                # 'context_predict':self.context_loss(context_pred, context_next)}
-                  'context_predict':activity_pred_loss}
+                  }
 
         output = {'class':self.inference_class(output_probs['class']),
                   'location':self.inference_location(edges_inferred)}
@@ -371,20 +269,20 @@ class GraphTranslatorModule(LightningModule):
                    'output':output, 
                    'evaluate_node':evaluate_node,
                    'importance_weights':imp,
-                   'logs':logs}
+                   }
 
-        return loss, details, output_activity
+        return loss, details
 
         
     def training_step(self, batch, batch_idx):
-        loss, details, activity_probs_pred = self.step(batch, prev_activity_probs=None)
+        loss, details = self.step(batch)
         self.log('Train loss',loss)
         self.log('Train',details['logs'])
         assert (sum(loss.values())).size() == torch.Size([])
         return sum(loss.values())
 
     def test_step(self, batch, batch_idx):
-        loss, details, activity_probs_pred = self.step(batch, prev_activity_probs=None)
+        loss, details = self.step(batch)
         self.log('Test loss',loss)
         self.log('Test',details['logs'])
         return 
