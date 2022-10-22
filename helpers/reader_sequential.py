@@ -145,16 +145,16 @@ class RoutinesDataset():
         self.params['n_activities'] = len(self.common_data['activities'])
 
     def get_train_loader(self):
-        return DataLoader(self.train, num_workers=1, batch_size=self.params['batch_size'], collate_fn=self.train.collate_fn)
+        return DataLoader(self.train, num_workers=min(4,os.cpu_count()), batch_size=self.params['batch_size'], collate_fn=self.train.collate_fn)
 
     def get_test_loader(self):
-        return DataLoader(self.test, num_workers=1, batch_size=self.params['batch_size'], collate_fn=self.test.collate_fn)
+        return DataLoader(self.test, num_workers=min(4,os.cpu_count()), batch_size=self.params['batch_size'], collate_fn=self.test.collate_fn)
 
     def get_test_split(self):
         return self.test
 
     def get_single_example_test_loader(self):
-        return DataLoader(self.test, num_workers=1, batch_size=1, collate_fn=self.test.collate_fn)
+        return DataLoader(self.test, num_workers=min(4,os.cpu_count()), batch_size=1, collate_fn=self.test.collate_fn)
     
     # def get_cooccurence_frequency(self):
     #     return get_cooccurence_frequency(self.train)

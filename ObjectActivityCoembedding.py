@@ -17,9 +17,11 @@ from GraphTranslatorModule import GraphTranslatorModule
 
 
 class ObjectActivityCoembeddingModule(LightningModule):
-    def __init__(self, model_configs):
+    def __init__(self, model_configs, original_model=False):
         
         super().__init__()
+
+        self.original_model = original_model
 
         self.cfg = model_configs
         self.embedding_size = self.cfg.c_len
@@ -254,41 +256,46 @@ class ObjectActivityCoembeddingModule(LightningModule):
         assert self.cfg.n_nodes == num_f_nodes, (str(self.cfg.n_nodes) +'!='+ str(num_f_nodes))
         assert self.cfg.n_nodes == num_t_nodes, (str(self.cfg.n_nodes) +'!='+ str(num_t_nodes))
 
-        graph_latents, graph_autoenc_loss = self.encode_graph(graph_seq_nodes, graph_seq_edges)
-
-        activity_latents, activity_autoenc_loss = self.encode_activity(activity_seq)
-       
-        latent_similarity_loss = self.latent_similarity_loss(graph_latents, activity_latents)
-        
-        # if time_context is not None:
-        #     time_latents = self.time_context(time_context)
-        #     latent_similarity_loss += self.latent_similarity_loss(graph_latents, time_latents)
-        #     context = F.normalize(graph_latents + activity_latents + time_latents, dim=-1)
-        # else:
-
-        keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
-        latents = F.normalize(graph_latents + (activity_latents * keep_activity_mask), dim=-1)
-
-        ## Prediction
-        # if self.train_prediction:
         input_nodes_forward = graph_seq_nodes[:,1:-1,:,:]
         input_edges_forward = graph_seq_edges[:,1:-1,:,:]
         output_edges_forward = graph_seq_edges[:,2:,:,:]
 
-        pred_latents, latent_predictive_loss = self.predict(latents[:,:-1], 
-                                                            time_context[:,:-1], 
-                                                            latents_expected=latents[:,1:])
+        if not self.original_model:
 
-        pred_edges, pred_activity, graph_pred_loss, activity_pred_loss = self.decode(latents=pred_latents, 
-                                                                                    input_nodes=input_nodes_forward,
-                                                                                    input_edges=input_edges_forward,
-                                                                                    output_edges=output_edges_forward,
-                                                                                    output_activity=activity_seq[:,1:])
+            graph_latents, graph_autoenc_loss = self.encode_graph(graph_seq_nodes, graph_seq_edges)
 
-        # print(output_edges_forward.size())    
-        # print(pred_edges.size())    
-        # print(activity_seq.size())    
-        # print(pred_activity.size())    
+            activity_latents, activity_autoenc_loss = self.encode_activity(activity_seq)
+        
+            latent_similarity_loss = self.latent_similarity_loss(graph_latents, activity_latents)
+
+            keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
+            latents = F.normalize(graph_latents + (activity_latents * keep_activity_mask), dim=-1)
+
+            ## Prediction
+            pred_latents, latent_predictive_loss = self.predict(latents[:,:-1], 
+                                                                time_context[:,:-1], 
+                                                                latents_expected=latents[:,1:])
+
+
+
+            pred_edges, pred_activity, graph_pred_loss, activity_pred_loss = self.decode(latents=pred_latents, 
+                                                                                        input_nodes=input_nodes_forward,
+                                                                                        input_edges=input_edges_forward,
+                                                                                        output_edges=output_edges_forward,
+                                                                                        output_activity=activity_seq[:,1:])
+                                                    
+        else:
+            pred_edges, pred_activity, graph_pred_loss, activity_pred_loss = self.decode(latents=time_context[:,:-1], 
+                                                                                        input_nodes=input_nodes_forward,
+                                                                                        input_edges=input_edges_forward,
+                                                                                        output_edges=output_edges_forward,
+                                                                                        output_activity=activity_seq[:,1:])
+
+            graph_autoenc_loss = torch.Tensor([0]).to('cuda')
+            activity_autoenc_loss = torch.Tensor([0]).to('cuda')
+            latent_similarity_loss = torch.Tensor([0]).to('cuda')
+            latent_predictive_loss = torch.Tensor([0]).to('cuda')
+
 
         accuracy_object = (output_edges_forward.argmax(-1) == pred_edges.argmax(-1)).sum()/torch.numel(output_edges_forward.argmax(-1))
         accuracy_activity = (activity_seq[:,1:] == pred_activity.argmax(-1)).sum()/torch.numel(activity_seq[:,1:])
@@ -329,40 +336,52 @@ class ObjectActivityCoembeddingModule(LightningModule):
         activity_seq = batch.get('activity')[:,:-1]
         time_context = batch.get('context_time')[:,:-1,:]
 
-        # if len(activity_seq.size()) == 2:
-        #     activity_seq = F.one_hot(activity_seq.to(int), num_classes=self.cfg.n_activities).to(torch.float32)
+        if not self.original_model:
 
-        self.obj_seq_decoder.evaluate = True
+            graph_latents, _ = self.encode_graph(graph_seq_nodes, graph_seq_edges)
+            latents = graph_latents
 
-        graph_latents, _ = self.encode_graph(graph_seq_nodes, graph_seq_edges)
-        latents = graph_latents
+            if activity_seq is not None:
+                activity_latents, _ = self.encode_activity(activity_seq)
+                keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
+                latents = graph_latents + (activity_latents * keep_activity_mask)
 
-        if activity_seq is not None:
-            activity_latents, _ = self.encode_activity(activity_seq)
-            keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
-            latents = graph_latents + (activity_latents * keep_activity_mask)
+            latents = F.normalize(latents, dim=-1)
 
-        latents = F.normalize(latents, dim=-1)
-
-        ## Prediction
-        routine_len = latents.size()[1] - num_steps
-        input_nodes_forward = graph_seq_nodes[:,1:1+routine_len,:,:]
-        input_edges_forward = graph_seq_edges[:,1:1+routine_len,:,:]
-        latents_forward = latents[:,:routine_len]
-        results = {'object':[], 'activity':[]} #, 'gt_object':[], 'gt_activity':[]}
+            ## Prediction
+            routine_len = latents.size()[1] - num_steps
+            input_nodes_forward = graph_seq_nodes[:,1:1+routine_len,:,:]
+            input_edges_forward = graph_seq_edges[:,1:1+routine_len,:,:]
+            latents_forward = latents[:,:routine_len]
+            results = {'object':[], 'activity':[]} 
 
 
-        for step in range(num_steps):
-            latents_forward, _ = self.predict(latents_forward, time_context[:,step:step+routine_len])
-            pred_edges, pred_activity, _, _ = self.decode(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward)
+            for step in range(num_steps):
+                latents_forward, _ = self.predict(latents_forward, time_context[:,step:step+routine_len])
+                pred_edges, pred_activity, _, _ = self.decode(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward)
 
-            # input_nodes_forward = input_nodes_forward[:,1:,:,:]
-            input_edges_forward = pred_edges
+                # input_nodes_forward = input_nodes_forward[:,1:,:,:]
+                input_edges_forward = pred_edges
 
-            results['object'].append(pred_edges)
-            # results['gt_object'].append(graph_seq_edges[:,2+step:,:,:])
-            results['activity'].append(pred_activity)
-            # results['gt_activity'].append(activity_seq[:,1+step:])
+                results['object'].append(pred_edges)
+                results['activity'].append(pred_activity)
+
+        else:
+            routine_len = time_context.size()[1] - num_steps
+            input_nodes_forward = graph_seq_nodes[:,1:1+routine_len,:,:]
+            input_edges_forward = graph_seq_edges[:,1:1+routine_len,:,:]
+            results = {'object':[], 'activity':[]} 
+
+
+            for step in range(num_steps):
+                latents_forward = time_context[:,step:step+routine_len]
+                pred_edges, pred_activity, _, _ = self.decode(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward)
+
+                # input_nodes_forward = input_nodes_forward[:,1:,:,:]
+                input_edges_forward = pred_edges
+
+                results['object'].append(pred_edges)
+                results['activity'].append(pred_activity)
 
         return results
 
@@ -374,12 +393,14 @@ class ObjectActivityCoembeddingModule(LightningModule):
         # self.log('Train',results['details'])
         # res = sum(results['loss'].values())
         res = 0
-        res += results['loss']['object_autoencoder']
-        # res += results['loss']['object_pred']
-        res += results['loss']['activity_autoencoder']
-        # res += results['loss']['activity_pred']
-        res += results['loss']['latent_similarity']
-        res += results['loss']['latent_pred']
+        if not self.original_model:
+            res += results['loss']['object_autoencoder']
+            res += results['loss']['activity_autoencoder']
+            res += results['loss']['latent_similarity']
+            res += results['loss']['latent_pred']
+        else:
+            res += results['loss']['object_pred']
+            res += results['loss']['activity_pred']
         return res
 
     def test_step(self, batch, batch_idx):

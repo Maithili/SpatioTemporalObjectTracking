@@ -56,6 +56,8 @@ def method_color(name):
         return 'tab:purple'
     if name.startswith('ours'):
         return 'tab:red'
+    if name.startswith('original'):
+        return 'k'
     raise RuntimeError(f"Method color not defined for {name}")
 
 def method_marker(name):
@@ -96,43 +98,45 @@ def method_label(name, ablation='default'):
     all_name_dict = {}
     all_name_dict['default'] = {}
     all_name_dict['baselines'] = {
-            'ours_50epochs':'Ours',
+            'ours_':'Ours',
             'ours':'Ours',
             'FremenStateConditioned':'FreMEn',
             'LastSeenAndStaticSemantic':'Stat Sem'
             }
     all_name_dict['pretrain'] = {
-            'ourspt_50epochs':'Pre-Train',
-            'ourspt0_50epochs':'PreTr0only',
-            'ours_50epochs':'Scratch',
+            'ourspt_':'Pre-Train',
+            'ourspt0_':'PreTr0only',
+            'ours_':'Scratch',
             }
     all_name_dict['ablations'] = {
-            'ours_50epochs':'Ours',
+            'ours_':'Ours',
             'ours':'Ours',
-            'ours_allEdges_50epochs':'w/o Attn',
+            'ours_allEdges_':'w/o Attn',
             'ours_allEdges':'w/o Attn',
-            'ours_timeLinear_50epochs':'w/o Time',
+            'ours_timeLinear_':'w/o Time',
             'ours_timeLinear':'w/o Time',
             }
     all_name_dict['ablations_activity'] = {
-            'ours_50epochs':'Ours',
-            'ours_activity25_50epochs':'Act-25',
-            'ours_activity50_50epochs':'Act-50',
-            'ours_activity75_50epochs':'Act-75',
-            'ours_activity100_50epochs':'Act-100',
+            'ours_':'Ours',
+            'ours_activity25_':'Act-25',
+            'ours_activity50_':'Act-50',
+            'ours_activity75_':'Act-75',
+            'ours_activity100_':'Act-100',
+            'original_':'Old'
             }
     all_name_dict['custom'] = {
-            'noPreTr_50epochs':'NoPT',
-            'ours_30epochs':'Ours',
-            'ours_50epochs':'Ours',
-            'ours_activity25_50epochs':'Act-25',
-            'ours_activity50_50epochs':'Act-50',
-            'ours_activity75_50epochs':'Act-75',
-            'ours_activity100_50epochs':'Act-100',
-            'ours_activity25_30epochs':'Act-25',
-            'ours_activity50_30epochs':'Act-50',
-            'ours_activity75_30epochs':'Act-75',
-            'ours_activity100_30epochs':'Act-100',
+            'noPreTr_':'NoPT',
+            'ours_':'Ours',
+            'ours_':'Ours',
+            'ours_activity25_':'Act-25',
+            'ours_activity50_':'Act-50',
+            'ours_activity75_':'Act-75',
+            'ours_activity100_':'Act-100',
+            'ours_activity25_':'Act-25',
+            'ours_activity50_':'Act-50',
+            'ours_activity75_':'Act-75',
+            'ours_activity100_':'Act-100',
+            'original_':'Old'
             }
     name_dict = all_name_dict[ablation]
     return name_dict[name]
@@ -460,11 +464,11 @@ if __name__ == '__main__':
         raise(RuntimeError)
 
     all_methods = {
-        'baselines' : ['FremenStateConditioned', 'LastSeenAndStaticSemantic', 'ours_50epochs'],
-        'pretrain' : ['ourspt_50epochs', 'ours_50epochs','FremenStateConditioned', 'LastSeenAndStaticSemantic'],
-        'ablations' : ['ours_50epochs','ours_allEdges_50epochs','ours_timeLinear_50epochs'],
-        'ablations_activity' : ['ours_50epochs','ours_activity25_50epochs','ours_activity50_50epochs' ,'ours_activity75_50epochs','ours_activity100_50epochs'],
-        'custom' : ['ours_30epochs','noPreTr_50epochs','ours_activity25_30epochs','ours_activity50_30epochs' ,'ours_activity75_30epochs','ours_activity100_30epochs']
+        'baselines' : ['FremenStateConditioned', 'LastSeenAndStaticSemantic', 'ours_'],
+        'pretrain' : ['ourspt_', 'ours_','FremenStateConditioned', 'LastSeenAndStaticSemantic'],
+        'ablations' : ['ours_','ours_allEdges_','ours_timeLinear_'],
+        'ablations_activity' : ['original_','ours_','ours_activity25_','ours_activity50_' ,'ours_activity75_'],
+        'custom' : ['original_','ours_']
     }
 
 
@@ -476,11 +480,11 @@ if __name__ == '__main__':
 
 
     for typ in [
-        'ablations_activity', 
+        # 'ablations_activity', 
         # 'baselines', 
         # 'ablations', 
         # 'pretrain',
-        # 'custom'
+        'custom'
         ]:
 
 
@@ -493,6 +497,8 @@ if __name__ == '__main__':
         dirs = [os.path.join(args.path,str(p)) for p in training_days]
 
         methods = all_methods[typ]
+        method_dirs = [[candidate for candidate in os.listdir(os.path.join(dirs[0],datasets[0])) if (candidate.startswith(method) and (len(candidate) < len(method) + 9))][0] for method in methods]
+        print(method_dirs)
 
         combined_dir_out = os.path.join(args.path,'visuals',typ,'combined')
 
@@ -524,7 +530,7 @@ if __name__ == '__main__':
             #             f.write(result_string_from_info(info))
             #         data = []
 
-            for method in methods:
+            for method in method_dirs:
                 data.append(average_stats([json.load(open(os.path.join(dir,dataset,method,'evaluation.json'))) for dataset in datasets]))
 
             names = [method_label(m,ablation=typ) for m in methods]

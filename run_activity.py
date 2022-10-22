@@ -24,7 +24,24 @@ random.seed(23435)
 from numpy import random as nrandom
 nrandom.seed(23435)
 
-def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write_ckpt=False, tags=[], logs_dir='logs', finetune=False):
+
+def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False, tags=[], train_days=None, logs_dir='logs', finetune=False, original_model=False):
+    
+    if cfg['NAME'] is None:
+        cfg['NAME'] = os.path.basename(data_dir)+'_trial'
+
+    with open(os.path.join(data_dir, 'processed_seq', 'common_data.json')) as f:
+        cfg['DATA_INFO'] = json.load(f)['info']
+
+    time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
+    time_encoding = time_options(cfg['time_encoding'])
+
+    data = RoutinesDataset(data_path=os.path.join(data_dir,'processed_seq'), 
+                           time_encoder=time_encoding, 
+                           batch_size=cfg['batch_size'],
+                           max_routines = (train_days, None))
+    
+    group = os.path.basename(data_dir)
 
 
     cfg.update(data.params)
@@ -39,13 +56,13 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
             n += 1
             new_dir = output_dir + "_"+str(n)
         output_dir = new_dir
-    os.makedirs(output_dir)
+    # os.makedirs(output_dir)
 
     # wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags)
     wandb_logger = WandbLogger(name=cfg['NAME'], group = group, tags = tags)
     wandb_logger.experiment.config.update(cfg)
 
-    model = ObjectActivityCoembeddingModule(model_configs = model_configs)
+    model = ObjectActivityCoembeddingModule(model_configs = model_configs, original_model = original_model)
 
     epochs = cfg['epochs'] if isinstance(cfg['epochs'],list) else [cfg['epochs']]
     done_epochs = 0
@@ -84,30 +101,6 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
 
         if write_ckpt:
             torch.save(model.state_dict(), os.path.join(output_dir_new,'weights.pt'))
-    
-
-def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False, tags=[], train_days=None, logs_dir='logs', finetune=False):
-    
-    if cfg['NAME'] is None:
-        cfg['NAME'] = os.path.basename(data_dir)+'_trial'
-
-    with open(os.path.join(data_dir, 'processed_seq', 'common_data.json')) as f:
-        cfg['DATA_INFO'] = json.load(f)['info']
-
-    time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
-    time_encoding = time_options(cfg['time_encoding'])
-
-    data = RoutinesDataset(data_path=os.path.join(data_dir,'processed_seq'), 
-                           time_encoder=time_encoding, 
-                           batch_size=cfg['batch_size'],
-                           max_routines = (train_days, None))
-    
-    group = os.path.basename(data_dir)
-
-    run_model(data, group=group, cfg = cfg, checkpoint_dir=ckpt_dir, read_ckpt=read_ckpt, write_ckpt=write_ckpt, tags=tags, logs_dir=logs_dir, finetune=finetune)
-
-
-
 
 
 
@@ -124,6 +117,7 @@ if __name__ == '__main__':
     parser.add_argument('--read_ckpt', action='store_true')
     parser.add_argument('--write_ckpt', action='store_true')
     parser.add_argument('--finetune', action='store_true')
+    parser.add_argument('--original_model', action='store_true')
     parser.add_argument('--logs_dir', type=str, default='logs_default', help='Path to store putputs.')
 
     args = parser.parse_args()
@@ -143,4 +137,4 @@ if __name__ == '__main__':
     tags = args.tags.split(',') if args.tags is not None else []
 
     print(args.logs_dir)
-    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt, tags = tags, train_days=args.train_days, logs_dir=args.logs_dir, finetune=args.finetune)
+    run(data_dir=args.path, cfg=cfg, baselines=args.baselines, ckpt_dir=args.ckpt_dir, read_ckpt=args.read_ckpt, write_ckpt=args.write_ckpt, tags = tags, train_days=args.train_days, logs_dir=args.logs_dir, finetune=args.finetune, original_model=args.original_model)
