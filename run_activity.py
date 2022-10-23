@@ -84,7 +84,15 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
         # trainer.fit(model, data.get_train_loader())
         # model.train_prediction = True
-        trainer.fit(model, data.get_train_loader())
+        try:
+            trainer.fit(model, data.get_train_loader())
+        except AttributeError:
+            try:
+                model = ObjectActivityCoembeddingModule(model_configs = model_configs, original_model = original_model)
+                trainer.fit(model, data.get_train_loader())
+            except AttributeError:
+                model = ObjectActivityCoembeddingModule(model_configs = model_configs, original_model = original_model)
+                trainer.fit(model, data.get_train_loader())
 
 
         trainer.test(model, data.get_test_loader())
