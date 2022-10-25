@@ -44,7 +44,6 @@ class ObjectActivityCoembeddingModule(LightningModule):
         graph_module = GraphTranslatorModule(model_configs=model_configs)
         self.time_context = graph_module.mlp_context
         self.obj_seq_decoder = graph_module
-        self.obj_graph_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='mean')(x.permute(0,2,1), y.argmax(-1)))
 
         ## Activity Encoder
         self.embed_context_activity = nn.Linear(self.cfg.n_activities, self.embedding_size)
@@ -65,6 +64,12 @@ class ObjectActivityCoembeddingModule(LightningModule):
         ### TODO Maithili : Change to cosine embedding loss
         self.predictive_latent_loss = torch.nn.MSELoss()   #(reduction='mean')
         
+    def obj_graph_loss(self, x, y, dyn_edg=None):
+        if dyn_edg is None:
+            dyn_edg = torch.ones_like(y)
+        x[dyn_edg == 0] = -float('inf')
+        dyn_obj = (dyn_edg.sum(-1).view(-1) > 0)
+        return nn.CrossEntropyLoss(reduction='mean')(x.view(-1, x.shape[-1])[dyn_obj], y.argmax(-1).view(-1)[dyn_obj])
 
     def context_loss(self, xc, yc):
         batch_size = xc.size()[0]
@@ -176,7 +181,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
         ### TODO Maithili : Add 'M' parameter
         return torch.nn.CosineEmbeddingLoss(reduction='mean')(latent_obj[xgrid.reshape(-1),:], latent_act[ygrid.reshape(-1),:], same)
 
-    def encode_graph(self, graph_seq_nodes, graph_seq_edges):
+    def encode_graph(self, graph_seq_nodes, graph_seq_edges, graph_dynamic_edges_mask):
         graph_latents = F.normalize(self.graph_encoder(graph_seq_nodes, graph_seq_edges), dim=-1)
         # graph_latents = self.seq_encoder(graph_latents, time_context, seq_type='object')
         input_nodes = graph_seq_nodes[:,:-1,:,:]
@@ -187,9 +192,8 @@ class ObjectActivityCoembeddingModule(LightningModule):
         edges_inferred, _, _ = self.obj_seq_decoder(input_edges.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_nodes), 
                                                    input_nodes.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_len), 
                                                    graph_latents.view(batch_size*sequence_len, self.embedding_size))
-        # dyn_edges_flat = graph_seq_dyn_edges.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_nodes, 1)
-        # edges_inferred[dyn_edges_flat == 0] = -float('inf')
-        graph_autoenc_loss = self.obj_graph_loss(edges_inferred, output_edges.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_nodes))
+
+        graph_autoenc_loss = self.obj_graph_loss(edges_inferred.view(batch_size, sequence_len, self.cfg.n_nodes, self.cfg.n_nodes), output_edges, graph_dynamic_edges_mask[:,:-1,:,:])
 
         return graph_latents, graph_autoenc_loss
 
@@ -210,27 +214,29 @@ class ObjectActivityCoembeddingModule(LightningModule):
         
         return pred_latents, latent_predictive_loss
 
-    def decode(self, latents, input_nodes, input_edges, output_edges=None, output_activity=None):
+    def decode(self, latents, input_nodes, input_edges, dynamic_edges_mask, output_edges=None, output_activity=None):
         batch_size, sequence_len, _, _ = input_edges.size()
 
         pred_edges, _, _ = self.obj_seq_decoder(input_edges.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_nodes), 
                                                    input_nodes.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_len), 
                                                    latents.view(batch_size*(sequence_len), self.embedding_size))
-
-        # pred_edges = input_edges.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_nodes)
-
+        pred_edges = pred_edges.view(batch_size, sequence_len, self.cfg.n_nodes, self.cfg.n_nodes)
 
         graph_pred_loss = None
         if output_edges is not None:
-            graph_pred_loss = self.obj_graph_loss(pred_edges, output_edges.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_nodes))
-        pred_edges = F.softmax(pred_edges, dim=-1).view(batch_size, sequence_len, self.cfg.n_nodes, self.cfg.n_nodes)
+            assert (input_edges[dynamic_edges_mask == 0] == output_edges[dynamic_edges_mask == 0]).all()
+            graph_pred_loss = self.obj_graph_loss(pred_edges, output_edges, dynamic_edges_mask)
         
+        pred_edges[dynamic_edges_mask == 0] = -float('inf')
+        pred_edges = F.softmax(pred_edges, dim=-1)
+        pred_edges[dynamic_edges_mask == 0] = input_edges[dynamic_edges_mask == 0]
+
         pred_activity, activity_pred_loss = self.activity_decoder(latents, ground_truth=output_activity)
 
         return pred_edges, pred_activity, graph_pred_loss, activity_pred_loss
 
 
-    def forward(self, graph_seq_nodes, graph_seq_edges, activity_seq, time_context, graph_seq_dyn_edges=None):
+    def forward(self, graph_seq_nodes, graph_seq_edges, graph_dynamic_edges_mask, activity_seq, time_context, graph_seq_dyn_edges=None):
         """
         Args:
             graph_seq_nodes: batch_size x sequence_length+1 x num_nodes x node_feature_len
@@ -262,7 +268,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
         if not self.original_model:
 
-            graph_latents, graph_autoenc_loss = self.encode_graph(graph_seq_nodes, graph_seq_edges)
+            graph_latents, graph_autoenc_loss = self.encode_graph(graph_seq_nodes, graph_seq_edges, graph_dynamic_edges_mask)
 
             activity_latents, activity_autoenc_loss = self.encode_activity(activity_seq)
         
@@ -281,6 +287,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
             pred_edges, pred_activity, graph_pred_loss, activity_pred_loss = self.decode(latents=pred_latents, 
                                                                                         input_nodes=input_nodes_forward,
                                                                                         input_edges=input_edges_forward,
+                                                                                        dynamic_edges_mask=graph_dynamic_edges_mask[:,1:-1,:,:],
                                                                                         output_edges=output_edges_forward,
                                                                                         output_activity=activity_seq[:,1:])
                                                     
@@ -288,6 +295,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
             pred_edges, pred_activity, graph_pred_loss, activity_pred_loss = self.decode(latents=time_context[:,:-1], 
                                                                                         input_nodes=input_nodes_forward,
                                                                                         input_edges=input_edges_forward,
+                                                                                        dynamic_edges_mask=graph_dynamic_edges_mask[:,1:-1,:,:],
                                                                                         output_edges=output_edges_forward,
                                                                                         output_activity=activity_seq[:,1:])
 
@@ -333,12 +341,13 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
         graph_seq_nodes = batch.get('nodes')
         graph_seq_edges = batch.get('edges')
+        graph_dyn_edges = batch.get('dynamic_edges_mask')
         activity_seq = batch.get('activity')[:,:-1]
         time_context = batch.get('context_time')[:,:-1,:]
 
         if not self.original_model:
 
-            graph_latents, _ = self.encode_graph(graph_seq_nodes, graph_seq_edges)
+            graph_latents, _ = self.encode_graph(graph_seq_nodes, graph_seq_edges, graph_dyn_edges)
             latents = graph_latents
 
             if activity_seq is not None:
@@ -358,7 +367,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
             for step in range(num_steps):
                 latents_forward, _ = self.predict(latents_forward, time_context[:,step:step+routine_len])
-                pred_edges, pred_activity, _, _ = self.decode(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward)
+                pred_edges, pred_activity, _, _ = self.decode(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward, dynamic_edges_mask=graph_dyn_edges[:,1:1+routine_len,:,:])
 
                 # input_nodes_forward = input_nodes_forward[:,1:,:,:]
                 input_edges_forward = pred_edges
@@ -375,7 +384,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
             for step in range(num_steps):
                 latents_forward = time_context[:,step:step+routine_len]
-                pred_edges, pred_activity, _, _ = self.decode(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward)
+                pred_edges, pred_activity, _, _ = self.decode(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward, dynamic_edges_mask=graph_dyn_edges[:,1:1+routine_len,:,:])
 
                 # input_nodes_forward = input_nodes_forward[:,1:,:,:]
                 input_edges_forward = pred_edges
@@ -387,7 +396,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
         
     def training_step(self, batch, batch_idx):
-        results = self(batch['nodes'], batch['edges'], batch['activity'], batch['context_time'])
+        results = self(batch['nodes'], batch['edges'], batch['dynamic_edges_mask'], batch['activity'], batch['context_time'])
         self.log('Train loss',results['loss'])
         self.log('Train accuracy',results['accuracies'])
         # self.log('Train',results['details'])
@@ -404,7 +413,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
         return res
 
     def test_step(self, batch, batch_idx):
-        results = self(batch['nodes'], batch['edges'], batch['activity'], batch['context_time'])
+        results = self(batch['nodes'], batch['edges'], batch['dynamic_edges_mask'], batch['activity'], batch['context_time'])
         self.log('Test loss',results['loss'])
         # self.log('Test',results['details'])
         return 

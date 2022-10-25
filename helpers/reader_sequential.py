@@ -89,7 +89,7 @@ class DataSplit():
         self.time_encoder = time_encoder
         self.active_edges = active_edges
         self.routines_dir = routines_dir
-        self.collate_fn = CollateToDict(['edges', 'nodes', 'activity', 'time', 'context_time'])
+        self.collate_fn = CollateToDict(['edges', 'nodes', 'activity', 'time', 'context_time', 'dynamic_edges_mask'])
         self.files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(os.path.join(self.routines_dir, name))]
         self.files.sort()
         self.max_num_files = min(max_num_files,len(self.files)) if max_num_files is not None else len(self.files)
@@ -100,7 +100,7 @@ class DataSplit():
     def __getitem__(self, idx: int):
         data = torch.load(os.path.join(self.routines_dir, self.files[idx]))
         stacked_edges, stacked_nodes, stacked_activities, stacked_times = data
-        return stacked_times.size()[0], stacked_edges, stacked_nodes, stacked_activities, stacked_times, self.time_encoder(stacked_times)
+        return stacked_times.size()[0], stacked_edges, stacked_nodes, stacked_activities, stacked_times, self.time_encoder(stacked_times), self.active_edges.unsqueeze(0).repeat(stacked_times.size()[0],1,1)
 
 
 class RoutinesDataset():
