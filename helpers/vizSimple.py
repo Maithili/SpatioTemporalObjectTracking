@@ -141,7 +141,7 @@ def method_label(name, ablation='default'):
     name_dict = all_name_dict[ablation]
     return name_dict[name]
 
-filenames = ['roc_inc_dest', 'roc_obj_only', 'num_changes', 'recall_by_type', 'recall_by_activity', 'UnmovedViolin', 'Moved', 'Moved_Line']
+filenames = ['roc_inc_dest', 'roc_obj_only', 'num_changes', 'recall_by_type', 'recall_by_activity', 'UnmovedViolin', 'Moved', 'Moved_Line', 'Activity']
 
 
 def visualize_eval_breakdowns(data, names, colors, markers, activity_difficulty=None):
@@ -153,7 +153,8 @@ def visualize_eval_breakdowns(data, names, colors, markers, activity_difficulty=
     f6, ax_succes_on_unmoved = plt.subplots(1,3)
     f7, ax_breakdown_on_moved = plt.subplots(1,2)
     f8, ax_breakdown_on_moved_line = plt.subplots(1,2)
-    figs = [f1, f2, f3, f4, f5, f6, f7, f8]
+    f9, ax_activity = plt.subplots()
+    figs = [f1, f2, f3, f4, f5, f6, f7, f8, f9]
 
     for ax in [ax_roc, ax_roc_onlyobj]:
         for f in [0.2, 0.4, 0.6]:
@@ -233,6 +234,8 @@ def visualize_eval_breakdowns(data, names, colors, markers, activity_difficulty=
         ax_roc.scatter(recalls, precisions, marker=markers[sample_num], label=names[sample_num], color=colors[sample_num], alpha=alphas)
         ax_roc_onlyobj.scatter(recalls_objonly, precisions_objonly, marker=markers[sample_num], label=names[sample_num], color=colors[sample_num], alpha=alphas)
 
+        ax_activity.bar(sample_num + offsets, sample_data['activity']['correct']/sample_data['activity']['sum'], color=green, width=width)
+
         # if 'by_change_type' in sample_data['completeness_breakdown'].keys():
         #     ax_recl_by_changetype.plot([1,2,3], [(sample_data['completeness_breakdown']['by_change_type'][ci][0]+sample_data['completeness_breakdown']['by_change_type'][ci][1])/sum(sample_data['completeness_breakdown']['by_change_type'][ci]) for ci in range(3)], linewidth=3, linestyle='dashed', marker=markers[sample_num], color=colors[sample_num], markersize = 20)
         #     ax_recl_by_changetype.plot([1,2,3], [(sample_data['completeness_breakdown']['by_change_type'][ci][0])/sum(sample_data['completeness_breakdown']['by_change_type'][ci]) for ci in range(3)], linewidth=3, label=(names[sample_num]), marker=markers[sample_num], color=colors[sample_num], markersize = 20)
@@ -271,6 +274,12 @@ def visualize_eval_breakdowns(data, names, colors, markers, activity_difficulty=
     ax_breakdown_on_moved[1].set_ylabel("Used Objects", fontsize=35)
     ax_breakdown_on_moved[1].set_xticklabels([(n) for n in names], fontsize=45)
     ax_breakdown_on_moved[1].tick_params(axis = 'y', labelsize=30)
+
+    ax_activity.legend(fontsize=40)
+    ax_activity.set_xticks(np.arange(len(names)))
+    ax_activity.set_ylabel("\% Activities", fontsize=35)
+    ax_activity.set_xticklabels([(n) for n in names], fontsize=45)
+    ax_activity.tick_params(axis = 'y', labelsize=30)
 
     ax_breakdown_on_moved_line[0].legend(fontsize=40)
     ax_breakdown_on_moved_line[0].set_xticks(np.arange(lookahead_steps))
@@ -363,7 +372,7 @@ def average_stats(stats_list):
     # if num_stats == 1:
     #     return stats_list[0]
     for kk in stats_list[0].keys():
-        if kk not in ['moved','unmoved']:
+        if kk not in ['moved','unmoved','activity']:
             continue
         aggregate[kk] = {}
         for k in stats_list[0][kk].keys():
@@ -468,7 +477,7 @@ if __name__ == '__main__':
         'pretrain' : ['ourspt_', 'ours_','FremenStateConditioned', 'LastSeenAndStaticSemantic'],
         'ablations' : ['ours_','ours_allEdges_','ours_timeLinear_'],
         'ablations_activity' : ['original_','ours_','ours_activity25_','ours_activity50_' ,'ours_activity75_'],
-        'custom' : ['original_','ours_']
+        'custom' : ['original_','ours_','ours_activity25_','ours_activity50_' ,'ours_activity75_']
     }
 
 
