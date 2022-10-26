@@ -477,7 +477,7 @@ if __name__ == '__main__':
         'pretrain' : ['ourspt_', 'ours_','FremenStateConditioned', 'LastSeenAndStaticSemantic'],
         'ablations' : ['ours_','ours_allEdges_','ours_timeLinear_'],
         'ablations_activity' : ['original_','ours_','ours_activity25_','ours_activity50_' ,'ours_activity75_'],
-        'custom' : ['original_','ours_','ours_activity25_','ours_activity50_' ,'ours_activity75_']
+        'custom' : ['original_','ours_','ours_activity25_','ours_activity50_' ,'ours_activity75_','ours_activity100_']
     }
 
 

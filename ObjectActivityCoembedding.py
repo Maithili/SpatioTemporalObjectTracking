@@ -98,7 +98,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
         latent_per_graph = self.context_from_graph_encodings(graphs_in)
         assert latent_per_graph.size()[0] == batch_size*sequence_len_plus_one
         latent_per_graph = latent_per_graph.view(batch_size, sequence_len_plus_one, self.embedding_size)
-        latent = latent_per_graph[:,1:,:] - latent_per_graph[:,:-1,:]
+        latent = (latent_per_graph[:,1:,:] - latent_per_graph[:,:-1,:])*1000
         assert latent.size()[0] == batch_size
         assert latent.size()[1] == sequence_len_plus_one - 1
         assert latent.size()[2] == self.embedding_size
@@ -179,7 +179,12 @@ class ObjectActivityCoembeddingModule(LightningModule):
         same = (((xgrid==ygrid).to(int).view(-1)*2)-1).to('cuda')
 
         ### TODO Maithili : Add 'M' parameter
-        return torch.nn.CosineEmbeddingLoss(reduction='mean')(latent_obj[xgrid.reshape(-1),:], latent_act[ygrid.reshape(-1),:], same)
+        latent_loss = torch.nn.CosineEmbeddingLoss(reduction='mean')(latent_obj[xgrid.reshape(-1),:], latent_act[ygrid.reshape(-1),:], same)
+        
+        if self.cfg.latent_regularization is not None:
+            latent_loss += self.cfg.latent_regularization * (torch.mean(torch.norm(latent_obj,dim=-1)) + torch.mean(torch.norm(latent_act,dim=-1)))
+
+        return  latent_loss
 
     def encode_graph(self, graph_seq_nodes, graph_seq_edges, graph_dynamic_edges_mask):
         graph_latents = self.graph_encoder(graph_seq_nodes, graph_seq_edges)

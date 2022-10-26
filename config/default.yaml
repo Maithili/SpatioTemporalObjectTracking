@@ -13,3 +13,4 @@ preprocess_context: True
 edge_importance: predicted
 hidden_layer_size: 20
 finetune: True
+latent_regularization: null
