@@ -12,6 +12,7 @@ from adict import adict
 import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
+import wandb
 from pytorch_lightning.loggers import WandbLogger
 
 from ObjectActivityCoembedding import ObjectActivityCoembeddingModule
@@ -59,7 +60,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     # os.makedirs(output_dir)
 
     # wandb_logger = WandbLogger(name=cfg['NAME'], log_model=True, group = group, tags = tags)
-    wandb_logger = WandbLogger(name=cfg['NAME'], group = group, tags = tags)
+    wandb_logger = WandbLogger(name=cfg['NAME'], group = group, tags = tags, settings=wandb.Settings(start_method="fork"))
     wandb_logger.experiment.config.update(cfg)
 
     model = ObjectActivityCoembeddingModule(model_configs = model_configs, original_model = original_model)

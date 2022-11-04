@@ -15,6 +15,7 @@ from pytorch_lightning.core.lightning import LightningModule
 import torch_geometric.nn as geom_nn
 from GraphTranslatorModule import GraphTranslatorModule
 
+CONCAT = False
 
 class ObjectActivityCoembeddingModule(LightningModule):
     def __init__(self, model_configs, original_model=False):
@@ -27,6 +28,8 @@ class ObjectActivityCoembeddingModule(LightningModule):
         self.embedding_size = self.cfg.c_len
         # self.train_prediction = False
 
+        self.individual_embedding_size = int(self.embedding_size/2) if CONCAT else self.embedding_size
+
         ## Object Transition Encoder
         self.graph_cnn = geom_nn.Sequential('x, edge_index',
                                             [(geom_nn.GCNConv(self.cfg.n_len, self.embedding_size*4), 'x, edge_index -> x'),
@@ -35,21 +38,21 @@ class ObjectActivityCoembeddingModule(LightningModule):
                                             ])
         self.context_from_graph_encodings = nn.Sequential(nn.Linear(self.embedding_size*2, self.embedding_size*2),
                                                           nn.ReLU(),
-                                                          nn.Linear(self.embedding_size*2, self.embedding_size)
+                                                          nn.Linear(self.embedding_size*2, self.individual_embedding_size)
                                                           )
 
-        self.obj_seq_encoder_transformer_layer = torch.nn.TransformerEncoderLayer(self.embedding_size, nhead=2)
-        self.obj_seq_encoder_transformer = torch.nn.TransformerEncoder(self.obj_seq_encoder_transformer_layer, num_layers=1)
+        # self.obj_seq_encoder_transformer_layer = torch.nn.TransformerEncoderLayer(self.embedding_size, nhead=2)
+        # self.obj_seq_encoder_transformer = torch.nn.TransformerEncoder(self.obj_seq_encoder_transformer_layer, num_layers=1)
 
         graph_module = GraphTranslatorModule(model_configs=model_configs)
         self.time_context = graph_module.mlp_context
         self.obj_seq_decoder = graph_module
 
         ## Activity Encoder
-        self.embed_context_activity = nn.Linear(self.cfg.n_activities, self.embedding_size)
+        self.embed_context_activity = nn.Linear(self.cfg.n_activities, self.individual_embedding_size)
 
-        self.activity_seq_encoder_transformer_layer = torch.nn.TransformerEncoderLayer(self.embedding_size, nhead=2)
-        self.activity_seq_encoder_transformer = torch.nn.TransformerEncoder(self.activity_seq_encoder_transformer_layer, num_layers=1)
+        # self.activity_seq_encoder_transformer_layer = torch.nn.TransformerEncoderLayer(self.embedding_size, nhead=2)
+        # self.activity_seq_encoder_transformer = torch.nn.TransformerEncoder(self.activity_seq_encoder_transformer_layer, num_layers=1)
 
         self.activity_decoder_mlp = nn.Sequential(nn.Linear(self.embedding_size, self.embedding_size),
                                                   nn.ReLU(),
@@ -64,12 +67,10 @@ class ObjectActivityCoembeddingModule(LightningModule):
         ### TODO Maithili : Change to cosine embedding loss
         self.predictive_latent_loss = torch.nn.MSELoss()   #(reduction='mean')
         
-    def obj_graph_loss(self, x, y, dyn_edg=None):
-        if dyn_edg is None:
-            dyn_edg = torch.ones_like(y)
-        x[dyn_edg == 0] = -float('inf')
-        dyn_obj = (dyn_edg.sum(-1).view(-1) > 0)
-        return nn.CrossEntropyLoss(reduction='mean')(x.view(-1, x.shape[-1])[dyn_obj], y.argmax(-1).view(-1)[dyn_obj])
+    def obj_graph_loss(self, x, y, dyn_obj=None):
+        if dyn_obj is None:
+            dyn_obj = (torch.ones_like(y)).max(-1).view(-1)
+        return nn.CrossEntropyLoss(reduction='mean')(x.view(-1, x.shape[-1])[dyn_obj.view(-1)], y.argmax(-1).view(-1)[dyn_obj.view(-1)])
 
     def context_loss(self, xc, yc):
         batch_size = xc.size()[0]
@@ -97,11 +98,11 @@ class ObjectActivityCoembeddingModule(LightningModule):
         graphs_in = geom_nn.global_mean_pool(self.graph_cnn(nodes.view(batch_size*sequence_len_plus_one*self.cfg.n_nodes, self.cfg.n_len), all_edges), batch=batch)
         latent_per_graph = self.context_from_graph_encodings(graphs_in)
         assert latent_per_graph.size()[0] == batch_size*sequence_len_plus_one
-        latent_per_graph = latent_per_graph.view(batch_size, sequence_len_plus_one, self.embedding_size)
+        latent_per_graph = latent_per_graph.view(batch_size, sequence_len_plus_one, self.individual_embedding_size)
         latent = (latent_per_graph[:,1:,:] - latent_per_graph[:,:-1,:])*1000
         assert latent.size()[0] == batch_size
         assert latent.size()[1] == sequence_len_plus_one - 1
-        assert latent.size()[2] == self.embedding_size
+        assert latent.size()[2] == self.individual_embedding_size
         return latent
 
     def activity_encoder(self, activity):
@@ -145,9 +146,11 @@ class ObjectActivityCoembeddingModule(LightningModule):
             encoded: batch_size x sequence_length x embedding_size
         """
         if seq_type == 'object':
-            transformer = self.obj_seq_encoder_transformer
+            raise ArgumentError('Object sequence encoder is currently suppressed!')
+            # transformer = self.obj_seq_encoder_transformer
         elif seq_type == 'activity':
-            transformer = self.activity_seq_encoder_transformer
+            raise ArgumentError('Activity sequence encoder is currently suppressed!')
+            # transformer = self.activity_seq_encoder_transformer
         elif seq_type == 'predictive':
             transformer = self.prediction_transformer
         else:
@@ -164,7 +167,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
         encoded = transformer(latents.view(batch_size * sequence_length, self.embedding_size) + time_context.view(batch_size * sequence_length, self.embedding_size), mask=mask).view(batch_size, sequence_length, self.embedding_size)
         return encoded
 
-    def latent_similarity_loss(self, latent_obj, latent_act):
+    def latent_similarity_loss(self, latent_obj, latent_act, margin=0):
         """
         Args:
             latent_obj: batch_size x sequence_len x embedding_size
@@ -179,7 +182,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
         same = (((xgrid==ygrid).to(int).view(-1)*2)-1).to('cuda')
 
         ### TODO Maithili : Add 'M' parameter
-        latent_loss = torch.nn.CosineEmbeddingLoss(reduction='mean')(latent_obj[xgrid.reshape(-1),:], latent_act[ygrid.reshape(-1),:], same)
+        latent_loss = torch.nn.CosineEmbeddingLoss(reduction='mean', margin=margin)(latent_obj[xgrid.reshape(-1),:], latent_act[ygrid.reshape(-1),:], same)
         
         if self.cfg.latent_regularization is not None:
             latent_loss += self.cfg.latent_regularization * (torch.mean(torch.norm(latent_obj,dim=-1)) + torch.mean(torch.norm(latent_act,dim=-1)))
@@ -193,20 +196,30 @@ class ObjectActivityCoembeddingModule(LightningModule):
         input_edges = graph_seq_edges[:,:-1,:,:]
         output_edges = graph_seq_edges[:,1:,:,:]
         batch_size, sequence_len, _, _ = input_nodes.size()
+        if CONCAT:
+            graph_latents = torch.cat([torch.zeros_like(graph_latents).to('cuda'), graph_latents], dim=-1)
 
         edges_inferred, _, _ = self.obj_seq_decoder(input_edges.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_nodes), 
                                                    input_nodes.view(batch_size*sequence_len, self.cfg.n_nodes, self.cfg.n_len), 
                                                    F.normalize(graph_latents, dim=-1).view(batch_size*sequence_len, self.embedding_size))
 
-        graph_autoenc_loss = self.obj_graph_loss(edges_inferred.view(batch_size, sequence_len, self.cfg.n_nodes, self.cfg.n_nodes), output_edges, graph_dynamic_edges_mask[:,:-1,:,:])
+        edges_inferred = edges_inferred.view(batch_size, sequence_len, self.cfg.n_nodes, self.cfg.n_nodes)
 
-        return graph_latents, graph_autoenc_loss
+        edges_inferred[graph_dynamic_edges_mask[:,:-1,:,:] == 0] = -float('inf')
+        dyn_obj = (graph_dynamic_edges_mask[:,:-1,:,:].sum(-1) > 0)
+        graph_autoenc_loss = self.obj_graph_loss(edges_inferred, output_edges, dyn_obj)
+        graph_autoenc_accuracy = (edges_inferred.argmax(-1) == output_edges.argmax(-1))[dyn_obj].sum()/torch.numel(edges_inferred.argmax(-1)[dyn_obj])
+
+        return graph_latents, graph_autoenc_loss, graph_autoenc_accuracy
 
     def encode_activity(self, activity_seq):
         activity_latents = self.activity_encoder(F.one_hot(activity_seq.to(int), num_classes=self.cfg.n_activities).to(torch.float32))
+        if CONCAT:
+            activity_latents = torch.cat([activity_latents, torch.zeros_like(activity_latents).to('cuda')], dim=-1)
         # activity_latents = self.seq_encoder(activity_latents, time_context, seq_type='activity')
-        _, activity_autoenc_loss = self.activity_decoder(F.normalize(activity_latents, dim=-1), ground_truth=activity_seq)
-        return activity_latents, activity_autoenc_loss
+        activity_inferred, activity_autoenc_loss = self.activity_decoder(F.normalize(activity_latents, dim=-1), ground_truth=activity_seq)
+        activity_autoenc_accuracy = (activity_seq == activity_inferred.argmax(-1)).sum()/torch.numel(activity_seq)
+        return activity_latents, activity_autoenc_loss, activity_autoenc_accuracy
 
     def predict(self, latents, time_context, latents_expected=None):
         batch_size, sequence_len, _ = latents.size()
@@ -215,31 +228,42 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
         latent_predictive_loss = None
         if latents_expected is not None:
-            latent_predictive_loss = self.predictive_latent_loss(pred_latents, latents_expected)    # , target=torch.Tensor([1]).to('cuda'))
+            latent_predictive_loss = self.latent_similarity_loss(pred_latents, latents_expected, margin=1.0)
+            # latent_predictive_loss = self.predictive_latent_loss(pred_latents, latents_expected)    # , target=torch.Tensor([1]).to('cuda'))
         
         return pred_latents, latent_predictive_loss
 
-    def decode(self, latents, input_nodes, input_edges, dynamic_edges_mask, output_edges=None, output_activity=None):
+    def decode_graph(self, latents, input_nodes, input_edges, dynamic_edges_mask, output_edges=None):
         batch_size, sequence_len, _, _ = input_edges.size()
 
         pred_edges, _, _ = self.obj_seq_decoder(input_edges.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_nodes), 
-                                                   input_nodes.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_len), 
-                                                   latents.view(batch_size*(sequence_len), self.embedding_size))
+                                                input_nodes.view(batch_size*(sequence_len), self.cfg.n_nodes, self.cfg.n_len), 
+                                                latents.view(batch_size*(sequence_len), self.embedding_size))
         pred_edges = pred_edges.view(batch_size, sequence_len, self.cfg.n_nodes, self.cfg.n_nodes)
 
         graph_pred_loss = None
         if output_edges is not None:
             assert (input_edges[dynamic_edges_mask == 0] == output_edges[dynamic_edges_mask == 0]).all()
-            graph_pred_loss = self.obj_graph_loss(pred_edges, output_edges, dynamic_edges_mask)
+            pred_edges[dynamic_edges_mask == 0] = -float('inf')
+            dyn_obj = (dynamic_edges_mask.sum(-1) > 0)
+            graph_pred_loss = self.obj_graph_loss(pred_edges, output_edges, dyn_obj)
         
-        pred_edges[dynamic_edges_mask == 0] = -float('inf')
         pred_edges = F.softmax(pred_edges, dim=-1)
         pred_edges[dynamic_edges_mask == 0] = input_edges[dynamic_edges_mask == 0]
 
+        graph_pred_accuracy = 0
+        if output_edges is not None:
+            graph_pred_accuracy = (pred_edges.argmax(-1) == output_edges.argmax(-1))[dyn_obj].sum()/torch.numel(pred_edges.argmax(-1)[dyn_obj])
+
+        return pred_edges, graph_pred_loss, graph_pred_accuracy
+
+    def decode_activity(self, latents, output_activity=None):
+
         pred_activity, activity_pred_loss = self.activity_decoder(latents, ground_truth=output_activity)
-
-        return pred_edges, pred_activity, graph_pred_loss, activity_pred_loss
-
+        activity_pred_accuracy = 0
+        if output_activity is not None:
+            activity_pred_accuracy = (pred_activity.argmax(-1) == output_activity).sum()/torch.numel(output_activity)
+        return pred_activity, activity_pred_loss, activity_pred_accuracy
 
     def forward(self, graph_seq_nodes, graph_seq_edges, graph_dynamic_edges_mask, activity_seq, time_context, graph_seq_dyn_edges=None):
         """
@@ -273,51 +297,76 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
         if not self.original_model:
 
-            graph_latents, graph_autoenc_loss = self.encode_graph(graph_seq_nodes, graph_seq_edges, graph_dynamic_edges_mask)
+            graph_latents, graph_autoenc_loss, accuracy_object_autoenc = self.encode_graph(graph_seq_nodes, graph_seq_edges, graph_dynamic_edges_mask)
 
-            activity_latents, activity_autoenc_loss = self.encode_activity(activity_seq)
+            activity_latents, activity_autoenc_loss, accuracy_activity_autoenc = self.encode_activity(activity_seq)
         
-            latent_similarity_loss = self.latent_similarity_loss(graph_latents, activity_latents)
-
             keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
+
+            _, cross_graph_pred_loss, cross_accuracy_object = self.decode_graph(latents=activity_latents, 
+                                                                        input_nodes=graph_seq_nodes[:,:-1,:,:],
+                                                                        input_edges=graph_seq_edges[:,:-1,:,:],
+                                                                        dynamic_edges_mask=graph_dynamic_edges_mask[:,:-1,:,:],
+                                                                        output_edges=graph_seq_edges[:,1:,:,:])
+
+            _, cross_activity_pred_loss, cross_accuracy_activity = self.decode_activity(latents=graph_latents, 
+                                                                                    output_activity=activity_seq)
+                                                                                            
+            latent_similarity_loss = self.latent_similarity_loss(graph_latents, activity_latents, margin=0.5)
+            
+            
             latents = F.normalize(graph_latents + (activity_latents * keep_activity_mask), dim=-1)
 
             ## Prediction
             pred_latents, latent_predictive_loss = self.predict(latents[:,:-1], 
                                                                 time_context[:,:-1], 
                                                                 latents_expected=latents[:,1:])
+            next_pred_latents = pred_latents
+            for i in range(self.cfg.latent_overshoot):
+                next_pred_latents, additional_latent_predictive_loss = self.predict(next_pred_latents[:,:-1], 
+                                                                    time_context[:,i+1:-1], 
+                                                                    latents_expected=latents[:,i+2:])
+                latent_predictive_loss += additional_latent_predictive_loss
 
+            pred_edges, graph_pred_loss, accuracy_object = self.decode_graph(latents=pred_latents, 
+                                                                            input_nodes=input_nodes_forward,
+                                                                            input_edges=input_edges_forward,
+                                                                            dynamic_edges_mask=graph_dynamic_edges_mask[:,1:-1,:,:],
+                                                                            output_edges=output_edges_forward)
 
-
-            pred_edges, pred_activity, graph_pred_loss, activity_pred_loss = self.decode(latents=pred_latents, 
-                                                                                        input_nodes=input_nodes_forward,
-                                                                                        input_edges=input_edges_forward,
-                                                                                        dynamic_edges_mask=graph_dynamic_edges_mask[:,1:-1,:,:],
-                                                                                        output_edges=output_edges_forward,
+            pred_activity, activity_pred_loss, accuracy_activity = self.decode_activity(latents=pred_latents, 
                                                                                         output_activity=activity_seq[:,1:])
                                                                                 
             latent_magn = {'object' : torch.mean(torch.linalg.norm(graph_latents, dim=-1)),
                            'activity' : torch.mean(torch.linalg.norm(activity_latents, dim=-1))}
                                                     
         else:
-            pred_edges, pred_activity, graph_pred_loss, activity_pred_loss = self.decode(latents=time_context[:,:-1], 
-                                                                                        input_nodes=input_nodes_forward,
-                                                                                        input_edges=input_edges_forward,
-                                                                                        dynamic_edges_mask=graph_dynamic_edges_mask[:,1:-1,:,:],
-                                                                                        output_edges=output_edges_forward,
+            pred_edges, graph_pred_loss, accuracy_object = self.decode_graph(latents=time_context[:,:-1], 
+                                                                            input_nodes=input_nodes_forward,
+                                                                            input_edges=input_edges_forward,
+                                                                            dynamic_edges_mask=graph_dynamic_edges_mask[:,1:-1,:,:],
+                                                                            output_edges=output_edges_forward)
+            pred_activity, activity_pred_loss, accuracy_activity = self.decode_activity(latents=time_context[:,:-1], 
                                                                                         output_activity=activity_seq[:,1:])
 
             graph_autoenc_loss = torch.Tensor([0]).to('cuda')
             activity_autoenc_loss = torch.Tensor([0]).to('cuda')
             latent_similarity_loss = torch.Tensor([0]).to('cuda')
             latent_predictive_loss = torch.Tensor([0]).to('cuda')
+            cross_graph_pred_loss = torch.Tensor([0]).to('cuda')
+            cross_accuracy_object = torch.Tensor([0]).to('cuda') 
+            cross_activity_pred_loss = torch.Tensor([0]).to('cuda')
+            cross_accuracy_activity = torch.Tensor([0]).to('cuda')
 
             latent_magn = {'object' : 0,
                            'activity' : 0}
 
-        accuracy_object = (output_edges_forward.argmax(-1) == pred_edges.argmax(-1)).sum()/torch.numel(output_edges_forward.argmax(-1))
-        accuracy_activity = (activity_seq[:,1:] == pred_activity.argmax(-1)).sum()/torch.numel(activity_seq[:,1:])
+            accuracy_object_autoenc = torch.Tensor([0]).to('cuda')
+            accuracy_activity_autoenc = torch.Tensor([0]).to('cuda')
 
+        # accuracy_object = (output_edges_forward.argmax(-1) == pred_edges.argmax(-1)).sum()/torch.numel(output_edges_forward.argmax(-1))
+        # accuracy_activity = (activity_seq[:,1:] == pred_activity.argmax(-1)).sum()/torch.numel(activity_seq[:,1:])
+        
         # else:
         #     graph_pred_loss = 0
         #     activity_pred_loss = 0
@@ -333,14 +382,20 @@ class ObjectActivityCoembeddingModule(LightningModule):
             'loss' : {
                       'object_autoencoder': graph_autoenc_loss,
                       'object_pred': graph_pred_loss,
+                      'object_cross_pred': cross_graph_pred_loss,
                       'activity_autoencoder': activity_autoenc_loss,
                       'activity_pred': activity_pred_loss,
+                      'activity_cross_pred': cross_activity_pred_loss,
                       'latent_similarity': latent_similarity_loss,
                       'latent_pred': latent_predictive_loss
                       },
             'accuracies' : {
                         'object': accuracy_object,
-                        'activity': accuracy_activity
+                        'activity': accuracy_activity,
+                        'object_autoenc': accuracy_object_autoenc,
+                        'activity_autoenc': accuracy_activity_autoenc,
+                        'object_cross': cross_accuracy_object,
+                        'activity_cross': cross_accuracy_activity,
             },
             'latents' : latent_magn
         }
@@ -358,11 +413,11 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
         if not self.original_model:
 
-            graph_latents, _ = self.encode_graph(graph_seq_nodes, graph_seq_edges, graph_dyn_edges)
+            graph_latents, _, _ = self.encode_graph(graph_seq_nodes, graph_seq_edges, graph_dyn_edges)
             latents = graph_latents
 
             if activity_seq is not None:
-                activity_latents, _ = self.encode_activity(activity_seq)
+                activity_latents, _, _ = self.encode_activity(activity_seq)
                 keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
                 latents = graph_latents + (activity_latents * keep_activity_mask)
 
@@ -378,7 +433,8 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
             for step in range(num_steps):
                 latents_forward, _ = self.predict(latents_forward, time_context[:,step:step+routine_len])
-                pred_edges, pred_activity, _, _ = self.decode(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward, dynamic_edges_mask=graph_dyn_edges[:,1:1+routine_len,:,:])
+                pred_edges, _, _ = self.decode_graph(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward, dynamic_edges_mask=graph_dyn_edges[:,1:1+routine_len,:,:])
+                pred_activity, _, _ = self.decode_activity(latents=latents_forward)
 
                 # input_nodes_forward = input_nodes_forward[:,1:,:,:]
                 input_edges_forward = pred_edges
@@ -397,7 +453,8 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
             for step in range(num_steps):
                 latents_forward = time_context[:,step:step+routine_len]
-                pred_edges, pred_activity, _, _ = self.decode(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward, dynamic_edges_mask=graph_dyn_edges[:,1:1+routine_len,:,:])
+                pred_edges, _, _ = self.decode_graph(latents=latents_forward, input_nodes=input_nodes_forward, input_edges=input_edges_forward, dynamic_edges_mask=graph_dyn_edges[:,1:1+routine_len,:,:])
+                pred_activity, _, _ = self.decode_activity(latents=latents_forward)
 
                 # input_nodes_forward = input_nodes_forward[:,1:,:,:]
                 input_edges_forward = pred_edges
@@ -421,8 +478,18 @@ class ObjectActivityCoembeddingModule(LightningModule):
         if not self.original_model:
             res += results['loss']['object_autoencoder']
             res += results['loss']['activity_autoencoder']
-            res += results['loss']['latent_similarity']
-            res += results['loss']['latent_pred']
+            if self.cfg.train_latent_pred:
+                res += results['loss']['latent_pred']
+            else:
+                res += results['loss']['object_pred']
+                res += results['loss']['activity_pred']
+                
+            if self.cfg.train_latent_similarity:  
+                res += results['loss']['latent_similarity']
+            else:
+                res += results['loss']['object_cross_pred']
+                res += results['loss']['activity_cross_pred']
+        
         else:
             res += results['loss']['object_pred']
             res += results['loss']['activity_pred']
@@ -431,6 +498,7 @@ class ObjectActivityCoembeddingModule(LightningModule):
     def test_step(self, batch, batch_idx):
         results = self(batch['nodes'], batch['edges'], batch['dynamic_edges_mask'], batch['activity'], batch['context_time'])
         self.log('Test loss',results['loss'])
+        self.log('Test accuracy',results['accuracies'])
         # self.log('Test',results['details'])
         return 
 

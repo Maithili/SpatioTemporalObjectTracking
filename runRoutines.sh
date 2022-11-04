@@ -1,20 +1,20 @@
-# #!/bin/bash
-# # exit when any command fails
-# set -e
+#!/bin/bash
+# exit when any command fails
+set -e
 
-# # keep track of the last executed command
-# trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
-# # echo an error message before exiting
-# trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
+# keep track of the last executed command
+trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
+# echo an error message before exiting
+trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
 
 DATE_TIME=`date "+%m%d_%H%M"`
 
-logs_dir="logs/"$DATE_TIME"_object_activity"
-tag="LatentRegularized"
+logs_dir="logs/"$DATE_TIME"_activity"
+tag=""
 
 for train_days in 50
 do    
-    for dataset in $(find data/personaWithoutClothes/ -mindepth 1 -maxdepth 1)
+    for dataset in data/personaWithoutClothes/persona0 data/personaWithoutClothes/persona1 data/personaWithoutClothes/persona3 data/personaWithoutClothes/persona4 
     do
         dataset_name=$(basename $dataset)
         python3 ./run_activity.py --path=$dataset --name=ours --train_days=$train_days --logs_dir=$logs_dir/$train_days --write_ckpt --tags=$tag

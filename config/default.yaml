@@ -14,3 +14,6 @@ edge_importance: predicted
 hidden_layer_size: 20
 finetune: True
 latent_regularization: null
+latent_overshoot: 5
+train_latent_pred: True
+train_latent_similarity: False
