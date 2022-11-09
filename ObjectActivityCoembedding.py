@@ -291,6 +291,9 @@ class ObjectActivityCoembeddingModule(LightningModule):
         assert self.cfg.n_nodes == num_f_nodes, (str(self.cfg.n_nodes) +'!='+ str(num_f_nodes))
         assert self.cfg.n_nodes == num_t_nodes, (str(self.cfg.n_nodes) +'!='+ str(num_t_nodes))
 
+        activity_seq_masked = activity_seq
+        activity_seq_masked.masked_fill_((torch.rand_like(activity_seq) < self.cfg.activity_dropout_prob).to(bool), self.cfg.null_activity_idx)
+
         input_nodes_forward = graph_seq_nodes[:,1:-1,:,:]
         input_edges_forward = graph_seq_edges[:,1:-1,:,:]
         output_edges_forward = graph_seq_edges[:,2:,:,:]
@@ -299,9 +302,8 @@ class ObjectActivityCoembeddingModule(LightningModule):
 
             graph_latents, graph_autoenc_loss, accuracy_object_autoenc = self.encode_graph(graph_seq_nodes, graph_seq_edges, graph_dynamic_edges_mask)
 
-            activity_latents, activity_autoenc_loss, accuracy_activity_autoenc = self.encode_activity(activity_seq)
+            activity_latents, activity_autoenc_loss, accuracy_activity_autoenc = self.encode_activity(activity_seq_masked)
         
-            keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
 
             _, cross_graph_pred_loss, cross_accuracy_object = self.decode_graph(latents=activity_latents, 
                                                                         input_nodes=graph_seq_nodes[:,:-1,:,:],
@@ -310,12 +312,12 @@ class ObjectActivityCoembeddingModule(LightningModule):
                                                                         output_edges=graph_seq_edges[:,1:,:,:])
 
             _, cross_activity_pred_loss, cross_accuracy_activity = self.decode_activity(latents=graph_latents, 
-                                                                                    output_activity=activity_seq)
+                                                                                    output_activity=activity_seq_masked)
                                                                                             
             latent_similarity_loss = self.latent_similarity_loss(graph_latents, activity_latents, margin=0.5)
             
             
-            latents = F.normalize(graph_latents + (activity_latents * keep_activity_mask), dim=-1)
+            latents = F.normalize(graph_latents + activity_latents, dim=-1)
 
             ## Prediction
             pred_latents, latent_predictive_loss = self.predict(latents[:,:-1], 
@@ -411,15 +413,14 @@ class ObjectActivityCoembeddingModule(LightningModule):
         activity_seq = batch.get('activity')[:,:-1]
         time_context = batch.get('context_time')[:,:-1,:]
 
+        activity_seq_masked = activity_seq
+        activity_seq_masked.masked_fill_((torch.rand_like(activity_seq) < self.cfg.activity_dropout_prob).to(bool), self.cfg.null_activity_idx)
+
         if not self.original_model:
 
             graph_latents, _, _ = self.encode_graph(graph_seq_nodes, graph_seq_edges, graph_dyn_edges)
-            latents = graph_latents
-
-            if activity_seq is not None:
-                activity_latents, _, _ = self.encode_activity(activity_seq)
-                keep_activity_mask = (torch.rand((activity_latents.size()[0], activity_latents.size()[1])) > self.cfg.activity_dropout_prob).unsqueeze(-1).to('cuda')
-                latents = graph_latents + (activity_latents * keep_activity_mask)
+            activity_latents, _, _ = self.encode_activity(activity_seq_masked)
+            latents = graph_latents + activity_latents
 
             latents = F.normalize(latents, dim=-1)
 
