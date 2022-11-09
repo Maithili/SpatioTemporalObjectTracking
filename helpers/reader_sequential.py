@@ -71,7 +71,7 @@ class OneHotEmbedder():
 
 class ConceptNetEmbedder():
 
-    def __init__(self, file='helpers/numberbatch-en.txt'):
+    def __init__(self, file='helpers/numberbatch-en-19.08.txt'):
         '''
         Loads Conceptnet Numberbatch from the text file
         Args:
@@ -83,21 +83,16 @@ class ConceptNetEmbedder():
 
         # Create dictionary of object: vector
         self.embeddings_index = dict()
-
         with open(file, 'r', encoding="utf8") as f:
-
             # Parse text file to populate dictionary
             for line in f:
                 values = line.split()
                 word = values[0]
-
                 coefs = np.asarray(values[1:], dtype='float32')
                 self.embeddings_index[word] = coefs
 
         self.num_feats = len(coefs)
-
-        print('ConceptNet loaded')
-
+        print('ConceptNet loaded !!!')
         self.synonyms = {
             'tvstand': 'tv_stand',
             'cookingpot': 'cooking_pot',
