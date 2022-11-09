@@ -61,6 +61,71 @@ def _sparsify(edges):
 #     return components
 
 
+
+class OneHotEmbedder():
+    def __init__(self):
+        pass
+
+    def get_func(self, class_list):
+        return lambda idxs: torch.nn.functional.one_hot(idxs.to(int))
+
+class ConceptNetEmbedder():
+
+    def __init__(self, file='helpers/numberbatch-en.txt'):
+        '''
+        Loads Conceptnet Numberbatch from the text file
+        Args:
+            file: path to numberbatch_en.txt file (must be on local system)
+        Output:
+            embeddings_index: dictionary mapping objects to their numberbatch embbs
+            num_feats: length of numberbatch embedding
+        '''
+
+        # Create dictionary of object: vector
+        self.embeddings_index = dict()
+
+        with open(file, 'r', encoding="utf8") as f:
+
+            # Parse text file to populate dictionary
+            for line in f:
+                values = line.split()
+                word = values[0]
+
+                coefs = np.asarray(values[1:], dtype='float32')
+                self.embeddings_index[word] = coefs
+
+        self.num_feats = len(coefs)
+
+        print('ConceptNet loaded')
+
+        self.synonyms = {
+            'tvstand': 'tv_stand',
+            'cookingpot': 'cooking_pot',
+            'knifeblock': 'knife_block',
+        }
+
+    def __call__(self, token):
+        token = token.lower()
+        if token in self.synonyms: token = self.synonyms[token]
+        if token in self.embeddings_index:
+            assert len(self.embeddings_index[token]) == self.num_feats
+            return self.embeddings_index[token]
+        elif '_' in token:
+            subtokens = token.split('_')
+            try:
+                assert all([len(self.embeddings_index[t]) == self.num_feats for t in subtokens])
+                return sum([self.embeddings_index[t] for t in subtokens])
+            except:
+                raise KeyError(f'{subtokens} cannot be embedded through ConceptNet')
+        raise KeyError(f'{token} cannot be embedded through ConceptNet')
+
+    def get_func(self, class_list):
+        embedding_list = [self(cls) for cls in class_list]
+        embedding_tensor = torch.Tensor(np.array(embedding_list))
+        embedding_func = lambda idxs : torch.matmul(torch.nn.functional.one_hot(idxs.to(int)).float(), embedding_tensor.float())
+        return embedding_func
+
+
 class CollateToDict():
     def __init__(self, dict_labels):
         self.dict_labels = dict_labels
@@ -85,7 +150,7 @@ class CollateToDict():
         return data
 
 class DataSplit():
-    def __init__(self, routines_dir, time_encoder, active_edges, max_num_files=None):
+    def __init__(self, routines_dir, time_encoder, active_edges, max_num_files=None, node_embedder=OneHotEmbedder):
         self.time_encoder = time_encoder
         self.active_edges = active_edges
         self.routines_dir = routines_dir
@@ -93,6 +158,7 @@ class DataSplit():
         self.files = [name for name in os.listdir(self.routines_dir) if os.path.isfile(os.path.join(self.routines_dir, name))]
         self.files.sort()
         self.max_num_files = min(max_num_files,len(self.files)) if max_num_files is not None else len(self.files)
+        self.node_embedder = node_embedder
 
     def __len__(self):
         return self.max_num_files
@@ -100,14 +166,15 @@ class DataSplit():
     def __getitem__(self, idx: int):
         data = torch.load(os.path.join(self.routines_dir, self.files[idx]))
         stacked_edges, stacked_nodes, stacked_activities, stacked_times = data
-        return stacked_times.size()[0], stacked_edges, stacked_nodes, stacked_activities, stacked_times, self.time_encoder(stacked_times), self.active_edges.unsqueeze(0).repeat(stacked_times.size()[0],1,1)
+        return stacked_times.size()[0], stacked_edges, self.node_embedder(stacked_nodes), stacked_activities, stacked_times, self.time_encoder(stacked_times), self.active_edges.unsqueeze(0).repeat(stacked_times.size()[0],1,1)
 
 
 class RoutinesDataset():
     def __init__(self, data_path, 
                  time_encoder = time_external, 
                  batch_size = 1,
-                 max_routines = (None, None)):
+                 max_routines = (None, None),
+                 use_conceptnet = True):
 
         with open(os.path.join(data_path, 'common_data.json')) as f:
             self.common_data = json.load(f)
@@ -128,11 +195,16 @@ class RoutinesDataset():
         self.node_idx_from_id = {int(k):v for k,v in self.common_data['node_idx_from_id'].items()}
         self.edge_keys = self.common_data['edge_keys']
         self.static_nodes = self.common_data['static_nodes']
+
+        if use_conceptnet:
+            node_embedder = ConceptNetEmbedder()
+        else:
+            node_embedder = OneHotEmbedder()
         
             
         # Generate train and test loaders
-        self.train = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.active_edges, max_num_files=max_routines[0])
-        self.test = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.active_edges, max_num_files=max_routines[1])
+        self.train = DataSplit(os.path.join(data_path,'train'), self.time_encoder, self.active_edges, max_num_files=max_routines[0], node_embedder=node_embedder.get_func(self.node_classes))
+        self.test = DataSplit(os.path.join(data_path,'test'), self.time_encoder, self.active_edges, max_num_files=max_routines[1], node_embedder=node_embedder.get_func(self.node_classes))
         print('Train split has ',len(self.train),' routines')
         print('Test split has ',len(self.test),' routines')
 
@@ -143,6 +215,7 @@ class RoutinesDataset():
         self.params['c_len'] = model_data['context_time'].size()[-1]
         print(self.common_data['activities'], len(self.common_data['activities']))
         self.params['n_activities'] = len(self.common_data['activities'])
+        self.params['null_activity_idx'] = self.common_data['activities'].index(None)
 
     def get_train_loader(self):
         return DataLoader(self.train, num_workers=min(4,os.cpu_count()), batch_size=self.params['batch_size'], collate_fn=self.train.collate_fn)
@@ -290,10 +363,10 @@ class ProcessDataset():
 
     def read_graphs(self, graphs):
         num_nodes = len(self.common_data['node_ids'])
-        node_features = np.zeros((len(graphs), num_nodes, num_nodes))
+        node_features = np.zeros((len(graphs), num_nodes))
         edge_features = np.zeros((len(graphs), num_nodes, num_nodes))
         for i,graph in enumerate(graphs):
-            node_features[i,:,:num_nodes] = np.eye(num_nodes)
+            node_features[i,:] = np.arange(num_nodes)
             for e in graph['edges']:
                 if e['relation_type'] in self.common_data['edge_keys'] and e['from_id'] in self.common_data['node_ids'] and e['to_id'] in self.common_data['node_ids']:
                     edge_features[i,self.common_data['node_idx_from_id'][e['from_id']],self.common_data['node_idx_from_id'][e['to_id']]] = 1
