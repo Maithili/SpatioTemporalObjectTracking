@@ -31,5 +31,10 @@ If you're curious about the code itself:
 
 ### Citation
 ```
-Anonymous
+@inproceedings{patel2022proactive,
+  title={Proactive Robot Assistance via Spatio-Temporal Object Modeling},
+  author={Patel, Maithili and Chernova, Sonia},
+  booktitle={6th Annual Conference on Robot Learning},
+  year={2022}
+}
 ```
