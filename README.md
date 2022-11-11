@@ -1,5 +1,5 @@
 # SpatioTemporalObjectTracking
-Graph translation network for modeling spatio-temporal dynamics of household objects for our paper 'Proactive Robot Assistance via Spatio-Temporal Object Modeling'. The model reads in an input graph representing the environment and time, and translates it to a probabilistic output graph representing the environment at the next time step.
+Graph translation network for modeling spatio-temporal dynamics of household objects for our paper 'Proactive Robot Assistance via Spatio-Temporal Object Modeling'. The model reads in an input graph representing the environment and time, and translates it to a probabilistic output graph representing the environment at the next time step. It uses the HOMER dataset which can be found [here](https://github.com/GT-RAIL/rail_tasksim/tree/homer/routines).
 
 <img src="GNNarchitecture.png"
      alt="GNN Architecture"
@@ -22,7 +22,7 @@ Some common things to do are:
 
 
 
-A processed version of the [HOMER dataset]() used for the results is present in the `data/` directory of this repository, and can be used directly with the model using the above commands. In order to use a different dataset generated using HOMER, first copy the dataset into `data/` directory, and then run `prepRoutines.sh` to run the necessary pre-processing. This needs to be done only once.
+A processed version of the [HOMER dataset](https://github.com/GT-RAIL/rail_tasksim/tree/homer/routines) used for the results is present in the `data/` directory of this repository, and can be used directly with the model using the above commands. In order to use a different dataset generated using HOMER, first copy the dataset into `data/` directory, and then run `prepRoutines.sh` to run the necessary pre-processing. This needs to be done only once.
 
 If you're curious about the code itself:
 - The model and it's helper functions can be found in `GraphTranslatorModule.py`
