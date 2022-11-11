@@ -6,7 +6,6 @@ import shutil
 import argparse
 import random
 import json
-from sqlite3 import SQLITE_CREATE_TEMP_TABLE
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import ttest_ind
@@ -96,6 +95,7 @@ def method_label(name, ablation='default'):
     all_name_dict['default'] = {}
     all_name_dict['baselines'] = {
             'ours_50epochs':'Ours',
+            'ours':'Ours',
             'FremenStateConditioned':'FreMEn',
             'LastSeenAndStaticSemantic':'Stat Sem'
             }
@@ -111,7 +111,9 @@ def method_label(name, ablation='default'):
             'ours_activity75_50epochs':'Activity 75',
             'ours_activity100_50epochs':'Activity 100',
             'ours_allEdges_50epochs':'w/o Attn',
-            'ours_timeLinear_50epochs':'w/o Time'
+            'ours_allEdges':'w/o Attn',
+            'ours_timeLinear_50epochs':'w/o Time',
+            'ours_timeLinear':'w/o Time',
             }
     name_dict = all_name_dict[ablation]
     return name_dict[name]
@@ -723,6 +725,7 @@ if __name__ == '__main__':
 
     datasets = os.listdir(dirs[0])
 
+    datasets = ['persona4']
 
     if PLOT_CONFIDENCES:
         confidences = [float(k) for k in json.load(open(os.path.join(dirs[0],datasets[0],'oursconf6_50epochs','evaluation.json')))["with_confidence"].keys()]
@@ -744,9 +747,9 @@ if __name__ == '__main__':
         raise(RuntimeError)
 
     all_methods = {
-        'baselines' : ['FremenStateConditioned', 'LastSeenAndStaticSemantic', 'ours_50epochs'],
-        'pretrain' : ['ourspt_50epochs', 'ours_50epochs'],
-        'ablations' : ['ours_50epochs','ours_allEdges_50epochs','ours_timeLinear_50epochs']
+        'baselines' : ['FremenStateConditioned', 'LastSeenAndStaticSemantic', 'ours'],
+        'pretrain' : ['ourspt', 'ours'],
+        'ablations' : ['ours','ours_allEdges','ours_timeLinear']
     }
 
 

@@ -118,7 +118,7 @@ class GraphTranslatorModule(LightningModule):
         self.class_loss = lambda xc,yc: nn.CrossEntropyLoss(reduction='none')(xc.permute(0,2,1), yc.long())
         self.inference_class = lambda xc: xc.argmax(-1)
 
-        self.context_loss = lambda context_list: sum([torch.nn.CosineEmbeddingLoss()(con, sum(context_list), torch.Tensor([1]).to('cuda')) for con in context_list])
+        self.context_loss = lambda context_list: sum([torch.nn.CosineEmbeddingLoss()(con, context_list[0], torch.Tensor([1]).to('cuda')) for con in context_list])
 
         # self.weighted_combination = nn.Linear(self.num_chebyshev_polys, 1, bias=False)
 
@@ -280,9 +280,9 @@ class GraphTranslatorModule(LightningModule):
               'location':self.inference_location(y_edges)}
 
         # if prev_context is None:
-        #     context_list = [self.get_time_context(batch_in=batch).squeeze(1), self.get_activity_context(batch_in=batch).squeeze(1)]
+        #     context_list = [self.get_activity_context(batch_in=batch).squeeze(1), self.get_time_context(batch_in=batch).squeeze(1)]
         # else:
-        #     context_list = [self.get_time_context(batch_in=batch).squeeze(1), self.get_activity_context(batch_in=batch).squeeze(1), prev_context.squeeze(1)]
+        #     context_list = [self.get_activity_context(batch_in=batch).squeeze(1), self.get_time_context(batch_in=batch).squeeze(1), prev_context.squeeze(1)]
 
         context_list = [time_context]
 
@@ -302,7 +302,7 @@ class GraphTranslatorModule(LightningModule):
         # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
 
         # eval = evaluate(gt=gt['location'], output=output['location'], input=input['location'], evaluate_node=evaluate_node, losses=losses['location'])
-        # loss = {'graph': losses['location'][evaluate_node].mean(), 'context': losses['context'].mean()}
+        # loss = {'graph': 1 * losses['location'][evaluate_node].mean(), 'context': 5 * losses['context'].mean()}
         loss = {'graph' : losses['location'][evaluate_node].mean()}
 
         details = {'input':input, 

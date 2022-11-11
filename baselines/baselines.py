@@ -43,7 +43,7 @@ class TimeConditionedBaseline(Baseline):
 
 
 class LastSeen(StateTimeConditionedBaseline):
-    def __init__(self, cooccurence_freq) -> None:
+    def __init__(self) -> None:
         super().__init__()
 
     def run(self):

@@ -12,9 +12,9 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from GraphTranslatorModule import GraphTranslatorModule
-from reader import RoutinesDataset, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
+from reader import RoutinesDataset, CombinedDataSplits, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
 from encoders import TimeEncodingOptions
-from breakdown_evaluations import evaluate as evaluate_applications_original
+from breakdown_evaluations_simple import evaluate as evaluate_applications_original
 from breakdown_evaluations_human_centric import evaluate as evaluate_applications_new
 from breakdown_evaluations_human_centric_stepahead import evaluate as evaluate_applications_stepahead
 from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned, FremenStateConditioned1, FremenStateConditioned2, FremenStateConditioned3, FremenStateConditioned4, LastSeenAndStaticSemantic2, LastSeenAndStaticSemantic3, LastSeenAndStaticSemantic4, LastSeenAndStaticSemantic5
@@ -104,30 +104,46 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
                 torch.save(model.state_dict(), os.path.join(output_dir_new,'weights.pt'))
     
 
-
 def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, write_ckpt=False, tags=[], train_days=None, logs_dir='logs', finetune=False):
     
     if cfg['NAME'] is None:
         cfg['NAME'] = os.path.basename(data_dir)+'_trial'
 
-    with open(os.path.join(data_dir, 'processed', 'common_data.json')) as f:
+    with open(os.path.join(data_dir, 'processedCorl', 'common_data.json')) as f:
         cfg['DATA_INFO'] = json.load(f)['info']
 
     time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
     time_encoding = time_options(cfg['time_encoding'])
 
-    data = RoutinesDataset(data_path=os.path.join(data_dir,'processed'), 
+    data = RoutinesDataset(data_path=os.path.join(data_dir,'processedCorl'), 
                            time_encoder=time_encoding, 
                            batch_size=cfg['batch_size'],
                            max_routines = (train_days, None))
     
+    # data_root, this_dataset = os.path.split(data_dir)
+    # other_data = os.listdir(data_root)
+    # other_data.remove(this_dataset)
+    # other_pretraining_data = [RoutinesDataset(data_path=os.path.join(data_root, d, 'processedCorl'), 
+    #                                             time_encoder=time_encoding, 
+    #                                             batch_size=cfg['batch_size'],
+    #                                             max_routines = (train_days, None)).train for d in other_data] +  [
+    #                           RoutinesDataset(data_path=os.path.join(data_root, d, 'processedCorl'), 
+    #                                             time_encoder=time_encoding, 
+    #                                             batch_size=cfg['batch_size'],
+    #                                             max_routines = (train_days, None)).test for d in other_data]                            
+
+    # pretrained_train_data = CombinedDataSplits([data.train] + other_pretraining_data)
+
     group = os.path.basename(data_dir)
 
     if baselines:
         cf = data.get_cooccurence_frequency()
         spec = data.get_spectral_components(periods_mins=[float('inf'), 60*24, 60*24/2])
-        for baseline in [LastSeen(cf), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
-            output_dir = os.path.join(logs_dir, group,baseline.__class__.__name__)
+        # cf = pretrained_train_data.get_cooccurence_frequency()
+        # spec = pretrained_train_data.get_spectral_components(periods_mins=[float('inf'), 60*24, 60*24/2])
+        for baseline in [LastSeen(), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
+        # for baseline in [LastSeen()]:
+            output_dir = os.path.join(logs_dir, group, baseline.__class__.__name__) #+"PreTr")
             if os.path.exists(output_dir):
                 n = 1
                 new_dir = output_dir + "_"+str(n)
@@ -139,7 +155,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
             # for routine in data.test:
             #     eval, details, _ = baseline.step(data.test.collate_fn([routine]))
-            _ = evaluate_applications_original(baseline, data, output_dir, learned_model=False)
+            _ = evaluate_applications_original(baseline, data, output_dir, learned_model=False, confidences=cfg['action_probability_thresholds'])
             # _ = evaluate_applications_new(baseline, data, output_dir)
             # evaluation_summary = evaluate_applications_stepahead(baseline, data, output_dir)
 
