@@ -128,6 +128,10 @@ def method_label(name, ablation='default'):
             'noPreTr_':'NoPT',
             'ours_':'Ours',
             'ours_':'Ours',
+            'ours_overshoot_':'OverShoot',
+            'ours_endgoal_pred_': 'GoalPred',
+            'ours_latent_simil_': 'LatentSimil', 
+            'ours_no_overshoot_': 'NoOversht',
             'ours_activity25_':'Act-25',
             'ours_activity50_':'Act-50',
             'ours_activity75_':'Act-75',
@@ -352,12 +356,12 @@ def visualize_eval_breakdowns(data, names, colors, markers, activity_difficulty=
     ax_roc_onlyobj.set_ylabel('Precision')
 
     for fig in figs:
-        fig.set_size_inches(30,15)
+        fig.set_size_inches(45,23)
         fig.tight_layout()
     
-    f1.set_size_inches(10,10)
+    f1.set_size_inches(15,15)
     f1.tight_layout()
-    f2.set_size_inches(10,10)
+    f2.set_size_inches(15,15)
     f2.tight_layout()
 
     return figs, info
@@ -476,8 +480,8 @@ if __name__ == '__main__':
         'baselines' : ['FremenStateConditioned', 'LastSeenAndStaticSemantic', 'ours_'],
         'pretrain' : ['ourspt_', 'ours_','FremenStateConditioned', 'LastSeenAndStaticSemantic'],
         'ablations' : ['ours_','ours_allEdges_','ours_timeLinear_'],
-        'ablations_activity' : ['original_','ours_','ours_activity25_','ours_activity50_' ,'ours_activity75_'],
-        'custom' : ['original_','ours_','ours_activity25_','ours_activity50_' ,'ours_activity75_','ours_activity100_']
+        'ablations_activity' : ['original_','ours_','ours_activity25_','ours_activity50_' ,'ours_activity75_' ,'ours_activity100_'],
+        'custom' : ['original_','ours_', 'ours_latent_simil_', 'ours_no_overshoot_']
     }
 
 
@@ -489,7 +493,7 @@ if __name__ == '__main__':
 
 
     for typ in [
-        # 'ablations_activity', 
+        'ablations_activity', 
         # 'baselines', 
         # 'ablations', 
         # 'pretrain',
@@ -506,7 +510,7 @@ if __name__ == '__main__':
         dirs = [os.path.join(args.path,str(p)) for p in training_days]
 
         methods = all_methods[typ]
-        method_dirs = [[candidate for candidate in os.listdir(os.path.join(dirs[0],datasets[0])) if (candidate.startswith(method) and (len(candidate) < len(method) + 9))][0] for method in methods]
+        method_dirs = [[candidate for candidate in os.listdir(os.path.join(dirs[0],datasets[0])) if (candidate.startswith(method) and (len(candidate) < len(method) + 12))][0] for method in methods]
         print(method_dirs)
 
         combined_dir_out = os.path.join(args.path,'visuals',typ,'combined')
