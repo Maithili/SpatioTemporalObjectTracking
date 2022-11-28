@@ -1,8 +1,0 @@
-numpy
-matplotlib
-sklearn
-scipy
-pytorch-lightning
-lightning-bolts
-wandb
-networkx
