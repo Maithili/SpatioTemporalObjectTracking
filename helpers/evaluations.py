@@ -49,6 +49,78 @@ def _erase_edges(edges, dyn_mask):
     empty_edges = empty_edges/(empty_edges.sum(dim=-1).unsqueeze(-1).repeat(1,1,edges.size()[-1])+1e-8)
     return empty_edges
 
+def update_onestep_metrics(ground_truths, outputs, results, inputs=None, changes_gt=None, changes_out=None, lookahead_step=0):
+    correct = (outputs == ground_truths)
+    wrong = (outputs != ground_truths)
+
+    if changes_gt is None:
+        assert inputs is not None, "Must provide either the inputs or the ground truth changes"
+        changes_gt = ground_truths != inputs
+    if changes_out is None:
+        assert inputs is not None, "Must provide either the inputs or the output changes"
+        changes_out = outputs != inputs
+
+    changes_output_and_gt = deepcopy(np.bitwise_and(changes_out, changes_gt))
+    changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_out, np.bitwise_not(changes_gt)))
+    changes_not_output_and_gt = deepcopy(np.bitwise_and(np.bitwise_not(changes_out), changes_gt))
+    results['moved']['correct'][lookahead_step] += int((correct[changes_output_and_gt]).sum())
+    results['moved']['wrong'][lookahead_step] += int((wrong[changes_output_and_gt]).sum())
+    results['moved']['missed'][lookahead_step] += int((changes_not_output_and_gt).sum())
+    results['unmoved']['fp'][lookahead_step] += int(changes_output_and_not_gt.sum())
+    results['unmoved']['tn'][lookahead_step] += int(deepcopy(np.bitwise_and(np.bitwise_not(changes_out), np.bitwise_not(changes_gt))).sum())
+
+    return results
+    
+
+
+def update_confidence_based_metrics(routine_ground_truths, routine_ground_truth_step, routine_outputs_conf, confidences, lookahead_steps, results):
+    for conf in confidences:
+        for ls in range(lookahead_steps):
+            changes_output_for_step = deepcopy(routine_outputs_conf[conf]['step']  <= ls)
+            changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
+            
+            results[conf] = update_onestep_metrics(ground_truths = routine_ground_truths, 
+                                                   outputs = routine_outputs_conf[conf]['output'], 
+                                                   results = results[conf],
+                                                   changes_gt = changes_gt_for_step,
+                                                   changes_out = changes_output_for_step,
+                                                   lookahead_step = ls)
+    return results
+            
+
+def update_additional_metrics(routine_outputs, routine_output_step, routine_ground_truths, routine_ground_truth_step, routine_change_types, changes_output_all, lookahead_steps, num_nodes, num_change_types, results_by_obj, results_other):
+    correct = deepcopy(routine_outputs == routine_ground_truths).to(int)
+    wrong = deepcopy(routine_outputs != routine_ground_truths).to(int)
+
+    for ls in range(lookahead_steps):
+        changes_output_for_step = deepcopy(routine_output_step  <= ls)
+        changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
+        changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
+        changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
+        changes_not_output_and_gt = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))
+        changes_tn = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step)))
+        origins = np.ones_like(routine_ground_truths) * np.arange(num_nodes)
+        results_by_obj[ls]['correct'] += ([(o,int(d)) for o,d in zip(origins[(correct * changes_output_and_gt).to(bool)], routine_ground_truths[(correct * changes_output_and_gt).to(bool)])])
+        results_by_obj[ls]['wrong'] += ([(o,int(d)) for o,d in zip(origins[(wrong * changes_output_and_gt).to(bool)], routine_ground_truths[(wrong * changes_output_and_gt).to(bool)])])
+        results_by_obj[ls]['missed'] += ([(o,int(d)) for o,d in zip(origins[(changes_not_output_and_gt).to(bool)], routine_ground_truths[(changes_not_output_and_gt).to(bool)])])
+        results_by_obj[ls]['fp'] += ([(o,int(d)) for o,d in zip(origins[(changes_output_and_not_gt).to(bool)], routine_ground_truths[(changes_output_and_not_gt).to(bool)])])
+        
+    routine_change_types = routine_change_types.to(int)
+    assert torch.equal(routine_output_step<lookahead_steps, changes_output_all)
+    for ct in range(num_change_types):
+        ct_mask = deepcopy(np.bitwise_and(changes_output_all, routine_change_types == (ct+1)))
+        results_other['moved_change_type']['correct'][ct] += int((correct[ct_mask]).sum())
+        results_other['moved_change_type']['wrong'][ct] += int((wrong[ct_mask]).sum())
+        ct_mask_missed = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_all), routine_change_types == (ct+1)))
+        results_other['moved_change_type']['missed'][ct] += int(ct_mask_missed.sum())
+    # print (routine_change_types.unique())
+    # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][2] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][2]) == 0 , "missed changes don't add up!"
+    # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][0] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][0]) == 0, "correct changes don't add up"
+    # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][1] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][1]) == 0, "wrong changes don't add up"
+
+    return results_by_obj, results_other
+
+
 def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, deterministic_input_loop=False, node_names=[], print_importance=False, confidences=[], learned_model=False):
     
     use_cuda = torch.cuda.is_available() and learned_model
@@ -74,7 +146,6 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
     figures_imp = []
 
     results['all_moves'] = []
-    results['num_changes'] = [[] for _ in range(lookahead_steps)]
     total_num_steps = 0
 
     for (routine, additional_info) in test_routines:
@@ -157,52 +228,9 @@ def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, determinis
             fig_imp.tight_layout()
             figures_imp.append(fig_imp)
         
-        correct = {conf:deepcopy(routine_outputs_conf[conf]['output'] == routine_ground_truths).to(int) for conf in confidences}
-        wrong = {conf:deepcopy(routine_outputs_conf[conf]['output'] != routine_ground_truths).to(int) for conf in confidences}
-        
-        for conf in confidences:
-            for ls in range(lookahead_steps):
-                changes_output_for_step = deepcopy(routine_outputs_conf[conf]['step']  <= ls)
-                changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
-                changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
-                changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
-                changes_not_output_and_gt = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))
-                results[conf]['moved']['correct'][ls] += int((correct[conf][changes_output_and_gt]).sum())
-                results[conf]['moved']['wrong'][ls] += int((wrong[conf][changes_output_and_gt]).sum())
-                results[conf]['moved']['missed'][ls] += int((changes_not_output_and_gt).sum())
-                results[conf]['unmoved']['fp'][ls] += int(changes_output_and_not_gt.sum())
-                results[conf]['unmoved']['tn'][ls] += int(deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step))).sum())
-                
 
-        correct = deepcopy(routine_outputs == routine_ground_truths).to(int)
-        wrong = deepcopy(routine_outputs != routine_ground_truths).to(int)
-
-        for ls in range(lookahead_steps):
-            changes_output_for_step = deepcopy(routine_output_step  <= ls)
-            changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
-            changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
-            changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
-            changes_not_output_and_gt = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))
-            changes_tn = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step)))
-            origins = np.ones_like(routine_ground_truths) * np.arange(num_nodes)
-            results_by_obj[ls]['correct'] += ([(o,int(d)) for o,d in zip(origins[(correct * changes_output_and_gt).to(bool)], routine_ground_truths[(correct * changes_output_and_gt).to(bool)])])
-            results_by_obj[ls]['wrong'] += ([(o,int(d)) for o,d in zip(origins[(wrong * changes_output_and_gt).to(bool)], routine_ground_truths[(wrong * changes_output_and_gt).to(bool)])])
-            results_by_obj[ls]['missed'] += ([(o,int(d)) for o,d in zip(origins[(changes_not_output_and_gt).to(bool)], routine_ground_truths[(changes_not_output_and_gt).to(bool)])])
-            results_by_obj[ls]['fp'] += ([(o,int(d)) for o,d in zip(origins[(changes_output_and_not_gt).to(bool)], routine_ground_truths[(changes_output_and_not_gt).to(bool)])])
-            
-        routine_change_types = routine_change_types.to(int)
-        assert torch.equal(routine_output_step<lookahead_steps, changes_output_all)
-        for ct in range(num_change_types):
-            ct_mask = deepcopy(np.bitwise_and(changes_output_all, routine_change_types == (ct+1)))
-            results_other['moved_change_type']['correct'][ct] += int((correct[ct_mask]).sum())
-            results_other['moved_change_type']['wrong'][ct] += int((wrong[ct_mask]).sum())
-            ct_mask_missed = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_all), routine_change_types == (ct+1)))
-            results_other['moved_change_type']['missed'][ct] += int(ct_mask_missed.sum())
-        # print (routine_change_types.unique())
-        # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][2] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][2]) == 0 , "missed changes don't add up!"
-        # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][0] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][0]) == 0, "correct changes don't add up"
-        # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][1] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][1]) == 0, "wrong changes don't add up"
-
+        results = update_confidence_based_metrics(routine_ground_truths, routine_ground_truth_step, routine_outputs_conf, confidences, lookahead_steps, results)
+        results_by_obj, results_other = update_additional_metrics(routine_outputs, routine_output_step, routine_ground_truths, routine_ground_truth_step, routine_change_types, changes_output_all, lookahead_steps, num_nodes, num_change_types, results_by_obj, results_other)
         
         fig, axs = plt.subplots(1,5)
         fig.set_size_inches(30,20)
