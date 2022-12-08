@@ -363,7 +363,7 @@ class ProcessDataset():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/personaWithoutClothesAllObj/persona0', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/HOMER/household0', help='Path where the data lives. Must contain routines, info and classes json files.')
     args = parser.parse_args()
 
 
