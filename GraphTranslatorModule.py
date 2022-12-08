@@ -10,8 +10,6 @@ from torch import nn
 from torch.optim import Adam
 from pytorch_lightning.core.lightning import LightningModule
 
-from breakdown_evaluations import evaluate_all_breakdowns, activity_list
-
 
 def get_masks(gt_tensor, output_tensor, input_tensor):
     masks = {}
@@ -27,28 +25,6 @@ def get_masks(gt_tensor, output_tensor, input_tensor):
     masks['wrong'] = gt_tensor != output_tensor
     return masks
 
-# def evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor):
-#     masks = get_masks(gt_tensor, output_tensor, input_tensor)
-#     result = {}
-#     result['accuracy'] = (masks['correct'].sum())/torch.numel(gt_tensor)
-#     if loss_tensor is not None:
-#         result['losses'] = {}
-#         result['losses']['mean'] = loss_tensor.mean()
-#         for key, mask in masks.items():
-#             result['losses'][key] = loss_tensor[mask].sum()/mask.sum()
-#     return result
-
-# def evaluate(gt, output, input, evaluate_node, losses=None):
-#     gt_tensor = gt[evaluate_node]
-#     input_tensor = input[evaluate_node]
-#     output_tensor = output[evaluate_node]
-#     if losses is not None:
-#         loss_tensor = losses[evaluate_node]
-#         result = evaluate_accuracy(gt_tensor, loss_tensor, output_tensor, input_tensor)
-#     else:
-#         result = evaluate_accuracy(gt_tensor, None, output_tensor, input_tensor)
-#     return result
-
 
 class GraphTranslatorModule(LightningModule):
     def __init__(self, model_configs):
@@ -60,29 +36,12 @@ class GraphTranslatorModule(LightningModule):
         self.n_len = model_configs.n_len
         self.c_len = model_configs.c_len
         self.edge_importance = model_configs.edge_importance
-        self.context_dropout_probs = model_configs.context_dropout_probs ## change to context_dropout_probs
-        self.learned_time_periods = model_configs.learned_time_periods
-        self.preprocess_context = model_configs.preprocess_context
 
         self.hidden_influence_dim = 20
 
         self.edges_update_input_dim = self.hidden_influence_dim*5 + self.c_len
         self.nodes_update_input_dim = self.hidden_influence_dim*2 + self.n_len + self.c_len
-        
-        if model_configs.learned_time_periods:
-            self.period_in_days = torch.nn.Parameter(torch.randn((1, int(self.c_len/2))))
-            omega_one_day = torch.Tensor([2*np.pi/60*24])
-            self.context_from_time = lambda t : torch.cat((torch.cos(omega_one_day * t / self.period_in_days),torch.sin(omega_one_day * t / self.period_in_days)), axis=1)
  
-        # self.mlp_context = nn.Sequential(nn.Linear(self.c_len, self.c_len),
-        #                                      nn.ReLU(),
-        #                                      nn.Linear(self.c_len, self.c_len),
-        #                                      )
-
-        # print(model_configs.n_activities, self.c_len)
-        # self.embed_context_action = torch.nn.Embedding(model_configs.n_activities, self.c_len)
-
-
 
         mlp_hidden = model_configs.hidden_layer_size
 
@@ -100,17 +59,6 @@ class GraphTranslatorModule(LightningModule):
                                                     nn.ReLU(),
                                                     nn.Linear(self.hidden_influence_dim, 1)
                                                     )
-
-        # self.mlp_predict_context = nn.Sequential(nn.Linear(self.edges_update_input_dim, self.hidden_influence_dim),
-        #                                             nn.ReLU(),
-        #                                             nn.Linear(self.hidden_influence_dim, self.c_len)
-        #                                             )
-
-
-        # self.mlp_update_nodes = nn.Sequential(nn.Linear(self.nodes_update_input_dim, self.hidden_influence_dim),
-        #                                             nn.ReLU(),
-        #                                             nn.Linear(self.hidden_influence_dim, 1)
-        #                                             )
         
         self.location_loss = lambda x,y: (nn.CrossEntropyLoss(reduction='none')(x.squeeze(-1).permute(0,2,1), y.squeeze(-1).long()))
         self.inference_location = lambda x: x.squeeze(-1).argmax(-1)
@@ -128,23 +76,6 @@ class GraphTranslatorModule(LightningModule):
         not_good_enough = ((probs[non_comp_inf] - probs[ref_onehot]) < thresh).sum(-1)
         non_comp_inf[not_good_enough] = ref[not_good_enough]
         return non_comp_inf
-
-    def get_time_context(self, batch_in):
-        if self.learned_time_periods:
-            input('Are you really trying to learn time periods?')
-            time = batch_in['time'].unsqueeze(1)
-            time_context = self.context_from_time(time)
-        else:
-            time_context = batch_in['context_time']
-        
-        # time_context = self.mlp_context(time_context)
-
-        return time_context
-
-    # def get_activity_context(self, batch_in):
-    #     activity_context = self.embed_context_action(batch_in['context_activity'].to(int))
-    #     assert activity_context.size()[-1] == self.c_len, f"Activity context size is {activity_context.size()} and clen is {self.c_len}"
-    #     return activity_context
 
 
     def graph_step(self, edges, nodes, context):
@@ -183,11 +114,6 @@ class GraphTranslatorModule(LightningModule):
 
         ## edge message passing
         xe = self.message_collection_edges(x, imp, context)
-        
-        ## context prediction
-        # xpool = xe.sum(dim=2).sum(dim=1)
-        # con = self.mlp_predict_context(xpool).view(size=[batch_size, self.c_len])
-        con = context
 
         ## edge update
         xe = xe.view(
@@ -198,18 +124,7 @@ class GraphTranslatorModule(LightningModule):
                                                 self.n_nodes,
                                                 1])
 
-
-        # ## node update
-        # xn = self.message_collection_nodes(x, imp, nodes, context)
-        # xn = xn.view(
-        #     size=[batch_size * self.num_nodes * self.num_nodes, 
-        #         self.edges_update_input_dim])
-        # xn = self.mlp_update_nodes(xn).view(size=[batch_size, 
-        #                                 self.num_nodes, 
-        #                                 self.num_nodes,
-        #                                 1])
-        
-        return xe, nodes, con, imp.view(size=[batch_size, self.n_nodes, self.n_nodes])
+        return xe, nodes, context, imp.view(size=[batch_size, self.n_nodes, self.n_nodes])
 
     def forward(self, edges, nodes, context):
         """
@@ -237,7 +152,7 @@ class GraphTranslatorModule(LightningModule):
         return edges.squeeze(-1), nodes, context, imp
 
 
-    def step(self, batch, prev_context=None):
+    def step(self, batch):
         edges = batch['edges']
         nodes = batch['nodes']
         y_edges = batch['y_edges']
@@ -245,19 +160,7 @@ class GraphTranslatorModule(LightningModule):
         dyn_edges = batch['dynamic_edges_mask']
         batch_size = nodes.size()[0]
         
-        time_context = self.get_time_context(batch_in=batch)
-        # activity_context = self.get_activity_context(batch_in=batch).reshape(time_context.size())
-        # context = time_context * 0
-        # if random() > self.cfg.context_dropout_probs['time']:
-        #     context += time_context
-        # if random() > self.cfg.context_dropout_probs['activity']:
-        #     context += activity_context
-        # # if random() > self.cfg.reset_prob and prev_context is not None:
-        # if prev_context is not None:
-        #     context += prev_context 
-                
-        # context = torch.nn.functional.normalize(context)
-  
+        time_context = batch['context_time']
         context = time_context
 
         edges_pred, nodes_pred, context_pred, imp = self(edges, nodes, context)
@@ -279,11 +182,6 @@ class GraphTranslatorModule(LightningModule):
         gt = {'class':self.inference_class(y_nodes), 
               'location':self.inference_location(y_edges)}
 
-        # if prev_context is None:
-        #     context_list = [self.get_activity_context(batch_in=batch).squeeze(1), self.get_time_context(batch_in=batch).squeeze(1)]
-        # else:
-        #     context_list = [self.get_activity_context(batch_in=batch).squeeze(1), self.get_time_context(batch_in=batch).squeeze(1), prev_context.squeeze(1)]
-
         context_list = [time_context]
 
         losses = {'class':self.class_loss(output_probs['class'], gt['class']),
@@ -293,16 +191,6 @@ class GraphTranslatorModule(LightningModule):
         output = {'class':self.inference_class(output_probs['class']),
                   'location':self.inference_location(edges_inferred)}
         
-
-        # for result, name in zip([input, gt, losses, output], ['input', 'gt', 'losses', 'output']):
-        #     assert list(result['class'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())
-        #     assert list(result['location'].size()) == list(nodes.size())[:2], 'wrong class size for {} : {} vs {}'.format(name, result['class'].size(), nodes.size())
-
-        # assert list(output_probs['class'].size())[:-1] == list(nodes.size())[:-1], 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), nodes.size())
-        # assert list(output_probs['location'].size()) == list(edges.size()), 'wrong class size for probs : {} vs {}'.format(output_probs['class'].size(), edges.size())
-
-        # eval = evaluate(gt=gt['location'], output=output['location'], input=input['location'], evaluate_node=evaluate_node, losses=losses['location'])
-        # loss = {'graph': 1 * losses['location'][evaluate_node].mean(), 'context': 5 * losses['context'].mean()}
         loss = {'graph' : losses['location'][evaluate_node].mean()}
 
         details = {'input':input, 
@@ -317,14 +205,12 @@ class GraphTranslatorModule(LightningModule):
 
         
     def training_step(self, batch, batch_idx):
-        prev_context = None
-        loss, details, prev_context = self.step(batch, prev_context=None)
+        loss, _, _ = self.step(batch)
         self.log('Train loss',loss)
         return sum(loss.values())
 
     def test_step(self, batch, batch_idx):
-        prev_context = None
-        loss, details, prev_context = self.step(batch, prev_context=None)
+        loss, _, _ = self.step(batch)
         self.log('Test loss',loss)
         return 
 

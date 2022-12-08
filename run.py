@@ -6,18 +6,15 @@ import os
 import glob
 import argparse
 from adict import adict
-from copy import deepcopy
 import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from GraphTranslatorModule import GraphTranslatorModule
-from reader import RoutinesDataset, CombinedDataSplits, INTERACTIVE, get_cooccurence_frequency, get_spectral_components
+from reader import RoutinesDataset
 from encoders import TimeEncodingOptions
-from breakdown_evaluations_simple import evaluate as evaluate_applications_original
-from breakdown_evaluations_human_centric import evaluate as evaluate_applications_new
-from breakdown_evaluations_human_centric_stepahead import evaluate as evaluate_applications_stepahead
-from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned, FremenStateConditioned1, FremenStateConditioned2, FremenStateConditioned3, FremenStateConditioned4, LastSeenAndStaticSemantic2, LastSeenAndStaticSemantic3, LastSeenAndStaticSemantic4, LastSeenAndStaticSemantic5
+from evaluations import evaluate
+from baselines.baselines import LastSeen, StaticSemantic, LastSeenAndStaticSemantic, Fremen, FremenStateConditioned
 
 import random
 random.seed(23435)
@@ -37,15 +34,9 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
                                                            model_configs = model_configs)
         output_dir = os.path.join(logs_dir, group,cfg['NAME'])
 
-        # graph_visuals_out = os.path.join(output_dir, 'graph_visuals')
-        # if not os.path.exists(graph_visuals_out):
-        #     os.makedirs(graph_visuals_out)
-        # visualize_conditional_datapoint(model, data.test, data.common_data['node_classes'], node_categories = data.common_data['node_categories'], use_output_nodes = False, save_fig_dir = graph_visuals_out, ask=False)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        evaluation_summary = evaluate_applications_original(model, data, output_dir, learned_model=True, print_importance=False, confidences=cfg['action_probability_thresholds'])
-        # evaluation_summary = evaluate_applications_new(model, data, output_dir)
-        # evaluation_summary = evaluate_applications_stepahead(model, data, output_dir)
+        evaluation_summary = evaluate(model, data, output_dir, learned_model=True, print_importance=False, confidences=cfg['action_probability_thresholds'])
 
         print('Outputs saved at ',output_dir)
 
@@ -90,9 +81,7 @@ def run_model(data, group, cfg = {}, checkpoint_dir=None, read_ckpt=False, write
             trainer.test(model, data.get_test_loader())
             done_epochs = epoch
 
-            evaluation_summary = evaluate_applications_original(model, data, output_dir_new, learned_model=True, print_importance=False, confidences=cfg['action_probability_thresholds'])
-            # evaluation_summary = evaluate_applications_new(model, data, output_dir_new)
-            # evaluation_summary = evaluate_applications_stepahead(model, data, output_dir)
+            evaluation_summary = evaluate(model, data, output_dir_new, learned_model=True, print_importance=False, confidences=cfg['action_probability_thresholds'])
 
 
             with open (os.path.join(output_dir_new,'config.json'), 'w') as f:
@@ -109,40 +98,24 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
     if cfg['NAME'] is None:
         cfg['NAME'] = os.path.basename(data_dir)+'_trial'
 
-    with open(os.path.join(data_dir, 'processedCorl', 'common_data.json')) as f:
+    with open(os.path.join(data_dir, 'processed', 'common_data.json')) as f:
         cfg['DATA_INFO'] = json.load(f)['info']
 
     time_options = TimeEncodingOptions(cfg['DATA_INFO']['weeekend_days'] if 'weeekend_days' in cfg['DATA_INFO'].keys() else None)
     time_encoding = time_options(cfg['time_encoding'])
 
-    data = RoutinesDataset(data_path=os.path.join(data_dir,'processedCorl'), 
+    data = RoutinesDataset(data_path=os.path.join(data_dir,'processed'), 
                            time_encoder=time_encoding, 
                            batch_size=cfg['batch_size'],
                            max_routines = (train_days, None))
     
-    # data_root, this_dataset = os.path.split(data_dir)
-    # other_data = os.listdir(data_root)
-    # other_data.remove(this_dataset)
-    # other_pretraining_data = [RoutinesDataset(data_path=os.path.join(data_root, d, 'processedCorl'), 
-    #                                             time_encoder=time_encoding, 
-    #                                             batch_size=cfg['batch_size'],
-    #                                             max_routines = (train_days, None)).train for d in other_data] +  [
-    #                           RoutinesDataset(data_path=os.path.join(data_root, d, 'processedCorl'), 
-    #                                             time_encoder=time_encoding, 
-    #                                             batch_size=cfg['batch_size'],
-    #                                             max_routines = (train_days, None)).test for d in other_data]                            
-
-    # pretrained_train_data = CombinedDataSplits([data.train] + other_pretraining_data)
-
+  
     group = os.path.basename(data_dir)
 
     if baselines:
         cf = data.get_cooccurence_frequency()
         spec = data.get_spectral_components(periods_mins=[float('inf'), 60*24, 60*24/2])
-        # cf = pretrained_train_data.get_cooccurence_frequency()
-        # spec = pretrained_train_data.get_spectral_components(periods_mins=[float('inf'), 60*24, 60*24/2])
         for baseline in [LastSeen(), StaticSemantic(cf), LastSeenAndStaticSemantic(cf), Fremen(spec), FremenStateConditioned(spec, data.params['dt'])]:
-        # for baseline in [LastSeen()]:
             output_dir = os.path.join(logs_dir, group, baseline.__class__.__name__) #+"PreTr")
             if os.path.exists(output_dir):
                 n = 1
@@ -153,11 +126,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
                 output_dir = new_dir
             os.makedirs(output_dir)
 
-            # for routine in data.test:
-            #     eval, details, _ = baseline.step(data.test.collate_fn([routine]))
-            _ = evaluate_applications_original(baseline, data, output_dir, learned_model=False, confidences=cfg['action_probability_thresholds'])
-            # _ = evaluate_applications_new(baseline, data, output_dir)
-            # evaluation_summary = evaluate_applications_stepahead(baseline, data, output_dir)
+            _ = evaluate(baseline, data, output_dir, learned_model=False, confidences=cfg['action_probability_thresholds'])
 
 
             with open (os.path.join(output_dir,'config.json'), 'w') as f:
@@ -175,7 +144,7 @@ def run(data_dir, cfg = {}, baselines=False, ckpt_dir=None, read_ckpt=False, wri
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run model on routines.')
-    parser.add_argument('--path', type=str, default='data/personaWithoutClothesAllObj/persona0', help='Path where the data lives. Must contain routines, info and classes json files.')
+    parser.add_argument('--path', type=str, default='data/persona/persona0', help='Path where the data lives. Must contain routines, info and classes json files.')
     parser.add_argument('--cfg', type=str, help='Name of config file.')
     parser.add_argument('--train_days', type=int, help='Number of routines to train on.')
     parser.add_argument('--name', type=str, default='trial', help='Name of run.')

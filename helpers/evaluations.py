@@ -1,17 +1,15 @@
 import os
 import shutil
 import json
-from unittest import result
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from matplotlib.colors import ListedColormap, LinearSegmentedColormap
+from matplotlib.colors import ListedColormap
 from math import isnan, floor, ceil, sqrt
 import torch
 from torch.nn.functional import one_hot
 import wandb
 from copy import deepcopy
-from encoders import human_readable_from_external
 
 viridis = cm.get_cmap('viridis', 256)
 newcolors = viridis(np.linspace(0, 1, 256))
@@ -44,13 +42,14 @@ activity_list = [
 "listening_to_music",
 None
 ]
+
 def _erase_edges(edges, dyn_mask):
     empty_edges = torch.ones_like(edges)/edges.size()[-1]
     empty_edges[dyn_mask == 0] = edges[dyn_mask == 0]
     empty_edges = empty_edges/(empty_edges.sum(dim=-1).unsqueeze(-1).repeat(1,1,edges.size()[-1])+1e-8)
     return empty_edges
 
-def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps=12, deterministic_input_loop=False, node_names=[], print_importance=False, confidences=[], learned_model=False):
+def evaluate_all_breakdowns(model, test_routines, lookahead_steps=12, deterministic_input_loop=False, node_names=[], print_importance=False, confidences=[], learned_model=False):
     
     use_cuda = torch.cuda.is_available() and learned_model
     if use_cuda: model.to('cuda')
@@ -59,32 +58,16 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
     num_change_types = 3
 
     raw_data = {'inputs':[], 'outputs':[], 'ground_truths':[], 'futures':[], 'change_types':[]}
-    results = {'breakdown':{'correct':[0 for _ in range(lookahead_steps)], 
+    results = {conf: 
+                {'moved':{'correct':[0 for _ in range(lookahead_steps)], 
                             'wrong':[0 for _ in range(lookahead_steps)], 
-                            'missed':[0 for _ in range(lookahead_steps)], 
-                            'fp':[0 for _ in range(lookahead_steps)], 
-                            'tn':[0 for _ in range(lookahead_steps)]},
-               'precision_breakdown':[[0,0] for _ in range(lookahead_steps)],
-               'completeness_breakdown': {
-                    'by_lookahead' : [[0,0,0] for _ in range(lookahead_steps)],
-                    'by_change_type' : [[0,0,0] for _ in range(num_change_types)],
-                    'by_activity' : [[0,0,0] for _ in activity_list]
-                },
-                'optimistic_completeness_breakdown': {
-                    'by_lookahead' : [[0,0,0] for _ in range(lookahead_steps)]
-                },
-                'timeonly_breakdown_direct':{
-                    'correct': 0,
-                    'wrong': 0
-                },
-                'timeonly_breakdown_playahead':{
-                    'correct': 0,
-                    'wrong': 0
-                }
-              }
-    results_conf = {conf: {'precision_breakdown':[[0,0] for _ in range(lookahead_steps)],
-                           'completeness_breakdown': [[0,0,0] for _ in range(lookahead_steps)]} for conf in confidences}
-    results_oracle = {'with_oracle': {'correct': 0, 'wrong': 0}, 'without_oracle': {'correct': 0, 'wrong': 0}}
+                            'missed':[0 for _ in range(lookahead_steps)]},
+                 'unmoved':{'fp':[0 for _ in range(lookahead_steps)], 
+                            'tn':[0 for _ in range(lookahead_steps)]}
+                } for conf in confidences}
+    results_other = {'moved_change_type' : {'correct':[0 for _ in range(num_change_types)], 
+                                            'wrong':[0 for _ in range(num_change_types)], 
+                                            'missed':[0 for _ in range(num_change_types)]}}
     results_by_obj = [{'correct':[], 'wrong':[], 'missed':[], 'fp':[]} for _ in range(lookahead_steps)]
     object_stats = []
     figures = []
@@ -100,10 +83,6 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
         total_num_steps += routine_length
         num_nodes = additional_info['active_nodes'].sum()
 
-        if 'activity' in additional_info:
-            activities = additional_info['activity']
-        else:
-            activities = [None] * routine_length
         routine_inputs = torch.empty(routine_length, num_nodes)
         routine_outputs = torch.ones(routine_length, num_nodes).to(int) * -1
         routine_output_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
@@ -111,50 +90,29 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
         routine_ground_truth_step = torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)
         routine_futures = torch.ones(routine_length, num_nodes) * -1
         routine_change_types = torch.zeros(routine_length, num_nodes).to(int)
-        routine_activities = torch.ones(routine_length, num_nodes).to(int) * -1
         routine_outputs_conf = {c:{'output':torch.ones(routine_length, num_nodes).to(int) * -1, 'step':torch.ones(routine_length, num_nodes).to(int) * (lookahead_steps)} for c in confidences}
 
         changes_output_all = torch.zeros(routine_length, num_nodes).to(bool)
         changes_gt_all = torch.zeros(routine_length, num_nodes).to(bool)
 
-        # play_forward_edges = test_routines.collate_fn([routine[0]])['edges']
         if print_importance: 
             fig_imp, axs_imp = plt.subplots(int(floor(sqrt(routine_length))), int(ceil(routine_length/floor(sqrt(routine_length)))))
             axs_imp = axs_imp.reshape(-1)
 
         for step in range(routine_length):
             data_list = [test_routines.collate_fn([routine[j]]) for j in range(step, min(step+lookahead_steps, routine_length))]
-            activities_in_lookahead = [activities[j] for j in range(step, min(step+lookahead_steps, routine_length))]
 
-            first_data = deepcopy(data_list[0])
 
-            # def evaluate_timeonly(edges, results_dict):
-            #     first_data['edges'] = edges
-            #     if use_cuda: 
-            #         for k in first_data.keys():
-            #             first_data[k] = first_data[k].to('cuda')
-            #     _, details = model.step(first_data)
-            #     correct = deepcopy(details['gt']['location'][details['evaluate_node']] == details['output']['location'][details['evaluate_node']]).to(int)
-            #     wrong = deepcopy(details['gt']['location'][details['evaluate_node']] != details['output']['location'][details['evaluate_node']]).to(int)
-            #     results_dict['correct'] += float(correct.sum())/routine_length
-            #     results_dict['wrong'] += float(wrong.sum())/routine_length
-            #     return (details['output_probs']['location']).to(torch.float32)
-
-            # _ = evaluate_timeonly(_erase_edges(first_data['edges'], first_data['dynamic_edges_mask']), results['timeonly_breakdown_direct'])
-            # play_forward_edges = evaluate_timeonly(play_forward_edges, results['timeonly_breakdown_playahead'])
-            
-            context_pred = None
-            for i,(data, act) in enumerate(zip(data_list,activities_in_lookahead)):
+            for i,data in enumerate(data_list):
                 assert i<lookahead_steps
                 if i>0:
                     data['edges'] = prev_edges
-                    # data['processed_context'] = context_pred
                 
                 if use_cuda: 
                     for k in data.keys():
                         data[k] = data[k].to('cuda')
                         
-                _, details, context_pred = model.step(data, prev_context=context_pred)
+                _, details, _ = model.step(data)
                 
                 if i==0 and print_importance:
                     axs_imp[step].imshow(details['importance_weights'].squeeze(0))
@@ -169,41 +127,17 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
                 new_changes_out = deepcopy(np.bitwise_and(output_tensor != input_tensor , np.bitwise_not(changes_output_all[step,:]))).to(bool)
                 new_changes_gt = deepcopy(np.bitwise_and(gt_tensor != routine_inputs[step,:] , np.bitwise_not(changes_gt_all[step,:]))).to(bool)
                 
-                if new_changes_out.max() > 0:
-                    print('No!!')
-
-                if i == 0:
-                    moved_output_probs = details['output_probs']['location'].cpu().detach().numpy()
-                    moved_output_probs -= np.eye(moved_output_probs.shape[-1])
-                    moved_output_tensor = moved_output_probs.argmax(-1)[details['evaluate_node'].cpu()]
-                    correct_without_oracle = deepcopy(np.bitwise_and((output_tensor == gt_tensor), new_changes_gt))
-                    wrong_without_oracle = deepcopy(np.bitwise_and((output_tensor != gt_tensor), new_changes_gt))
-                    correct_with_oracle = deepcopy(np.bitwise_and((moved_output_tensor == gt_tensor), new_changes_gt))
-                    wrong_with_oracle = deepcopy(np.bitwise_and((moved_output_tensor != gt_tensor), new_changes_gt))
-                    results_oracle['with_oracle']['correct'] += correct_with_oracle.sum()
-                    results_oracle['with_oracle']['wrong'] += wrong_with_oracle.sum()
-                    results_oracle['without_oracle']['correct'] += correct_without_oracle.sum()
-                    results_oracle['without_oracle']['wrong'] += wrong_without_oracle.sum()
-                
                 if i == 0:
                     origins_one = np.arange(num_nodes)
                     object_stats += ([((o,int(d)),step) for o,d in zip(origins_one[(new_changes_gt).to(bool)], gt_tensor[(new_changes_gt).to(bool)])])
-                # if i == 0 and sum(new_changes_gt)>0:
-                #     for obj in np.argwhere(new_changes_gt)[0]:
-                #         object_stats['timesteps'][obj].append(step)
-                #     object_stats['num_times_moved'] += new_changes_gt
-                # assert new_changes_out.sum().sum() == 0
                 routine_outputs[step, :][new_changes_out] = deepcopy(output_tensor[new_changes_out])
                 routine_output_step[step, :][new_changes_out] = i
                 routine_ground_truths[step, :][new_changes_gt] = deepcopy(gt_tensor[new_changes_gt])
                 routine_ground_truth_step[step, :][new_changes_gt] = i
-                # assert all(data['change_type'].to(int)[details['evaluate_node']][new_changes_gt] > 0)
                 routine_change_types[step,:][new_changes_gt] = deepcopy(data['change_type'].cpu().to(int)[details['evaluate_node']])[new_changes_gt]
-                routine_activities[step,:][new_changes_gt] = act
                 changes_output_all[step,:] = deepcopy(np.bitwise_or(changes_output_all[step,:], new_changes_out)).to(bool)
                 changes_gt_all[step,:] = deepcopy(np.bitwise_or(changes_gt_all[step,:], new_changes_gt)).to(bool)
 
-                # output_conf = (output_probs*(torch.nn.functional.one_hot(output_tensor, num_classes=output_probs.size()[-1]))).sum(-1) #- output_probs*(torch.nn.functional.one_hot(input_tensor, num_classes=output_probs.size()[-1]))).sum(-1)
                 output_conf = (output_probs*(torch.nn.functional.one_hot(output_tensor, num_classes=output_probs.size()[-1]))).sum(-1)*(routine_inputs[step,:]!=output_tensor).to(float)
                 
                 for conf in confidences:
@@ -216,25 +150,7 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
                     prev_edges = one_hot(details['output']['location'], num_classes = details['output']['location'].size()[-1]).to(torch.float32)
                 else:
                     prev_edges = (details['output_probs']['location']).to(torch.float32)
-
-        gt_changes_list = np.argwhere((routine_ground_truth_step == 0))  # step, object
-        for gt_step, gt_obj in zip(gt_changes_list[0,:], gt_changes_list[1,:]):
-            gt_dest = routine_ground_truths[gt_step, gt_obj]
-            outputs_to_consider = np.array([routine_outputs[lb, gt_obj] for lb in range(gt_step, max(-1,gt_step-lookahead_steps), -1)])
-            outputs_steps_to_consider = np.array([routine_output_step[lb, gt_obj] for lb in range(gt_step, max(-1,gt_step-lookahead_steps), -1)])
-            assert gt_step < lookahead_steps or len(outputs_to_consider) == lookahead_steps
-            
-            for s in range(len(outputs_to_consider)):
-                outputs_for_lookahead = [out_dest for out_dest,pred_st in zip(outputs_to_consider[:s+1], outputs_steps_to_consider[:s+1]) if pred_st <= s]
-                if len(outputs_for_lookahead) > 0:
-                    assert max(outputs_for_lookahead) >= 0, f"Something smells fishy! {s} : {outputs_for_lookahead}\n{outputs_to_consider}\n{outputs_steps_to_consider}"
-                    if gt_dest in outputs_for_lookahead:
-                        results['optimistic_completeness_breakdown']['by_lookahead'][s][0] += 1
-                    else:
-                        results['optimistic_completeness_breakdown']['by_lookahead'][s][1] += 1
-                else:
-                    results['optimistic_completeness_breakdown']['by_lookahead'][s][2] += 1
-            
+        
 
         if print_importance:
             fig_imp.set_size_inches(25,22)
@@ -251,36 +167,23 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
                 changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
                 changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
                 changes_not_output_and_gt = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))
-                results_conf[conf]['precision_breakdown'][ls][0] += int(changes_output_and_gt.sum())/routine_length
-                results_conf[conf]['precision_breakdown'][ls][1] += int(changes_output_and_not_gt.sum())/routine_length
-                results_conf[conf]['completeness_breakdown'][ls][0] += int((correct[conf][changes_output_and_gt]).sum())/routine_length
-                results_conf[conf]['completeness_breakdown'][ls][1] += int((wrong[conf][changes_output_and_gt]).sum())/routine_length
-                results_conf[conf]['completeness_breakdown'][ls][2] += int((changes_not_output_and_gt).sum())/routine_length
+                results[conf]['moved']['correct'][ls] += int((correct[conf][changes_output_and_gt]).sum())
+                results[conf]['moved']['wrong'][ls] += int((wrong[conf][changes_output_and_gt]).sum())
+                results[conf]['moved']['missed'][ls] += int((changes_not_output_and_gt).sum())
+                results[conf]['unmoved']['fp'][ls] += int(changes_output_and_not_gt.sum())
+                results[conf]['unmoved']['tn'][ls] += int(deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step))).sum())
                 
 
         correct = deepcopy(routine_outputs == routine_ground_truths).to(int)
         wrong = deepcopy(routine_outputs != routine_ground_truths).to(int)
 
-        # assert np.equal((routine_ground_truths >= 0), changes_gt)
         for ls in range(lookahead_steps):
             changes_output_for_step = deepcopy(routine_output_step  <= ls)
             changes_gt_for_step = deepcopy(routine_ground_truth_step  <= ls)
-            # results['num_changes'][ls].append(list(changes_gt_for_step.sum(-1).reshape(-1)))
             changes_output_and_gt = deepcopy(np.bitwise_and(changes_output_for_step, changes_gt_for_step))
             changes_output_and_not_gt = deepcopy(np.bitwise_and(changes_output_for_step, np.bitwise_not(changes_gt_for_step)))
             changes_not_output_and_gt = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), changes_gt_for_step))
             changes_tn = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_for_step), np.bitwise_not(changes_gt_for_step)))
-            results['breakdown']['correct'][ls] += int((correct[changes_output_and_gt]).sum())
-            results['breakdown']['wrong'][ls] += int((wrong[changes_output_and_gt]).sum())
-            results['breakdown']['missed'][ls] += int(changes_not_output_and_gt.sum())
-            results['breakdown']['fp'][ls] += int(changes_output_and_not_gt.sum())
-            results['breakdown']['tn'][ls] += int(changes_tn.sum())
-
-            results['precision_breakdown'][ls][0] += int(changes_output_and_gt.sum())/routine_length
-            results['precision_breakdown'][ls][1] += int(changes_output_and_not_gt.sum())/routine_length
-            results['completeness_breakdown']['by_lookahead'][ls][0] += int((correct[changes_output_and_gt]).sum())/routine_length
-            results['completeness_breakdown']['by_lookahead'][ls][1] += int((wrong[changes_output_and_gt]).sum())/routine_length
-            results['completeness_breakdown']['by_lookahead'][ls][2] += int(changes_not_output_and_gt.sum())/routine_length
             origins = np.ones_like(routine_ground_truths) * np.arange(num_nodes)
             results_by_obj[ls]['correct'] += ([(o,int(d)) for o,d in zip(origins[(correct * changes_output_and_gt).to(bool)], routine_ground_truths[(correct * changes_output_and_gt).to(bool)])])
             results_by_obj[ls]['wrong'] += ([(o,int(d)) for o,d in zip(origins[(wrong * changes_output_and_gt).to(bool)], routine_ground_truths[(wrong * changes_output_and_gt).to(bool)])])
@@ -288,26 +191,17 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
             results_by_obj[ls]['fp'] += ([(o,int(d)) for o,d in zip(origins[(changes_output_and_not_gt).to(bool)], routine_ground_truths[(changes_output_and_not_gt).to(bool)])])
             
         routine_change_types = routine_change_types.to(int)
-        # assert torch.equal(routine_change_types > 0, changes_gt_all)
         assert torch.equal(routine_output_step<lookahead_steps, changes_output_all)
-        # changes_output_and_gt_all = deepcopy(np.bitwise_and(changes_output_all, changes_gt))
         for ct in range(num_change_types):
             ct_mask = deepcopy(np.bitwise_and(changes_output_all, routine_change_types == (ct+1)))
-            results['completeness_breakdown']['by_change_type'][ct][0] += int((correct[ct_mask]).sum())/routine_length
-            results['completeness_breakdown']['by_change_type'][ct][1] += int((wrong[ct_mask]).sum())/routine_length
+            results_other['moved_change_type']['correct'][ct] += int((correct[ct_mask]).sum())
+            results_other['moved_change_type']['wrong'][ct] += int((wrong[ct_mask]).sum())
             ct_mask_missed = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_all), routine_change_types == (ct+1)))
-            results['completeness_breakdown']['by_change_type'][ct][2] += int(ct_mask_missed.sum())/routine_length
+            results_other['moved_change_type']['missed'][ct] += int(ct_mask_missed.sum())
         # print (routine_change_types.unique())
         # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][2] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][2]) == 0 , "missed changes don't add up!"
         # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][0] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][0]) == 0, "correct changes don't add up"
         # assert abs(sum([results['completeness_breakdown']['by_change_type'][ct][1] for ct in range(num_change_types)]) - results['completeness_breakdown']['by_lookahead'][-1][1]) == 0, "wrong changes don't add up"
-
-        for aidx in range(len(activity_list)):
-            a_mask = deepcopy(np.bitwise_and(changes_output_all, routine_activities == aidx))
-            results['completeness_breakdown']['by_activity'][aidx][0] += int((correct[a_mask]).sum())/routine_length
-            results['completeness_breakdown']['by_activity'][aidx][1] += int((wrong[a_mask]).sum())/routine_length
-            a_mask_missed = deepcopy(np.bitwise_and(np.bitwise_not(changes_output_all), routine_activities == aidx))
-            results['completeness_breakdown']['by_activity'][aidx][2] += int(a_mask_missed.sum())/routine_length
 
         
         fig, axs = plt.subplots(1,5)
@@ -362,10 +256,6 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
 
         moves = {}
         for i,act_node in enumerate(labels):
-            # changes = torch.stack([routine_ground_truths[:,i][routine_ground_truths[:,i]>0], routine_outputs[:,i][routine_ground_truths[:,i]>0]], dim=-1)
-            # changes_predicted = torch.stack([routine_outputs[:,i][routine_outputs[:,i]>0], routine_ground_truths[:,i][routine_outputs[:,i]>0]], dim=-1)
-            # node_changes = [node_names[c] if c>=0 else None for c in changes]
-            # node_changes_predicted = [node_names[c] if c>=0 else None for c in changes_predicted]
             any_changes = (routine_ground_truths[:,i]+routine_outputs[:,i])>0
             def get_name(idx):
                 if idx>=0: return node_names[idx]
@@ -413,14 +303,14 @@ def evaluate_all_breakdowns(model, test_routines, activity_list, lookahead_steps
         axs[1].set_title(f'Recall-{ls}')
         obj_eval_figs.append(fig)
 
-    results['with_confidence'] = results_conf
+    results['num_steps'] = total_num_steps
 
     return results, raw_data, figures + figures_imp + obj_eval_figs
 
 
 def evaluate(model, data, output_dir, print_importance=False, lookahead_steps=12, confidences=[], learned_model=False):
     
-    info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.common_data['node_classes'], print_importance=print_importance, lookahead_steps=lookahead_steps, confidences=confidences, learned_model=learned_model, activity_list=data.common_data['activities'])
+    info, raw_data, figures = evaluate_all_breakdowns(model, data.test_routines, node_names=data.common_data['node_classes'], print_importance=print_importance, lookahead_steps=lookahead_steps, confidences=confidences, learned_model=learned_model)
     json.dump(info, open(os.path.join(output_dir, 'evaluation.json'), 'w'), indent=4)
 
     torch.save(raw_data, os.path.join(output_dir, 'raw_data.pt'))

@@ -27,7 +27,7 @@ A processed version of the [HOMER dataset](https://github.com/GT-RAIL/rail_tasks
 If you're curious about the code itself:
 - The model and it's helper functions can be found in `GraphTranslatorModule.py`
 - The `reader.py` file contains code to process the (HOMER) dataset
-- The evaluation functions for our model are in `breakdown_evaluations.py`
+- The evaluation functions for our model are in `evaluations.py`
 
 ### Citation
 ```

@@ -17,7 +17,7 @@ class Baseline():
         self.gt = batch['y_edges']
         self.time = batch['time']
     
-    def step(self, batch, prev_context=None):
+    def step(self, batch):
         self.extract(batch)
         result = deepcopy(self.run())
         result[self.dynamic_edges == 0] = self.edges[self.dynamic_edges == 0]
@@ -68,51 +68,6 @@ class LastSeenAndStaticSemantic(StateTimeConditionedBaseline):
         next_edges += self.prob_change/next_edges.size()[-1]
         return self.cooccurence_freq * next_edges
 
-class LastSeenAndStaticSemantic2(StateTimeConditionedBaseline):
-    def __init__(self, cooccurence_freq, prob_change = 0.6) -> None:
-        super().__init__()
-        self.cooccurence_freq = cooccurence_freq
-        self.prob_change = prob_change
-
-    def run(self):
-        next_edges = self.edges * (1-self.prob_change)
-        next_edges += self.prob_change/next_edges.size()[-1]
-        return self.cooccurence_freq * next_edges
-
-class LastSeenAndStaticSemantic3(StateTimeConditionedBaseline):
-    def __init__(self, cooccurence_freq, prob_change = 0.7) -> None:
-        super().__init__()
-        self.cooccurence_freq = cooccurence_freq
-        self.prob_change = prob_change
-
-    def run(self):
-        next_edges = self.edges * (1-self.prob_change)
-        next_edges += self.prob_change/next_edges.size()[-1]
-        return self.cooccurence_freq * next_edges
-
-class LastSeenAndStaticSemantic4(StateTimeConditionedBaseline):
-    def __init__(self, cooccurence_freq, prob_change = 0.8) -> None:
-        super().__init__()
-        self.cooccurence_freq = cooccurence_freq
-        self.prob_change = prob_change
-
-    def run(self):
-        next_edges = self.edges * (1-self.prob_change)
-        next_edges += self.prob_change/next_edges.size()[-1]
-        return self.cooccurence_freq * next_edges
-
-
-class LastSeenAndStaticSemantic5(StateTimeConditionedBaseline):
-    def __init__(self, cooccurence_freq, prob_change = 0.9) -> None:
-        super().__init__()
-        self.cooccurence_freq = cooccurence_freq
-        self.prob_change = prob_change
-
-    def run(self):
-        next_edges = self.edges * (1-self.prob_change)
-        next_edges += self.prob_change/next_edges.size()[-1]
-        return self.cooccurence_freq * next_edges
-
 
 class Fremen(TimeConditionedBaseline):
     def __init__(self, spectral_components):
@@ -134,48 +89,5 @@ class FremenStateConditioned(StateTimeConditionedBaseline):
         posterior = prior + (self.edges-prior) * self.decay_exponent
         return posterior
 
-class FremenStateConditioned1(StateTimeConditionedBaseline):
-    def __init__(self, spectral_components, dt, time_decay=20):
-        super().__init__()
-        self.spectral_components = spectral_components
-        self.decay_exponent = np.exp(-dt / time_decay)
-    
-    def run(self):
-        prior = sum([2*spec['amplitude']*np.cos(2*np.pi*self.time/spec['period'] - spec['phase']) for spec in self.spectral_components])
-        posterior = prior + (self.edges-prior) * self.decay_exponent
-        return posterior
-
-class FremenStateConditioned2(StateTimeConditionedBaseline):
-    def __init__(self, spectral_components, dt, time_decay=15):
-        super().__init__()
-        self.spectral_components = spectral_components
-        self.decay_exponent = np.exp(-dt / time_decay)
-    
-    def run(self):
-        prior = sum([2*spec['amplitude']*np.cos(2*np.pi*self.time/spec['period'] - spec['phase']) for spec in self.spectral_components])
-        posterior = prior + (self.edges-prior) * self.decay_exponent
-        return posterior
-
-class FremenStateConditioned3(StateTimeConditionedBaseline):
-    def __init__(self, spectral_components, dt, time_decay=10):
-        super().__init__()
-        self.spectral_components = spectral_components
-        self.decay_exponent = np.exp(-dt / time_decay)
-    
-    def run(self):
-        prior = sum([2*spec['amplitude']*np.cos(2*np.pi*self.time/spec['period'] - spec['phase']) for spec in self.spectral_components])
-        posterior = prior + (self.edges-prior) * self.decay_exponent
-        return posterior
-
-class FremenStateConditioned4(StateTimeConditionedBaseline):
-    def __init__(self, spectral_components, dt, time_decay=5):
-        super().__init__()
-        self.spectral_components = spectral_components
-        self.decay_exponent = np.exp(-dt / time_decay)
-    
-    def run(self):
-        prior = sum([2*spec['amplitude']*np.cos(2*np.pi*self.time/spec['period'] - spec['phase']) for spec in self.spectral_components])
-        posterior = prior + (self.edges-prior) * self.decay_exponent
-        return posterior
 
 

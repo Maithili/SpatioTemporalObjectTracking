@@ -2,14 +2,11 @@ import os
 import networkx as nx
 import torch
 from math import sqrt, floor, ceil
-from networkx.algorithms.components import connected
-from networkx.classes import graph
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import Colormap
 from torch.nn import functional as F
 
-from breakdown_evaluations import _erase_edges
+from evaluations import _erase_edges
 from encoders import time_external, human_readable_from_external
 
 SEED = 456
